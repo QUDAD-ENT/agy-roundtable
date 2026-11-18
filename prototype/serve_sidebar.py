@@ -107,18 +107,26 @@ def _resolve_link_target(raw_target: str, task_id: Optional[str] = None) -> Dict
     else:
         abs_p = os.path.normpath(os.path.join(proj_root, path_str))
 
-    # Fallback filename search within project_root if agent wrote a bare filename or partial relative path
+    # Fallback filename / partial-subpath search within project_root if agent wrote a bare filename or partial relative path
     if not os.path.exists(abs_p) and os.path.isdir(proj_root):
         target_base = os.path.basename(path_str).lower()
+        norm_rel = path_str.replace("/", "\\").lstrip(".\\").lower()
+        best_match: Optional[str] = None
         if target_base:
             for cur_r, dirs, files in os.walk(proj_root):
                 dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv"}]
                 for fn in files:
                     if fn.lower() == target_base:
-                        abs_p = os.path.normpath(os.path.join(cur_r, fn))
-                        break
-                if os.path.exists(abs_p):
+                        cand = os.path.normpath(os.path.join(cur_r, fn))
+                        if norm_rel and cand.lower().endswith("\\" + norm_rel):
+                            best_match = cand
+                            break
+                        if best_match is None:
+                            best_match = cand
+                if best_match and norm_rel and best_match.lower().endswith("\\" + norm_rel):
                     break
+        if best_match:
+            abs_p = best_match
 
     if not os.path.exists(abs_p):
         raise ValueError(f"未找到目标文件或目录: {abs_p}")
@@ -130,6 +138,84 @@ def _resolve_link_target(raw_target: str, task_id: Optional[str] = None) -> Dict
         "start_line": start_line,
         "end_line": end_line,
     }
+
+
+def _reveal_or_open_local_path(abs_p: str, reveal: bool = False) -> str:
+    """Open a file/folder or reveal & highlight an item in OS file manager without CLI quoting bugs."""
+    norm_p = os.path.normpath(os.path.abspath(abs_p))
+    if not os.path.exists(norm_p):
+        raise ValueError(f"未找到目标文件或目录: {norm_p}")
+
+    if os.name == "nt":
+        parent_p = os.path.dirname(norm_p)
+        if reveal and parent_p and parent_p != norm_p:
+            revealed_ok = False
+            try:
+                import ctypes
+
+                ole32 = ctypes.windll.ole32
+                shell32 = ctypes.windll.shell32
+
+                ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+                ole32.CoInitializeEx.restype = ctypes.c_long
+                ole32.CoUninitialize.argtypes = []
+                ole32.CoUninitialize.restype = None
+
+                shell32.ILCreateFromPathW.argtypes = [ctypes.c_wchar_p]
+                shell32.ILCreateFromPathW.restype = ctypes.c_void_p
+                shell32.ILFindLastID.argtypes = [ctypes.c_void_p]
+                shell32.ILFindLastID.restype = ctypes.c_void_p
+                shell32.ILFree.argtypes = [ctypes.c_void_p]
+                shell32.ILFree.restype = None
+
+                shell32.SHOpenFolderAndSelectItems.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.c_uint,
+                    ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.c_ulong,
+                ]
+                shell32.SHOpenFolderAndSelectItems.restype = ctypes.c_long
+
+                try:
+                    ctypes.windll.user32.AllowSetForegroundWindow(ctypes.c_ulong(0xFFFFFFFF))
+                except Exception:
+                    pass
+
+                hr_com = ole32.CoInitializeEx(None, 0x2)  # COINIT_APARTMENTTHREADED
+                need_uninit = hr_com in (0, 1)
+                pidl_parent = None
+                pidl_full = None
+                try:
+                    pidl_parent = shell32.ILCreateFromPathW(parent_p)
+                    pidl_full = shell32.ILCreateFromPathW(norm_p)
+                    if pidl_parent and pidl_full:
+                        pidl_child = shell32.ILFindLastID(pidl_full)
+                        if pidl_child:
+                            child_arr = (ctypes.c_void_p * 1)(pidl_child)
+                            hr_sel = shell32.SHOpenFolderAndSelectItems(pidl_parent, 1, child_arr, 0)
+                            if hr_sel == 0:
+                                revealed_ok = True
+                finally:
+                    if pidl_full:
+                        shell32.ILFree(pidl_full)
+                    if pidl_parent:
+                        shell32.ILFree(pidl_parent)
+                    if need_uninit:
+                        ole32.CoUninitialize()
+            except Exception:
+                revealed_ok = False
+
+            if not revealed_ok:
+                # Pass a raw command string (NOT a list) so "/select," is never wrapped inside quotes!
+                subprocess.Popen(f'explorer.exe /select,"{norm_p}"')
+        else:
+            os.startfile(norm_p)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", norm_p] if reveal else ["open", norm_p])
+    else:
+        subprocess.Popen(["xdg-open", os.path.dirname(norm_p) if (reveal and os.path.isfile(norm_p)) else norm_p])
+
+    return norm_p
 
 
 def _extract_docx_text(docx_path: str, max_chars: int = 45000) -> str:
@@ -300,7 +386,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 6})
+                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 8})
             elif route == "/api/state":
                 self._send_json(200, ORCHESTRATOR.store.snapshot())
             elif route == "/api/models":
@@ -363,8 +449,8 @@ class SidebarHandler(BaseHTTPRequestHandler):
             elif route == "/api/fs/open_explorer":
                 proj_p = body.get("path") or ORCHESTRATOR.store.snapshot()["binding"]["project_path"]
                 if os.path.isdir(proj_p):
-                    subprocess.Popen(["explorer.exe", os.path.normpath(proj_p)])
-                    self._send_json(200, {"ok": True})
+                    opened_p = _reveal_or_open_local_path(proj_p, reveal=False)
+                    self._send_json(200, {"ok": True, "opened": opened_p})
                 else:
                     raise ValueError(f"目录不存在: {proj_p}")
             elif route == "/api/fs/open_item":
@@ -374,19 +460,8 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     webbrowser.open(resolved["url"])
                     self._send_json(200, {"ok": True, "opened": resolved["url"], "kind": "web"})
                 else:
-                    abs_p = resolved["path"]
-                    if os.name == "nt":
-                        if reveal and os.path.isfile(abs_p):
-                            subprocess.Popen(["explorer.exe", f"/select,{abs_p}"])
-                        elif os.path.isdir(abs_p):
-                            subprocess.Popen(["explorer.exe", abs_p])
-                        else:
-                            os.startfile(abs_p)  # type: ignore[attr-defined]
-                    elif sys.platform == "darwin":
-                        subprocess.Popen(["open", "-R", abs_p] if (reveal and os.path.isfile(abs_p)) else ["open", abs_p])
-                    else:
-                        subprocess.Popen(["xdg-open", os.path.dirname(abs_p) if (reveal and os.path.isfile(abs_p)) else abs_p])
-                    self._send_json(200, {"ok": True, "opened": abs_p, "kind": resolved["kind"], "name": resolved["name"]})
+                    opened_p = _reveal_or_open_local_path(resolved["path"], reveal=reveal)
+                    self._send_json(200, {"ok": True, "opened": opened_p, "kind": resolved["kind"], "name": resolved["name"]})
             elif route == "/api/binding":
                 res = ORCHESTRATOR.update_binding(
                     project_path=body.get("project_path"),

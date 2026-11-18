@@ -1301,6 +1301,11 @@
       '🖥️ 用本地默认软件打开': '🖥️ Open in Default App',
       '📂 在文件夹中定位': '📂 Reveal in Explorer',
       '✕ 关闭': '✕ Close',
+      '真实路径：': 'File Path: ',
+      '进入子目录': 'Open Subfolder',
+      '目录为空': 'Folder is empty',
+      '数据表为空': 'Table is empty',
+      '📄 已实时提取 Word 文档正文与表格供直接阅读；如需查看原版排版或批注，可点击右上角 “🖥️ 用本地默认软件打开”。': '📄 Extracted Word text & tables for instant reading; to view original layout or comments, click "🖥️ Open in Default App" above.',
       '🪟 弹出窗口确认选项': '🪟 Open Confirmation Modal',
       '✅ 确认选择并继续': '✅ Confirm & Continue',
       '✅ 确认我的选择并继续执行': '✅ Confirm Choice & Continue',
@@ -1325,6 +1330,9 @@
       [/^💬 团队实时交流与 @队友 协商群聊 \((\d+) 条发言\)$/, '💬 Live Team Group Chat & @Peer Consultations ($1 messages)'],
       [/^📄 最终汇总交付 \/ 当前主输出（共 (\d+) 字）$/, '📄 Final Synthesis / Primary Deliverable ($1 chars)'],
       [/^🔽 展开完整发言 \(共 (\d+) 字\)$/, '🔽 Expand Full Message ($1 chars)'],
+      [/^🔍 展开底层进程流水 \((\d+)\)、PID、Session ID 与双端模型回读核验$/, '🔍 Expand Process Stream ($1), PID, Session ID & Dual-Engine Verification'],
+      [/^定位行 #L(.+)$/, 'Lines #L$1'],
+      [/^([0-9.]+) KB · 点击预览$/, '$1 KB · Click to preview'],
       [/^🙋 @(.+) 请求协助$/, '🙋 Asking @$1'],
       [/^💡 回复 @(.+)$/, '💡 Replying to @$1'],
       [/^👉 点名 @(.+)$/, '👉 @Mentioned $1'],
@@ -2941,11 +2949,11 @@
           task_id: FOCUSED_TASK_ID,
           reveal
         });
-        if (res.kind === 'web') toast('🌐 已在系统默认浏览器中打开该链接');
-        else if (reveal) toast(`📂 已在资源管理器中定位: ${res.name || res.opened}`);
-        else toast(`🖥️ 已调用本机默认程序打开: ${res.name || res.opened}`);
+        if (res.kind === 'web') toast(LANG === 'en' ? '🌐 Opened URL in default browser' : '🌐 已在系统默认浏览器中打开该链接');
+        else if (reveal) toast((LANG === 'en' ? '📂 Revealed in Explorer: ' : '📂 已在资源管理器中定位: ') + (res.name || res.opened));
+        else toast((LANG === 'en' ? '🖥️ Opened in default app: ' : '🖥️ 已调用本机默认程序打开: ') + (res.name || res.opened));
       } catch (e) {
-        toast('打开失败: ' + e.message, true);
+        toast((LANG === 'en' ? 'Failed to open: ' : '打开失败: ') + e.message, true);
       }
     }
 
@@ -2966,27 +2974,24 @@
         }
         renderFilePreviewModal(data);
       } catch (e) {
-        toast('无法打开该链接目标: ' + e.message, true);
+        toast((LANG === 'en' ? 'Unable to open link target: ' : '无法打开该链接目标: ') + e.message, true);
       }
     }
 
     function renderFilePreviewModal(data) {
-      const pJs = esc((data.path || '').replace(/\\/g, '\\\\'));
+      window._CURRENT_PREVIEW_PATH = data.path || '';
       const lineBadge = data.start_line
         ? `<span class="badge b-gold">定位行 #L${data.start_line}${data.end_line && data.end_line !== data.start_line ? '-L' + data.end_line : ''}</span>`
         : '';
 
       let bodyHtml = '';
       if (data.preview_type === 'directory') {
-        const rows = (data.entries || []).map(en => {
-          const subJs = esc(en.path.replace(/\\/g, '\\\\'));
-          return `
-            <div class="fs-item" onclick="openAnswerLink('${subJs}')">
+        const rows = (data.entries || []).map(en => `
+            <div class="fs-item" data-subpath="${esc(en.path)}" onclick="openAnswerLink(this.getAttribute('data-subpath'))">
               <span>${en.is_dir ? '📁' : '📄'} <strong>${esc(en.name)}</strong></span>
               <span style="font-size:11px; color:var(--muted);">${en.is_dir ? '进入子目录' : (Math.round(en.size / 1024 * 10) / 10 + ' KB · 点击预览')}</span>
             </div>
-          `;
-        }).join('');
+          `).join('');
         bodyHtml = `<div class="fs-list" style="max-height:55vh;">${rows || '<div style="padding:14px; color:var(--muted); text-align:center;">目录为空</div>'}</div>`;
       } else if (data.preview_type === 'image') {
         bodyHtml = `<div style="text-align:center; background:#080b12; padding:12px; border-radius:8px;"><img src="${esc(data.raw_url)}" style="max-width:100%; max-height:62vh; border-radius:6px;"></div>`;
@@ -2994,7 +2999,7 @@
         bodyHtml = `<iframe src="${esc(data.raw_url)}" style="width:100%; height:64vh; border:1px solid var(--border); border-radius:8px; background:#fff;"></iframe>`;
       } else if (data.preview_type === 'docx') {
         bodyHtml = `
-          <div class="alert alert-ok" style="margin-bottom:8px;">📄 已实时提取 Word 文档正文与表格供直接阅读；如需查看原版排版或批注，可点击右上角 <strong>“🖥️ 用本地 Word 打开”</strong>。</div>
+          <div class="alert alert-ok" style="margin-bottom:8px;">📄 已实时提取 Word 文档正文与表格供直接阅读；如需查看原版排版或批注，可点击右上角 “🖥️ 用本地默认软件打开”。</div>
           <div class="deliverable-box" style="max-height:58vh;">${renderLiteMarkdown(data.content || '')}</div>
         `;
       } else if (data.preview_type === 'markdown') {
@@ -3037,8 +3042,8 @@
             <div style="font-size:11px; color:var(--muted); word-break:break-all; margin-top:3px;">真实路径：<code>${esc(data.path)}</code></div>
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn btn-sm" onclick="openItemNatively('${pJs}', false)">🖥️ 用本地默认软件打开</button>
-            <button class="btn btn-sec btn-sm" onclick="openItemNatively('${pJs}', true)">📂 在文件夹中定位</button>
+            <button class="btn btn-sm" onclick="openItemNatively(window._CURRENT_PREVIEW_PATH, false)">🖥️ 用本地默认软件打开</button>
+            <button class="btn btn-sec btn-sm" onclick="openItemNatively(window._CURRENT_PREVIEW_PATH, true)">📂 在文件夹中定位</button>
             <button class="btn btn-sec btn-sm" onclick="closeModal()">✕ 关闭</button>
           </div>
         </div>
