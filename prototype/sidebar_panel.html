@@ -22,7 +22,14 @@
       --warn: #fbbf24;
       --err: #f87171;
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #2f3e5c #0b0e15; }
+    ::selection { background: rgba(79, 156, 249, 0.32); color: #ffffff; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0b0e15; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #2c3a57; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3f527a; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .badge, .live-timer, .src-ln, #cur-proj-stats { font-variant-numeric: tabular-nums; }
     body {
       margin: 0;
       padding: 12px 16px 64px;
@@ -295,9 +302,105 @@
       border-color: #34d399;
       color: #ecfdf5;
     }
+    .seat-chip.is-host-chip {
+      border-color: rgba(245, 158, 11, 0.65);
+      background: linear-gradient(90deg, rgba(245,158,11,0.16) 0%, rgba(52,211,153,0.12) 100%);
+    }
     .seat-chip .avatar { width: 24px; height: 24px; font-size: 12px; border-width: 1.5px; }
+    .host-set-btn {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: all 0.14s ease;
+    }
+    .host-set-btn:hover {
+      border-color: var(--gold);
+      color: #fde68a;
+      background: rgba(245,158,11,0.16);
+    }
 
-    /* ==================== ANTHROPOMORPHIC SCENES (COMPOSER PREVIEW & LIVE STAGE) ==================== */
+    /* Compact Composer Setup & Auto-Collapsed Bar */
+    .composer-collapsed-bar {
+      background: linear-gradient(90deg, #161f33 0%, #121725 100%);
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.24);
+    }
+    .composer-setup-box {
+      background: #0f1523;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin: 8px 0 10px;
+    }
+    .composer-flow-strip {
+      margin-top: 8px;
+      padding: 6px 10px;
+      border-radius: 7px;
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(52, 211, 153, 0.24);
+      font-size: 11.5px;
+      color: #a7f3d0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    /* Compact Completed Consensus Banner (replaces full oval table once Completed) */
+    .consensus-banner {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.12) 0%, rgba(17, 24, 39, 0.96) 65%);
+      border: 1px solid rgba(52, 211, 153, 0.36);
+      border-radius: 11px;
+      padding: 10px 13px;
+      margin: 10px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .mini-seat-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .mini-seat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px 3px 4px;
+      border-radius: 999px;
+      background: #121929;
+      border: 1px solid var(--border);
+      font-size: 11px;
+      color: #e2e8f0;
+    }
+    .mini-seat-pill.is-host {
+      border-color: rgba(245, 158, 11, 0.5);
+      background: rgba(245, 158, 11, 0.10);
+    }
+    .mini-seat-pill .avatar {
+      width: 20px;
+      height: 20px;
+      font-size: 11px;
+      border-width: 1.5px;
+    }
+
+    /* ==================== ANTHROPOMORPHIC SCENES (LIVE STAGE ONLY) ==================== */
     .scene-box {
       border-radius: 12px;
       padding: 14px;
@@ -369,9 +472,9 @@
       font-size: 11px;
       color: #cbd5e1;
       background: rgba(9, 12, 20, 0.78);
-      border-left: 2px solid var(--ok);
+      border: 1px solid rgba(52, 211, 153, 0.28);
       padding: 3px 6px;
-      border-radius: 4px;
+      border-radius: 5px;
       max-height: 44px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -534,7 +637,7 @@
       font-size: 13px;
       line-height: 1.65;
       word-break: break-word;
-      max-height: 460px;
+      max-height: 540px;
       overflow-y: auto;
       margin: 8px 0;
     }
@@ -691,9 +794,9 @@
       margin: 8px 0;
       word-break: break-word;
     }
-    .alert-warn { background: rgba(251,191,36,0.12); border-left: 3px solid var(--warn); color: #fde68a; }
-    .alert-err { background: rgba(248,113,113,0.12); border-left: 3px solid var(--err); color: #fecaca; }
-    .alert-ok { background: rgba(52,211,153,0.1); border-left: 3px solid var(--ok); color: #a7f3d0; }
+    .alert-warn { background: rgba(251,191,36,0.11); border: 1px solid rgba(251,191,36,0.38); color: #fde68a; }
+    .alert-err { background: rgba(248,113,113,0.11); border: 1px solid rgba(248,113,113,0.38); color: #fecaca; }
+    .alert-ok { background: rgba(52,211,153,0.09); border: 1px solid rgba(52,211,153,0.35); color: #a7f3d0; }
 
     .q-card {
       background: linear-gradient(180deg, rgba(167,139,250,0.14) 0%, rgba(79,156,249,0.08) 100%);
@@ -916,18 +1019,32 @@
 
   <!-- ==================== VIEW 1: ANTHROPOMORPHIC COLLABORATION WORKSPACE ==================== -->
   <div id="view-workspace">
-    <div class="card">
+    <!-- Compact Launch Strip (auto-shown when an active task is on stage so there is zero vertical clutter) -->
+    <div id="composer-collapsed-bar" class="composer-collapsed-bar hidden">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="badge b-run">🎬 当前现场模式</span>
+        <strong style="font-size:13px;">项目 <span id="collapsed-proj-name" style="color:var(--accent);"></span> 正在展示下方议题现场</strong>
+        <span style="font-size:11.5px; color:var(--muted);">（已自动收拢新建筹备台，让圆桌现场、群聊与终稿直达首屏）</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:7px;">
+        <span id="collapsed-paused-hint" class="badge b-warn hidden">队列已暂停</span>
+        <button class="btn btn-sm" onclick="setComposerOpen(true)">➕ 发起新议题 / 展开筹备台</button>
+      </div>
+    </div>
+
+    <div class="card" id="composer-card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
         <div>
           <strong style="font-size:14px;">🎬 在项目 <span id="composer-proj-name" style="color:var(--accent);"></span> 下自由组织团队</strong>
           <span style="font-size:11px; color:var(--muted); margin-left:6px;">支持 Agent 实时共享群聊与中途 <code>@队友</code> 提问互助</span>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <span id="paused-hint" class="badge b-warn hidden">队列已暂停</span>
           <select id="cmp-sandbox" style="width:auto; font-weight:600;">
             <option value="read-only">🔒 只读研判 / 审查（不改文件）</option>
             <option value="workspace-write">✏️ 允许读写修改当前项目文件</option>
           </select>
+          <button class="btn btn-sec btn-sm hidden" id="btn-collapse-composer" onclick="setComposerOpen(false)">🔼 收起筹备台</button>
         </div>
       </div>
 
@@ -1118,9 +1235,11 @@
     let AUTO_POPUP_QUESTIONS = localStorage.getItem('team_q_popup') !== '0';
     let LANG = localStorage.getItem('roundtable_lang') || 'zh';
     let ACTIVE_Q_MODAL_KEY = '';
+    let COMPOSER_OPEN_OVERRIDE = null; // null = auto (open if 0 active tasks, tucked if >=1 active task)
     const DISMISSED_Q_KEYS = new Set();
     const OPEN_DETAILS = new Set();
     const EXPANDED_MSGS = new Set();
+    const EXPANDED_SCENES = new Set();
     const USER_CHOICE_DRAFT = {};
 
     // Persistent Composer Draft State (survives all 1200ms state polls!)
@@ -1184,6 +1303,53 @@
       if (EXPANDED_MSGS.has(msgId)) EXPANDED_MSGS.delete(msgId);
       else EXPANDED_MSGS.add(msgId);
       refreshState(true);
+    }
+
+    function toggleSceneExpand(taskId) {
+      if (EXPANDED_SCENES.has(taskId)) EXPANDED_SCENES.delete(taskId);
+      else EXPANDED_SCENES.add(taskId);
+      refreshState(true);
+    }
+
+    function isComposerOpen(projUnarchived) {
+      const hasDraft = Boolean(document.getElementById('cmp-goal')?.value.trim());
+      if (hasDraft) return true;
+      if (!projUnarchived || projUnarchived.length === 0) return true;
+      if (COMPOSER_OPEN_OVERRIDE !== null) return COMPOSER_OPEN_OVERRIDE;
+      return false;
+    }
+
+    function setComposerOpen(open) {
+      COMPOSER_OPEN_OVERRIDE = Boolean(open);
+      if (STATE) {
+        const curProjNorm = normPath(STATE.binding?.project_path || '');
+        const projUnarchived = (STATE.tasks || []).filter(t => !t.archived && normPath(t.project_path) === curProjNorm);
+        syncComposerCollapseUi(projUnarchived, STATE.binding?.project_name || STATE.binding?.project_path || '', Boolean(STATE.paused));
+      }
+      if (open) {
+        setTimeout(() => {
+          const g = document.getElementById('cmp-goal');
+          if (g) g.focus();
+        }, 40);
+      }
+    }
+
+    function syncComposerCollapseUi(projUnarchived, curProjName, isPaused) {
+      const hasActive = (projUnarchived || []).length > 0;
+      if (!hasActive && COMPOSER_OPEN_OVERRIDE === false) {
+        COMPOSER_OPEN_OVERRIDE = null;
+      }
+      const open = isComposerOpen(projUnarchived);
+      const colBar = document.getElementById('composer-collapsed-bar');
+      const card = document.getElementById('composer-card');
+      const hideBtn = document.getElementById('btn-collapse-composer');
+      const colName = document.getElementById('collapsed-proj-name');
+      const colPaused = document.getElementById('collapsed-paused-hint');
+      if (colName) colName.textContent = curProjName;
+      if (colPaused) colPaused.classList.toggle('hidden', !isPaused);
+      if (colBar) colBar.classList.toggle('hidden', open);
+      if (card) card.classList.toggle('hidden', !open);
+      if (hideBtn) hideBtn.classList.toggle('hidden', !hasActive);
     }
 
     const ZH_EN_EXACT = {
@@ -1312,7 +1478,25 @@
       '⚡ 按推荐项自动继续': '⚡ Continue with Recommended',
       '👁️ 先看上下文': '👁️ View Context First',
       '暂收起弹窗': 'Minimize Modal',
-      '🔼 收起长文': '🔼 Collapse'
+      '🔼 收起长文': '🔼 Collapse',
+      '🎬 当前现场模式': '🎬 Active Stage',
+      '项目 ': 'Workspace ',
+      ' 正在展示下方议题现场': ' — Focused on Live Session Below',
+      '（已自动收拢新建筹备台，让圆桌现场、群聊与终稿直达首屏）': '(New-task composer tucked away so chat & deliverable stay above the fold)',
+      '➕ 发起新议题 / 展开筹备台': '➕ New Roundtable / Task',
+      '🔼 收起筹备台': '🔼 Hide Composer',
+      '设为👑': 'Set 👑',
+      '🪑 展开圆桌席位': '🪑 Show Roundtable Seats',
+      '🔼 收起圆桌席位': '🔼 Compact Consensus Bar',
+      '🔽 展开阵型详情': '🔽 Show Topology',
+      '🔼 收起阵型详情': '🔼 Compact Bar',
+      '🪑 圆桌议事厅': '🪑 Roundtable',
+      '🎖️ 主帅动态点将': '🎖️ Chief Dispatch',
+      '🧱 多轨搭积木流水线': '🧱 Multi-Track',
+      '🛡️ 实施+审查闭环': '🛡️ Impl + Review',
+      '⚡ 专家一对一专办': '⚡ 1-on-1 Desk',
+      '项目：': 'Workspace: ',
+      ' · 权限：': ' · Access: '
     };
 
     const ZH_EN_PATTERNS = [
@@ -1320,7 +1504,16 @@
       [/^Antigravity 在线 \((\d+) 模型族\)$/, 'Antigravity Online ($1 Families)'],
       [/^当前项目活动现场: (\d+) · 在岗忙碌成员: (\d+) · 历史总归档: (\d+)$/, 'Active in Project: $1 · Working Agents: $2 · Total History: $3'],
       [/^(\d+) 人在岗$/, '$1 Working'],
+      [/^🪑 点选参会专家（已入席 (\d+) 人 · 点击胶囊入座\/离席）$/, '🪑 Select Roundtable Specialists ($1 Seated · Click pills to toggle)'],
       [/^🪑 点选入席成员（点击下方头像入座\/离席，已入席 (\d+) 人）$/, '🪑 Click Avatars to Seat/Unseat Roundtable Specialists ($1 Seated)'],
+      [/^⚡ 第 1 秒 (\d+) 人并行独立立论 ➔ (\d+) 轮交叉 @互评 ➔ 主持共识定稿（8000字无损上下文）$/, '⚡ Instant Parallel Proposals ($1 Agents) ➔ $2-Round Cross-@Critique ➔ Host Synthesis (8k Lossless Context)'],
+      [/^主持开场破题 ➔ (\d+) 人并行独立立论 ➔ (\d+) 轮交叉 @互评 ➔ 主持共识定稿（8000字无损上下文）$/, 'Host Framing ➔ $1 Parallel Proposals ➔ $2-Round Cross-@Critique ➔ Host Synthesis (8k Lossless Context)'],
+      [/^⚡ 第 1 秒 (\d+) 人并行独立立论 ➔ 主持人直接汇总定稿（快速单轮）$/, '⚡ Instant Parallel Proposals ($1 Agents) ➔ Direct Host Synthesis (Fast 1-Round)'],
+      [/^主持开场破题 ➔ (\d+) 人并行独立立论 ➔ 主持人直接汇总定稿（快速单轮）$/, 'Host Framing ➔ $1 Parallel Proposals ➔ Direct Host Synthesis (Fast 1-Round)'],
+      [/^参会席位 (\d+) 人 · 设定 (\d+) 轮思辨 · 实时 @队友协商 (\d+) 次 · 群聊消息 (\d+) 条$/, '$1 Specialists Seated · $2 Rounds · $3 @Peer Consults · $4 Chat Messages'],
+      [/^✅ 协作已定稿 · 共 (\d+) 个工位节点 · 群聊消息 (\d+) 条$/, '✅ Completed · $1 Stations · $2 Chat Messages · Deliverable Ready'],
+      [/^🎖️ 主帅先勘察项目制定《点将令》 ➔ 从下方 (\d+) 名待命专家按需抽调并行\/审查 ➔ 终局签发$/, '🎖️ Commander inspects workspace ➔ Dynamically recruits from $1 standby specialists ➔ Final sign-off'],
+      [/^· 创建于 (.+)$/, '· Created $1'],
       [/^🟢 圆桌实时共享群聊议事厅（(\d+) 轮交锋 \+ 8000字无损上下文 \+ 随时 @队友 互助）$/, '🟢 Live Shared Roundtable Chamber ($1 Rounds + 8,000-char Lossless Context + @Peer Consult)'],
       [/^⚡ 第 1 秒全员直接并行立论 ➔ (\d+) 人独立调研 ➔ (.*)主持人汇总拍板交付$/, '⚡ Instant Parallel Proposals ($1 Agents) ➔ Cross-@Critique ➔ Host Final Synthesis'],
       [/^主持开场定调 ➔ (\d+) 人独立调研 ➔ (.*)主持人汇总拍板交付$/, 'Host Framing ➔ $1 Parallel Proposals ➔ Cross-@Critique ➔ Host Final Synthesis'],
@@ -1368,6 +1561,14 @@
         if (re.test(trimmed)) return trimmed.replace(re, rep);
       }
       return s;
+    }
+
+    function setZhText(el, zhText) {
+      if (!el) return;
+      el.textContent = LANG === 'en' ? translateZhStr(zhText) : zhText;
+      if (el.firstChild && el.firstChild.nodeType === Node.TEXT_NODE) {
+        el.firstChild._origZh = zhText;
+      }
     }
 
     function applyBilingualDom(root = document.body) {
@@ -1627,7 +1828,15 @@
         custom_dag: '🧱 启动多轨流水线 · 按阶段推进',
         single_member: '⚡ 直连专家 · 立即开干'
       }[mode] || '🚀 开始执行';
-      document.getElementById('btn-launch-task').textContent = btnLbl;
+      setZhText(document.getElementById('btn-launch-task'), btnLbl);
+      renderComposerStudio();
+    }
+
+    function setRtHost(mid) {
+      if (!CMP.rtParticipants.includes(mid)) {
+        CMP.rtParticipants.push(mid);
+      }
+      CMP.rtHost = mid;
       renderComposerStudio();
     }
 
@@ -1746,44 +1955,40 @@
         const chips = ids.map(id => {
           const m = ms[id];
           const sel = CMP.rtParticipants.includes(id);
+          const isHost = id === CMP.rtHost;
           return `
-            <div class="seat-chip ${sel ? 'selected' : ''}" onclick="toggleRtParticipant('${esc(id)}')">
+            <div class="seat-chip ${sel ? 'selected' : ''} ${sel && isHost ? 'is-host-chip' : ''}" onclick="toggleRtParticipant('${esc(id)}')">
               ${avatarHtml(id, m)}
               <div>
-                <div style="font-weight:700; line-height:1.2;">${sel ? '✓ ' : ''}${esc(m.name || id)}</div>
+                <div style="font-weight:700; line-height:1.2; display:flex; align-items:center; gap:5px;">
+                  <span>${sel ? '✓ ' : ''}${esc(m.name || id)}</span>
+                  ${sel && isHost ? '<span class="badge b-gold" style="padding:1px 6px; font-size:10px;">👑 主持</span>' : ''}
+                  ${sel && !isHost ? `<span class="host-set-btn" onclick="event.stopPropagation(); setRtHost('${esc(id)}')">设为👑</span>` : ''}
+                </div>
                 <div style="font-size:10px; color:var(--muted);">${esc(m.client === 'antigravity' ? 'AGY' : 'Codex')} · ${esc(m.model)}</div>
               </div>
             </div>
           `;
         }).join('');
 
-        const hostSeats = CMP.rtParticipants.includes(CMP.rtHost) ? CMP.rtParticipants : [CMP.rtHost, ...CMP.rtParticipants];
-        const seatsPreview = hostSeats.map(id => {
-          const m = ms[id] || {};
-          const isHost = id === CMP.rtHost;
-          return `
-            <div class="rt-seat-card ${isHost ? 'is-host' : ''}">
-              ${avatarHtml(id, m)}
-              <div style="min-width:0;">
-                <div style="font-weight:700; font-size:12px;">
-                  ${isHost ? '<span class="badge b-gold">👑 主持</span> ' : ''}${esc(m.name || id)}
-                </div>
-                <div style="font-size:11px; color:var(--muted);">${esc(roles[m.role]?.name || '专家')} · ${esc(m.model)}</div>
-              </div>
-            </div>
-          `;
-        }).join('');
+        const flowDesc = CMP.rtRounds > 1
+          ? (CMP.rtHostOpening
+              ? `主持开场破题 ➔ ${CMP.rtParticipants.length} 人并行独立立论 ➔ ${CMP.rtRounds} 轮交叉 @互评 ➔ 主持共识定稿（8000字无损上下文）`
+              : `⚡ 第 1 秒 ${CMP.rtParticipants.length} 人并行独立立论 ➔ ${CMP.rtRounds} 轮交叉 @互评 ➔ 主持共识定稿（8000字无损上下文）`)
+          : (CMP.rtHostOpening
+              ? `主持开场破题 ➔ ${CMP.rtParticipants.length} 人并行独立立论 ➔ 主持人直接汇总定稿（快速单轮）`
+              : `⚡ 第 1 秒 ${CMP.rtParticipants.length} 人并行独立立论 ➔ 主持人直接汇总定稿（快速单轮）`);
 
         box.innerHTML = `
-          <div class="scene-box scene-roundtable">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+          <div class="composer-setup-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:6px;">
               <div>
-                <strong style="color:#6ee7b7;">🪑 点选入席成员（点击下方头像入座/离席，已入席 ${CMP.rtParticipants.length} 人）</strong>
+                <strong style="color:#6ee7b7;">🪑 点选参会专家（已入席 ${CMP.rtParticipants.length} 人 · 点击胶囊入座/离席）</strong>
               </div>
               <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                 <div style="display:flex; align-items:center; gap:5px;">
                   <span style="font-size:11px; color:var(--muted);">👑 圆桌主持人:</span>
-                  <select style="width:auto;" onchange="CMP.rtHost=this.value; renderComposerStudio();">${memberOptions(CMP.rtHost)}</select>
+                  <select style="width:auto;" onchange="setRtHost(this.value)">${memberOptions(CMP.rtHost)}</select>
                 </div>
                 <div style="display:flex; align-items:center; gap:5px;">
                   <span style="font-size:11px; color:var(--muted);">🔄 交叉讨论轮数:</span>
@@ -1800,50 +2005,27 @@
               </div>
             </div>
             <div class="member-seat-picks">${chips}</div>
-            <div class="rt-arena" style="margin-top:10px;">
-              <div class="rt-table-ring" style="min-height:92px; padding:12px 20px;">
-                <div style="font-weight:800; color:#a7f3d0; font-size:13px;">🟢 圆桌实时共享群聊议事厅（${CMP.rtRounds} 轮交锋 + 8000字无损上下文 + 随时 @队友 互助）</div>
-                <div style="font-size:11px; color:#94a3b8; margin-top:3px;">${CMP.rtHostOpening ? '主持开场定调 ➔ ' : '⚡ 第 1 秒全员直接并行立论 ➔ '}${CMP.rtParticipants.length} 人独立调研 ➔ ${CMP.rtRounds > 1 ? '全员阅读完整群聊互相 @点名质询补充 ➔ ' : ''}主持人汇总拍板交付</div>
-              </div>
-              <div class="rt-seats-grid">${seatsPreview}</div>
+            <div class="composer-flow-strip">
+              <span>${esc(flowDesc)}</span>
             </div>
           </div>
         `;
       } else if (CMP.mode === 'chief_dispatch') {
-        const chief = ms[CMP.chiefId] || {};
-        const bench = ids.filter(x => x !== CMP.chiefId).map(id => {
+        const standbyPills = ids.filter(x => x !== CMP.chiefId).map(id => {
           const m = ms[id];
-          return `
-            <div class="squad-card">
-              ${avatarHtml(id, m)}
-              <div>
-                <div style="font-weight:700; font-size:12px;">${esc(m.name || id)}</div>
-                <div style="font-size:11px; color:var(--muted);">${esc(roles[m.role]?.name || m.role)} · ${esc(m.client === 'antigravity' ? 'AGY' : 'Codex')}</div>
-              </div>
-            </div>
-          `;
+          return `<span class="mini-seat-pill">${avatarHtml(id, m)} <span>${esc(m.name || id)}</span></span>`;
         }).join('');
 
         box.innerHTML = `
-          <div class="scene-box scene-chief">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-              <strong style="color:#fcd34d;">🎖️ 选择坐镇主帅（主帅将自动探查项目目录，并从下方花名册按需点选精兵强将派单）</strong>
-              <div style="display:flex; align-items:center; gap:6px;">
-                <span style="font-size:11px; color:var(--muted);">坐镇主帅:</span>
+          <div class="composer-setup-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span style="font-size:12px; font-weight:700; color:#fcd34d;">坐镇主帅:</span>
                 <select style="width:auto;" onchange="CMP.chiefId=this.value; renderComposerStudio();">${memberOptions(CMP.chiefId)}</select>
               </div>
+              <div style="font-size:11.5px; color:#fde68a;">🎖️ 主帅先勘察项目制定《点将令》 ➔ 从下方 ${ids.length - 1} 名待命专家按需抽调并行/审查 ➔ 终局签发</div>
             </div>
-            <div class="chief-podium">
-              <div style="display:flex; align-items:center; gap:10px;">
-                ${avatarHtml(CMP.chiefId, chief)}
-                <div>
-                  <div style="font-weight:800; font-size:13px; color:#fef3c7;">🎖️ 主帅：${esc(chief.name || CMP.chiefId)} ${clientBadge(chief.client)}</div>
-                  <div style="font-size:11px; color:#fde68a;">第 1 步先勘察项目制定《点将令》 ➔ 自动编排并行/串行/独立审查 ➔ 终局汇总签发</div>
-                </div>
-              </div>
-            </div>
-            <div class="chief-connector">⇣ 帐下听令花名册（共 ${ids.length - 1} 名专家待命，主帅按需抽调，无需全员陪跑） ⇣</div>
-            <div class="squad-row">${bench}</div>
+            <div class="mini-seat-row" style="margin-top:8px;">${standbyPills}</div>
           </div>
         `;
       } else if (CMP.mode === 'custom_dag') {
@@ -1942,11 +2124,11 @@
 
         const cPill = document.getElementById('codex-cli-pill');
         cPill.className = 'badge ' + (cCli.logged_in ? 'b-codex' : 'b-warn');
-        cPill.textContent = cCli.logged_in ? `Codex 在线 (${(CAPS.clients?.codex?.models||[]).length} 模型)` : 'Codex 待登录';
+        setZhText(cPill, cCli.logged_in ? `Codex 在线 (${(CAPS.clients?.codex?.models||[]).length} 模型)` : 'Codex 待登录');
 
         const aPill = document.getElementById('agy-cli-pill');
         aPill.className = 'badge ' + (aCli.logged_in ? 'b-agy' : 'b-warn');
-        aPill.textContent = aCli.logged_in ? `Antigravity 在线 (${(CAPS.clients?.antigravity?.models||[]).length} 模型族)` : 'Antigravity 待登录';
+        setZhText(aPill, aCli.logged_in ? `Antigravity 在线 (${(CAPS.clients?.antigravity?.models||[]).length} 模型族)` : 'Antigravity 待登录');
 
         populateClientModels('add-m-client', 'add-m-model', 'add-m-effort');
         if (refresh) toast('已重新探测 Codex 与 Antigravity 官方模型目录');
@@ -2132,7 +2314,7 @@
       renderProjectDropdown();
 
       const pauseBtn = document.getElementById('pause-btn');
-      pauseBtn.textContent = st.paused ? '▶️ 恢复队列派发' : '⏸️ 暂停派发';
+      setZhText(pauseBtn, st.paused ? '▶️ 恢复队列派发' : '⏸️ 暂停派发');
       pauseBtn.className = st.paused ? 'btn btn-warn btn-sm' : 'btn btn-sec btn-sm';
       document.getElementById('paused-hint').classList.toggle('hidden', !st.paused);
 
@@ -2158,12 +2340,16 @@
       const projUnarchived = allTasks.filter(t => !t.archived && normPath(t.project_path) === curProjNorm);
       const workingMembers = runnableIds.filter(id => st.members[id].status === 'working').length;
 
-      document.getElementById('cur-proj-stats').textContent =
-        `当前项目活动现场: ${projUnarchived.length} · 在岗忙碌成员: ${workingMembers} · 历史总归档: ${allTasks.length}`;
+      syncComposerCollapseUi(projUnarchived, curProjName, Boolean(st.paused));
+
+      setZhText(
+        document.getElementById('cur-proj-stats'),
+        `当前项目活动现场: ${projUnarchived.length} · 在岗忙碌成员: ${workingMembers} · 历史总归档: ${allTasks.length}`
+      );
 
       const actBadge = document.getElementById('badge-active-count');
       if (workingMembers > 0) {
-        actBadge.textContent = `${workingMembers} 人在岗`;
+        setZhText(actBadge, `${workingMembers} 人在岗`);
         actBadge.classList.remove('hidden');
       } else {
         actBadge.classList.add('hidden');
@@ -2205,15 +2391,45 @@
         }
       });
 
+      const isCompleted = task.status === 'succeeded';
+      const sceneExpanded = !isCompleted || EXPANDED_SCENES.has(task.id);
+
       if (mode === 'roundtable') {
         const hostId = meta.host_member_id || steps[0]?.member_id || 'agy_gemini';
         const parts = meta.participants || [...new Set(steps.map(s => s.member_id))];
         const orderedSeats = parts.includes(hostId) ? parts : [hostId, ...parts];
         const curStep = steps.find(s => s.status === 'running') || steps[task.current_step_index || 0] || steps[steps.length - 1];
-        const curPhase = task.status === 'succeeded'
+        const curPhase = isCompleted
           ? '🎉 圆桌共识已达成 · 主持终稿已签发'
           : `🎙️ 当前议程：${curStep?.round_label || curStep?.title || '准备开议'}`;
         const consultTotal = steps.reduce((acc, s) => acc + (s.consult_count || 0), 0);
+        const statsText = `参会席位 ${orderedSeats.length} 人 · 设定 ${meta.discussion_rounds || 2} 轮思辨 · 实时 @队友协商 ${consultTotal} 次 · 群聊消息 ${(task.chat_room || []).length} 条`;
+
+        if (!sceneExpanded) {
+          const miniSeats = orderedSeats.map(mid => {
+            const m = ms[mid] || { name: mid, client: 'codex' };
+            const isHost = mid === hostId;
+            return `
+              <span class="mini-seat-pill ${isHost ? 'is-host' : ''}">
+                ${avatarHtml(mid, m)}
+                <span>${isHost ? '👑 ' : '✓ '}${esc(m.name || mid)}</span>
+              </span>
+            `;
+          }).join('');
+
+          return `
+            <div class="consensus-banner">
+              <div>
+                <div style="font-size:13.5px; font-weight:800; color:#6ee7b7;">${esc(curPhase)}</div>
+                <div style="font-size:11px; color:var(--muted); margin-top:2px;">${esc(statsText)}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div class="mini-seat-row">${miniSeats}</div>
+                <button class="btn btn-sec btn-sm" onclick="toggleSceneExpand('${esc(task.id)}')">🪑 展开圆桌席位</button>
+              </div>
+            </div>
+          `;
+        }
 
         const seatCards = orderedSeats.map(mid => {
           const m = ms[mid] || { name: mid, client: 'codex', model: '-' };
@@ -2244,14 +2460,30 @@
 
         return `
           <div class="scene-box scene-roundtable">
+            ${isCompleted ? `<div style="display:flex; justify-content:flex-end; margin-bottom:4px;"><button class="btn btn-sec btn-sm" onclick="toggleSceneExpand('${esc(task.id)}')">🔼 收起圆桌席位</button></div>` : ''}
             <div class="rt-arena">
               <div class="rt-table-ring">
                 <div style="font-size:14px; font-weight:800; color:#6ee7b7;">${esc(curPhase)}</div>
-                <div style="font-size:11.5px; color:#cbd5e1; margin-top:4px;">
-                  参会席位 ${orderedSeats.length} 人 · 设定 ${meta.discussion_rounds || 2} 轮思辨 · 已触发实时 <code>@队友协商</code> ${consultTotal} 次 · 群聊消息 ${(task.chat_room || []).length} 条
-                </div>
+                <div style="font-size:11.5px; color:#cbd5e1; margin-top:4px;">${esc(statsText)}</div>
               </div>
               <div class="rt-seats-grid">${seatCards}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      if (!sceneExpanded) {
+        const uniqMembers = [...new Set(steps.map(s => s.member_id))];
+        const miniSeats = uniqMembers.map(mid => {
+          const m = ms[mid] || { name: mid, client: 'codex' };
+          return `<span class="mini-seat-pill">${avatarHtml(mid, m)} <span>✓ ${esc(m.name || mid)}</span></span>`;
+        }).join('');
+        return `
+          <div class="consensus-banner">
+            <div style="font-size:12.5px; font-weight:700; color:#6ee7b7;">✅ 协作已定稿 · 共 ${steps.length} 个工位节点 · 群聊消息 ${(task.chat_room || []).length} 条</div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div class="mini-seat-row">${miniSeats}</div>
+              <button class="btn btn-sec btn-sm" onclick="toggleSceneExpand('${esc(task.id)}')">🔽 展开阵型详情</button>
             </div>
           </div>
         `;
@@ -2818,6 +3050,7 @@
         const r = await api('POST', '/api/tasks', payload);
         document.getElementById('cmp-goal').value = '';
         document.getElementById('cmp-title').value = '';
+        COMPOSER_OPEN_OVERRIDE = false;
         toast(`🎬 已开场启动: ${r.task.title}`);
         await refreshState(true);
       } catch (e) { toast(e.message, true); }
@@ -2927,7 +3160,7 @@
     function syncQPopupToggleBtn() {
       const btn = document.getElementById('q-popup-toggle-btn');
       if (!btn) return;
-      btn.textContent = AUTO_POPUP_QUESTIONS ? '🔔 提问自动弹窗: 开' : '🔕 提问自动弹窗: 关';
+      setZhText(btn, AUTO_POPUP_QUESTIONS ? '🔔 提问自动弹窗: 开' : '🔕 提问自动弹窗: 关');
       btn.className = AUTO_POPUP_QUESTIONS ? 'btn btn-sec btn-sm' : 'btn btn-warn btn-sm';
     }
 

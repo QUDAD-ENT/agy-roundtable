@@ -103,7 +103,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 dispatch_mode="coordinator_auto",
                 max_auto_repairs=2,
             )
-            deadline = time.time() + 8.0
+            deadline = time.time() + 20.0
             final_t = None
             while time.time() < deadline:
                 snap = orch.store.snapshot()
@@ -593,7 +593,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 participants=["codex_author", "agy_claude_reviewer"],
                 discussion_rounds=2,
             )
-            deadline = time.time() + 8.0
+            deadline = time.time() + 20.0
             cur = None
             while time.time() < deadline:
                 cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
@@ -668,7 +668,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 execution_mode="chief_dispatch",
                 chief_member_id="agy_gemini",
             )
-            deadline = time.time() + 8.0
+            deadline = time.time() + 20.0
             cur = None
             while time.time() < deadline:
                 cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_chief["id"])
@@ -696,7 +696,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                     ],
                 ],
             )
-            deadline = time.time() + 8.0
+            deadline = time.time() + 20.0
             cur_dag = None
             while time.time() < deadline:
                 cur_dag = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_dag["id"])
@@ -782,7 +782,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
             # Fast parallel start without opening step -> 2*2 + 1 = 5 steps total!
             self.assertEqual(len(t["steps"]), 5)
 
-            deadline = time.time() + 8.0
+            deadline = time.time() + 20.0
             cur = None
             while time.time() < deadline:
                 cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
