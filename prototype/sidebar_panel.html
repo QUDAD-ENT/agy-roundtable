@@ -1,0 +1,3482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGY Roundtable · 圆桌会议 (Antigravity × Codex)</title>
+  <style>
+    :root {
+      --bg: #0b0e15;
+      --surface: #131824;
+      --surface-2: #1a2233;
+      --surface-3: #232d44;
+      --border: #2a3650;
+      --border-hi: #3f527a;
+      --text: #eef2ff;
+      --muted: #93a1bd;
+      --accent: #4f9cf9;
+      --codex: #2dd4bf;
+      --agy: #a78bfa;
+      --gold: #f59e0b;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --err: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 12px 16px 64px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(900px 380px at 12% -8%, rgba(79,156,249,0.10), transparent 65%),
+        radial-gradient(800px 360px at 90% -5%, rgba(167,139,250,0.10), transparent 65%),
+        var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 1200px;
+      margin-inline: auto;
+    }
+
+    /* ==================== TOP PROJECT SWITCHER BAR ==================== */
+    .project-bar {
+      background: linear-gradient(180deg, #171e2e 0%, #121724 100%);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 15px;
+      margin-bottom: 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+    }
+    .proj-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .brand {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .proj-selector-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .proj-selector-row select {
+      flex: 1;
+      min-width: 220px;
+      font-weight: 600;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: #0b0e16;
+      border-color: #384769;
+    }
+    .proj-path-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    /* ==================== BADGES & BUTTONS ==================== */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .b-ok { background: rgba(52,211,153,0.14); color: var(--ok); border-color: rgba(52,211,153,0.35); }
+    .b-run { background: rgba(79,156,249,0.16); color: var(--accent); border-color: rgba(79,156,249,0.42); }
+    .b-warn { background: rgba(251,191,36,0.15); color: var(--warn); border-color: rgba(251,191,36,0.4); }
+    .b-err { background: rgba(248,113,113,0.15); color: var(--err); border-color: rgba(248,113,113,0.4); }
+    .b-codex { background: rgba(45,212,191,0.13); color: var(--codex); border-color: rgba(45,212,191,0.35); }
+    .b-agy { background: rgba(167,139,250,0.15); color: var(--agy); border-color: rgba(167,139,250,0.4); }
+    .b-gold { background: rgba(245,158,11,0.16); color: #fcd34d; border-color: rgba(245,158,11,0.45); }
+    .b-muted { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+
+    .btn {
+      background: linear-gradient(180deg, #5da5fb 0%, #3b86eb 100%);
+      color: #06101f;
+      border: 1px solid rgba(255,255,255,0.12);
+      padding: 7px 13px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: transform 0.1s ease, filter 0.15s ease;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:active { transform: translateY(1px); }
+    .btn-sec { background: var(--surface-2); color: var(--text); border-color: var(--border); font-weight: 600; }
+    .btn-warn { background: rgba(251,191,36,0.18); color: var(--warn); border-color: rgba(251,191,36,0.42); }
+    .btn-err { background: rgba(248,113,113,0.18); color: var(--err); border-color: rgba(248,113,113,0.42); }
+    .btn-sm { padding: 4px 9px; font-size: 11px; border-radius: 6px; }
+
+    /* ==================== NAVIGATION TABS ==================== */
+    .nav-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .nav-tab {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
+      padding: 7px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .nav-tab.active {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border-hi);
+    }
+
+    /* ==================== CARDS & INPUTS ==================== */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%;
+      background: #0b0e16;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 9px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    textarea { resize: vertical; min-height: 68px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    @media (max-width: 680px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    }
+
+    /* ==================== 4-MODE ANTHROPOMORPHIC COMPOSER ==================== */
+    .mode-cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 860px) {
+      .mode-cards { grid-template-columns: repeat(2, 1fr); }
+    }
+    .mode-card {
+      background: #0f1420;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 11px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.16s ease;
+      position: relative;
+    }
+    .mode-card:hover { border-color: var(--border-hi); background: #151c2c; }
+    .mode-card.active[data-mode="roundtable"] {
+      border-color: #34d399;
+      background: linear-gradient(180deg, rgba(52,211,153,0.14) 0%, rgba(16,24,38,0.95) 100%);
+      box-shadow: 0 0 0 1px rgba(52,211,153,0.28);
+    }
+    .mode-card.active[data-mode="chief_dispatch"] {
+      border-color: #f59e0b;
+      background: linear-gradient(180deg, rgba(245,158,11,0.15) 0%, rgba(16,24,38,0.95) 100%);
+      box-shadow: 0 0 0 1px rgba(245,158,11,0.3);
+    }
+    .mode-card.active[data-mode="custom_dag"] {
+      border-color: #4f9cf9;
+      background: linear-gradient(180deg, rgba(79,156,249,0.16) 0%, rgba(16,24,38,0.95) 100%);
+      box-shadow: 0 0 0 1px rgba(79,156,249,0.3);
+    }
+    .mode-card.active[data-mode="single_member"] {
+      border-color: #a78bfa;
+      background: linear-gradient(180deg, rgba(167,139,250,0.16) 0%, rgba(16,24,38,0.95) 100%);
+      box-shadow: 0 0 0 1px rgba(167,139,250,0.3);
+    }
+    .mode-card-title {
+      font-weight: 800;
+      font-size: 13px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .mode-card-desc {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    /* Avatar Chip & Anthropomorphic Persona */
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      background: #1c2538;
+      border: 2px solid var(--border-hi);
+      flex-shrink: 0;
+      position: relative;
+    }
+    .avatar.av-codex { border-color: var(--codex); background: rgba(45,212,191,0.12); }
+    .avatar.av-agy { border-color: var(--agy); background: rgba(167,139,250,0.14); }
+    .avatar.av-human { border-color: var(--accent); background: rgba(79,156,249,0.18); }
+    .avatar.speaking {
+      animation: pulseHalo 1.5s infinite;
+    }
+    @keyframes pulseHalo {
+      0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.65); }
+      70% { box-shadow: 0 0 0 9px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+
+    /* Seat / Member Toggle Pills */
+    .member-seat-picks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 6px;
+    }
+    .seat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px 5px 6px;
+      border-radius: 999px;
+      background: #0e131f;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      transition: all 0.14s ease;
+    }
+    .seat-chip:hover { border-color: var(--border-hi); }
+    .seat-chip.selected {
+      background: rgba(52,211,153,0.13);
+      border-color: #34d399;
+      color: #ecfdf5;
+    }
+    .seat-chip .avatar { width: 24px; height: 24px; font-size: 12px; border-width: 1.5px; }
+
+    /* ==================== ANTHROPOMORPHIC SCENES (COMPOSER PREVIEW & LIVE STAGE) ==================== */
+    .scene-box {
+      border-radius: 12px;
+      padding: 14px;
+      margin: 10px 0 12px;
+      border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 1. Roundtable Chamber Scene */
+    .scene-roundtable {
+      background:
+        radial-gradient(ellipse at center, rgba(16, 185, 129, 0.10) 0%, rgba(12, 17, 28, 0.96) 72%);
+      border-color: rgba(52, 211, 153, 0.35);
+    }
+    .rt-arena {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 4px;
+    }
+    .rt-table-ring {
+      width: 100%;
+      max-width: 760px;
+      min-height: 158px;
+      border-radius: 999px;
+      background: radial-gradient(ellipse at center, #162c28 0%, #0f1d1d 68%, #0b1418 100%);
+      border: 3px solid #2b594f;
+      box-shadow: inset 0 0 28px rgba(0,0,0,0.65), 0 8px 24px rgba(0,0,0,0.35);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 18px 28px;
+      text-align: center;
+      position: relative;
+    }
+    .rt-seats-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+    }
+    .rt-seat-card {
+      background: rgba(17, 23, 36, 0.94);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 11px;
+      min-width: 156px;
+      max-width: 220px;
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      transition: all 0.2s ease;
+    }
+    .rt-seat-card.is-host {
+      border-color: rgba(245,158,11,0.55);
+      background: linear-gradient(180deg, rgba(245,158,11,0.12), rgba(17,23,36,0.95));
+    }
+    .rt-seat-card.is-speaking {
+      border-color: var(--ok);
+      background: linear-gradient(180deg, rgba(52,211,153,0.16), rgba(17,23,36,0.96));
+      transform: translateY(-2px);
+    }
+    .speech-snippet {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #cbd5e1;
+      background: rgba(9, 12, 20, 0.78);
+      border-left: 2px solid var(--ok);
+      padding: 3px 6px;
+      border-radius: 4px;
+      max-height: 44px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 2. Chief Command Bridge Scene */
+    .scene-chief {
+      background:
+        radial-gradient(ellipse at top, rgba(245, 158, 11, 0.12) 0%, rgba(13, 17, 28, 0.96) 70%);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+    .chief-podium {
+      background: linear-gradient(180deg, rgba(245,158,11,0.15) 0%, rgba(20,26,40,0.95) 100%);
+      border: 1px solid rgba(245,158,11,0.5);
+      border-radius: 10px;
+      padding: 10px 14px;
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    .chief-connector {
+      text-align: center;
+      color: #fbbf24;
+      font-size: 12px;
+      font-weight: 700;
+      margin: 8px 0;
+      letter-spacing: 1px;
+    }
+    .squad-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 9px;
+    }
+    .squad-card {
+      background: #111726;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 11px;
+      min-width: 170px;
+      max-width: 245px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .squad-card.recruited { border-color: rgba(79,156,249,0.55); background: rgba(79,156,249,0.08); }
+    .squad-card.working { border-color: var(--ok); background: rgba(52,211,153,0.12); }
+
+    /* 3. Custom Block Pipeline Builder & Live Assembly Studio */
+    .scene-dag {
+      background:
+        radial-gradient(ellipse at left, rgba(79, 156, 249, 0.11) 0%, rgba(12, 16, 26, 0.97) 72%);
+      border-color: rgba(79, 156, 249, 0.38);
+    }
+    .stages-track {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .stage-col {
+      min-width: 235px;
+      max-width: 290px;
+      flex-shrink: 0;
+      background: rgba(14, 19, 31, 0.9);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .stage-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 18px;
+      font-weight: 800;
+      padding: 0 2px;
+      user-select: none;
+    }
+    .workstation-node {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+    }
+    .workstation-node.ws-run { border-color: var(--accent); background: rgba(79,156,249,0.13); }
+    .workstation-node.ws-ok { border-color: rgba(52,211,153,0.5); }
+    .workstation-node.ws-warn { border-color: var(--warn); }
+    .workstation-node.ws-err { border-color: var(--err); }
+
+    /* 4. Solo Specialist Desk Scene */
+    .scene-solo {
+      background: linear-gradient(90deg, rgba(79,156,249,0.09) 0%, rgba(167,139,250,0.11) 100%);
+      border-color: rgba(167,139,250,0.38);
+    }
+    .solo-desk {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      flex-wrap: wrap;
+      padding: 4px 8px;
+    }
+
+    /* ==================== SHARED LIVE GROUP CHAT STREAM ==================== */
+    .chat-room-panel {
+      background: #0c101a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+    .chat-room-header {
+      background: #141b2b;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chat-stream {
+      max-height: 390px;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .chat-divider {
+      align-self: center;
+      font-size: 11px;
+      color: var(--muted);
+      background: #161e30;
+      border: 1px solid var(--border);
+      padding: 2px 10px;
+      border-radius: 999px;
+      margin: 2px 0;
+    }
+    .chat-msg {
+      display: flex;
+      gap: 9px;
+      align-items: flex-start;
+      max-width: 92%;
+    }
+    .chat-msg.from-user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+    .deliverable-box {
+      background: #090c13;
+      border: 1px solid #28334c;
+      border-radius: 9px;
+      padding: 12px 15px;
+      font-size: 13px;
+      line-height: 1.65;
+      word-break: break-word;
+      max-height: 460px;
+      overflow-y: auto;
+      margin: 8px 0;
+    }
+    .md-body { line-height: 1.62; word-break: break-word; }
+    .md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+      margin: 10px 0 5px;
+      color: #f8fafc;
+      line-height: 1.35;
+    }
+    .md-body h1 { font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    .md-body h2 { font-size: 14.5px; color: #93c5fd; }
+    .md-body h3 { font-size: 13.5px; color: #a7f3d0; }
+    .md-body h4 { font-size: 13px; color: #fde68a; }
+    .md-body p { margin: 5px 0; }
+    .md-body ul { margin: 4px 0 6px 18px; padding: 0; }
+    .md-body li { margin: 2px 0; }
+    .md-body pre {
+      background: #080b12;
+      border: 1px solid #243049;
+      padding: 8px 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 11.5px;
+      margin: 6px 0;
+    }
+    .md-body code {
+      background: rgba(79,156,249,0.13);
+      color: #bfdbfe;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 11.5px;
+    }
+    .md-body pre code { background: transparent; padding: 0; color: #e2e8f0; }
+    .md-table-wrap { overflow-x: auto; margin: 7px 0; }
+    .md-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      background: #0c101a;
+    }
+    .md-table th, .md-table td {
+      border: 1px solid #283552;
+      padding: 5px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .md-table th { background: #172136; color: #93c5fd; font-weight: 700; }
+    .partial-rescue-banner {
+      background: linear-gradient(90deg, rgba(245,158,11,0.16) 0%, rgba(52,211,153,0.14) 100%);
+      border: 1px solid rgba(52,211,153,0.55);
+      border-radius: 10px;
+      padding: 11px 13px;
+      margin: 9px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chat-bubble {
+      background: #161e2e;
+      border: 1px solid #28344f;
+      border-radius: 10px;
+      padding: 8px 11px;
+      font-size: 12.5px;
+      line-height: 1.58;
+      word-break: break-word;
+      flex: 1;
+    }
+    .chat-msg.from-user .chat-bubble {
+      background: rgba(79,156,249,0.16);
+      border-color: rgba(79,156,249,0.45);
+    }
+    .chat-bubble.kind-mention_ask {
+      background: rgba(245,158,11,0.12);
+      border-color: rgba(245,158,11,0.5);
+    }
+    .chat-bubble.kind-mention_reply {
+      background: rgba(45,212,191,0.11);
+      border-color: rgba(45,212,191,0.48);
+    }
+    .chat-bubble.kind-review {
+      background: rgba(167,139,250,0.11);
+      border-color: rgba(167,139,250,0.45);
+    }
+    .chat-bubble.kind-deliverable {
+      background: rgba(52,211,153,0.09);
+      border-color: rgba(52,211,153,0.42);
+    }
+    .chat-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .interject-bar {
+      background: #131a2a;
+      border: 1px solid var(--border-hi);
+      border-radius: 10px;
+      padding: 9px 11px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    /* ==================== STAGE, DELIVERABLE & QUESTION CARDS ==================== */
+    .stage-card {
+      background: #121725;
+      border: 1px solid #354466;
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.32);
+    }
+    .stage-empty {
+      background: var(--surface);
+      border: 1px dashed var(--border-hi);
+      border-radius: 12px;
+      padding: 28px 16px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .active-pills {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .task-pill {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .task-pill.active {
+      background: rgba(79,156,249,0.18);
+      color: var(--text);
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+    .alert {
+      padding: 8px 11px;
+      border-radius: 7px;
+      font-size: 12px;
+      margin: 8px 0;
+      word-break: break-word;
+    }
+    .alert-warn { background: rgba(251,191,36,0.12); border-left: 3px solid var(--warn); color: #fde68a; }
+    .alert-err { background: rgba(248,113,113,0.12); border-left: 3px solid var(--err); color: #fecaca; }
+    .alert-ok { background: rgba(52,211,153,0.1); border-left: 3px solid var(--ok); color: #a7f3d0; }
+
+    .q-card {
+      background: linear-gradient(180deg, rgba(167,139,250,0.14) 0%, rgba(79,156,249,0.08) 100%);
+      border: 1px solid rgba(167,139,250,0.55);
+      border-radius: 10px;
+      padding: 13px 14px;
+      margin: 10px 0;
+    }
+    .q-block {
+      background: rgba(11,14,22,0.82);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 8px;
+    }
+    .q-opt {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 7px 9px;
+      margin-top: 5px;
+      border: 1px solid #28324a;
+      border-radius: 6px;
+      background: #121724;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .q-opt:hover { border-color: var(--accent); background: #182033; }
+    .q-opt input { margin-top: 2px; cursor: pointer; }
+
+    details {
+      margin-top: 10px;
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+    }
+    details > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      user-select: none;
+    }
+    details > summary:hover { color: var(--text); }
+    .action-bar { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; align-items: center; }
+
+    /* Folder Explorer & Modal */
+    .fs-list {
+      max-height: 270px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0c0f17;
+      margin: 8px 0;
+    }
+    .fs-item {
+      padding: 7px 10px;
+      border-bottom: 1px solid #1b2233;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .fs-item:hover { background: var(--surface-2); }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.74);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      z-index: 970;
+    }
+    .q-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 9, 18, 0.78);
+      backdrop-filter: blur(3px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      z-index: 940;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 560px;
+      padding: 16px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 18px 48px rgba(0,0,0,0.6);
+    }
+    .modal.modal-wide {
+      max-width: 880px;
+    }
+    .q-modal {
+      background: linear-gradient(180deg, #19172e 0%, #131826 100%);
+      border: 1.5px solid rgba(167,139,250,0.7);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 660px;
+      padding: 18px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 56px rgba(0,0,0,0.68), 0 0 0 1px rgba(167,139,250,0.2);
+    }
+    .ans-link {
+      color: #60a5fa;
+      background: rgba(79,156,249,0.12);
+      border: 1px solid rgba(79,156,249,0.32);
+      padding: 1px 6px;
+      border-radius: 5px;
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-block;
+      margin: 1px 0;
+      transition: all 0.14s ease;
+    }
+    .ans-link:hover {
+      background: rgba(79,156,249,0.25);
+      border-color: var(--accent);
+      color: #eff6ff;
+    }
+    .src-viewer {
+      background: #080b12;
+      border: 1px solid #25314b;
+      border-radius: 8px;
+      max-height: 60vh;
+      overflow: auto;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      padding: 6px 0;
+    }
+    .src-line {
+      display: flex;
+      padding: 1px 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .src-line.hl {
+      background: rgba(245,158,11,0.2);
+      border-left: 3px solid var(--gold);
+    }
+    .src-ln {
+      width: 44px;
+      flex-shrink: 0;
+      color: #64748b;
+      text-align: right;
+      padding-right: 10px;
+      user-select: none;
+    }
+    .toast {
+      position: fixed;
+      bottom: 14px;
+      right: 14px;
+      max-width: 430px;
+      background: #1f2940;
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 9px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      display: none;
+      z-index: 999;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== TOP PROJECT SWITCHER BAR ==================== -->
+  <div class="project-bar">
+    <div class="proj-top">
+      <div class="brand">
+        <span>🏛️ AGY Roundtable · 圆桌会议</span>
+        <span id="codex-cli-pill" class="badge b-muted">Codex 检测中</span>
+        <span id="agy-cli-pill" class="badge b-muted">Antigravity 检测中</span>
+        <a href="#open-link" class="badge b-muted ans-link" data-ans-link="https://github.com/dneo9527-ctrl/agy-console" title="Associated Companion Project: dneo9527-ctrl/agy-console" style="cursor:pointer; text-decoration:none;">🔗 Agy Console</a>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn btn-sec btn-sm" id="lang-toggle-btn" onclick="toggleLanguage()" title="Switch UI Language / 切换中英双语界面">🌐 English</button>
+        <button class="btn btn-sec btn-sm" id="q-popup-toggle-btn" onclick="toggleAutoQuestionPopup()" title="控制 AI 提出选项问题时是否自动弹出确认窗口">🔔 提问弹窗: 开启</button>
+        <button class="btn btn-sec btn-sm" id="pause-btn" onclick="togglePause()">⏸️ 暂停派发</button>
+        <button class="btn btn-sec btn-sm" onclick="openCurrentFolder()">📁 打开项目目录</button>
+      </div>
+    </div>
+
+    <label style="color:var(--accent); font-weight:700;">当前工作项目（切换后圆桌/点将/流水线成员将直接在该项目目录下协作）</label>
+    <div class="proj-selector-row">
+      <select id="project-select" onchange="onQuickProjectSelect(this.value)"></select>
+      <button class="btn btn-sec" onclick="openFolderBrowserModal()">📂 浏览任意文件夹...</button>
+      <button class="btn btn-sec" onclick="pickNativeFolder()" title="弹出 Windows 系统文件夹选择窗口">🪟 系统选目录</button>
+    </div>
+
+    <div class="proj-path-hint">
+      <span>当前完整路径：<code id="cur-proj-path" style="color:var(--text);">-</code></span>
+      <span id="cur-proj-stats">正在同步团队状态...</span>
+    </div>
+  </div>
+
+  <!-- ==================== CLEAN 3-TAB NAVIGATION ==================== -->
+  <div class="nav-tabs">
+    <button class="nav-tab active" id="nav-workspace" onclick="switchView('workspace')">
+      🎯 拟人协作现场 <span id="badge-active-count" class="badge b-run hidden">0</span>
+    </button>
+    <button class="nav-tab" id="nav-history" onclick="switchView('history')">
+      🗂️ 历史与旧任务 (<span id="badge-history-count">0</span>)
+    </button>
+    <button class="nav-tab" id="nav-members" onclick="switchView('members')">
+      👥 团队花名册与双端模型 (<span id="badge-member-count">0</span>)
+    </button>
+  </div>
+
+  <!-- ==================== VIEW 1: ANTHROPOMORPHIC COLLABORATION WORKSPACE ==================== -->
+  <div id="view-workspace">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <div>
+          <strong style="font-size:14px;">🎬 在项目 <span id="composer-proj-name" style="color:var(--accent);"></span> 下自由组织团队</strong>
+          <span style="font-size:11px; color:var(--muted); margin-left:6px;">支持 Agent 实时共享群聊与中途 <code>@队友</code> 提问互助</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span id="paused-hint" class="badge b-warn hidden">队列已暂停</span>
+          <select id="cmp-sandbox" style="width:auto; font-weight:600;">
+            <option value="read-only">🔒 只读研判 / 审查（不改文件）</option>
+            <option value="workspace-write">✏️ 允许读写修改当前项目文件</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 4 Visual Anthropomorphic Mode Selector Cards -->
+      <div class="mode-cards" id="mode-cards">
+        <div class="mode-card active" data-mode="roundtable" onclick="selectComposerMode('roundtable')">
+          <div class="mode-card-title"><span>🪑 群聊圆桌议事厅</span><span class="badge b-ok">自主争鸣</span></div>
+          <div class="mode-card-desc">勾选多位专家围坐圆桌：主持破题 → 并行独立立论 → 交叉 @质询互评 → 共识定稿</div>
+        </div>
+        <div class="mode-card" data-mode="chief_dispatch" onclick="selectComposerMode('chief_dispatch')">
+          <div class="mode-card-title"><span>🎖️ 总管自动点将台</span><span class="badge b-gold">智能排兵</span></div>
+          <div class="mode-card-desc">指定 1 位坐镇主帅先看项目与花名册，按需动态点兵派发并行/串行/审查并在终局签发</div>
+        </div>
+        <div class="mode-card" data-mode="custom_dag" onclick="selectComposerMode('custom_dag')">
+          <div class="mode-card-title"><span>🧱 多轨搭积木工坊</span><span class="badge b-run">自由串并行</span></div>
+          <div class="mode-card-desc">像搭积木一样编排第 1~N 阶段工位，同阶段可放多人并行攻关，可插入独立审查关卡</div>
+        </div>
+        <div class="mode-card" data-mode="single_member" onclick="selectComposerMode('single_member')">
+          <div class="mode-card-title"><span>⚡ 专家一对一专办</span><span class="badge b-agy">极速直达</span></div>
+          <div class="mode-card-desc">面对面直连单名 Codex 或 Antigravity 专家快速完成分析、改码或专项答疑</div>
+        </div>
+      </div>
+
+      <!-- Mode-Adaptive Anthropomorphic Configuration & Live Formation Preview -->
+      <div id="composer-mode-studio"></div>
+
+      <!-- Task Goal Input -->
+      <div style="margin-top:10px; margin-bottom:8px;">
+        <textarea id="cmp-goal" placeholder="直接向团队交代任务目标（执行过程中所有参会 Agent 共享实时群聊，支持互相 @提问核查，你也可随时插话指导）..."></textarea>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <details style="margin:0; border:none; padding:0;" data-persist-id="cmp-adv">
+          <summary>⚙️ 高级选项（自定义任务标题、限定子目录、审查人工裁决开关）</summary>
+          <div class="grid-3" style="margin-top:8px;">
+            <div>
+              <label>自定义任务简称（留空自动生成）</label>
+              <input type="text" id="cmp-title" placeholder="自动提炼任务标题">
+            </div>
+            <div>
+              <label>限定子目录范围（默认 . 即整个项目）</label>
+              <input type="text" id="cmp-subscope" value=".">
+            </div>
+            <div style="padding-top:16px; display:flex; flex-direction:column; gap:4px;">
+              <label style="color:var(--text); cursor:pointer;"><input type="checkbox" id="cmp-manual-rule"> 独立审查打回时暂停由我亲自裁决</label>
+              <label style="color:var(--text); cursor:pointer;"><input type="checkbox" id="cmp-reuse-sess"> 单人模式接续上次会话记忆</label>
+            </div>
+          </div>
+        </details>
+        <button class="btn" id="btn-launch-task" onclick="submitTask()">🚀 召集入席 · 立即开干</button>
+      </div>
+    </div>
+
+    <!-- Active Stage Switcher Pills -->
+    <div id="stage-pills" class="active-pills hidden"></div>
+
+    <!-- Main Focused Stage (Split into Dynamic Scene/Output + Persistent Live Chat Interjection Bar!) -->
+    <div id="active-stage-wrapper">
+      <div id="active-stage-dynamic"></div>
+      <div id="active-stage-interject" class="hidden">
+        <div class="interject-bar">
+          <span class="badge b-run">🎙️ 现场插话 / 点名</span>
+          <select id="interject-target" style="width:auto; min-width:190px;"></select>
+          <input type="text" id="interject-input" style="flex:1; min-width:220px;"
+            placeholder="随时向团队群聊补充要求，或点名 @某位成员 追问/核查（按 Enter 直接发送）..."
+            onkeydown="if(event.key==='Enter'){event.preventDefault(); sendInterjection();}">
+          <label style="margin:0; display:inline-flex; align-items:center; gap:4px; color:var(--text); cursor:pointer;">
+            <input type="checkbox" id="interject-wake" checked> 立即唤醒答复
+          </label>
+          <button class="btn btn-sm" onclick="sendInterjection()">📨 发送到群聊</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW 2: ARCHIVED & HISTORICAL TASKS ==================== -->
+  <div id="view-history" class="hidden">
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-sec btn-sm" id="hist-scope-cur" onclick="setHistoryScope('current')">仅当前项目</button>
+        <button class="btn btn-sec btn-sm" id="hist-scope-all" onclick="setHistoryScope('all')">全部项目记录</button>
+        <input type="text" id="hist-search" placeholder="搜索任务标题或目标..." style="width:210px;" oninput="renderHistoryView()">
+      </div>
+      <button class="btn btn-sec btn-sm" onclick="archiveAllCompleted()">🧹 将工作台已完成任务全部收入历史</button>
+    </div>
+    <div id="history-container"></div>
+  </div>
+
+  <!-- ==================== VIEW 3: MEMBERS & DUAL-CLIENT MODELS ==================== -->
+  <div id="view-members" class="hidden">
+    <div class="card" style="background:#141b2c;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <strong>👥 团队花名册与双端模型配置</strong>
+          <div style="font-size:12px; color:var(--muted);">
+            支持随时点击成员名字改名，自由混编 <span class="badge b-agy">Antigravity (Gemini 4 / Claude 5.5)</span> 与 <span class="badge b-codex">Codex (GPT-6 / 6.1)</span> 专家。
+          </div>
+        </div>
+        <button class="btn btn-sec btn-sm" onclick="loadCapabilities(true)">🔄 重新探测官方模型列表</button>
+      </div>
+    </div>
+
+    <div id="members-grid" class="grid-2"></div>
+
+    <div class="card">
+      <details data-persist-id="add-member-drawer">
+        <summary style="color:var(--accent); font-size:13px;">➕ 招募新成员加入花名册（支持任意 Codex 或 Antigravity 模型）</summary>
+        <div class="grid-3" style="margin-top:10px;">
+          <div>
+            <label>成员 ID（英文唯一标识）</label>
+            <input type="text" id="add-m-id" placeholder="例如 agy_arch_lead">
+          </div>
+          <div>
+            <label>成员显示姓名</label>
+            <input type="text" id="add-m-name" placeholder="例如 首席架构师老周">
+          </div>
+          <div>
+            <label>承担职责角色</label>
+            <select id="add-m-role"></select>
+          </div>
+          <div>
+            <label>客户端引擎</label>
+            <select id="add-m-client" onchange="populateClientModels('add-m-client', 'add-m-model', 'add-m-effort')">
+              <option value="antigravity">Antigravity 官方 CLI (Gemini / Claude)</option>
+              <option value="codex">Codex 官方 CLI (GPT 系列)</option>
+            </select>
+          </div>
+          <div>
+            <label>分配模型</label>
+            <select id="add-m-model" onchange="syncClientEfforts('add-m-client', 'add-m-model', 'add-m-effort')"></select>
+          </div>
+          <div>
+            <label>思考强度</label>
+            <select id="add-m-effort"></select>
+          </div>
+        </div>
+        <div class="action-bar">
+          <button class="btn btn-sm" onclick="createMember()">保存新成员</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <details data-persist-id="roles-drawer">
+        <summary>🎭 角色职责模板管理与并行工位上限</summary>
+        <div id="roles-box" style="margin-top:8px;"></div>
+        <div class="grid-3" style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+          <div><label>角色 ID</label><input type="text" id="r-id" placeholder="如 sec_audit"></div>
+          <div><label>角色名称</label><input type="text" id="r-name" placeholder="如 安全审计"></div>
+          <div><label>职责说明</label><input type="text" id="r-desc" placeholder="负责权限与边界漏洞复核"></div>
+        </div>
+        <div class="action-bar" style="justify-content:space-between;">
+          <button class="btn btn-sec btn-sm" onclick="saveRole()">保存/更新角色</button>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span style="font-size:12px; color:var(--muted);">最大同时并行成员数:</span>
+            <input type="number" id="cfg-conc" min="1" max="6" value="3" style="width:64px;">
+            <button class="btn btn-sec btn-sm" onclick="saveConcurrency()">更新并行数</button>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Footer Companion Attribution -->
+  <div style="text-align:center; font-size:11.5px; color:var(--muted); margin-top:22px; padding-top:12px; border-top:1px solid var(--border);">
+    <span>🏛️ <strong>AGY Roundtable · 圆桌会议</strong> — Dual-Engine Multi-Agent Studio (Antigravity + Codex) · MIT License · </span>
+    <a href="#open-link" class="ans-link" data-ans-link="https://github.com/dneo9527-ctrl/agy-console">🔗 Companion &amp; Ecosystem: dneo9527-ctrl/agy-console</a>
+  </div>
+
+  <!-- Question Confirmation Modal & General/Preview Modal & Toast -->
+  <div id="q-modal-backdrop" class="q-modal-backdrop">
+    <div class="q-modal" id="q-modal-body"></div>
+  </div>
+  <div id="modal-backdrop" class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+    <div class="modal" id="modal-body"></div>
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let STATE = null;
+    let CAPS = { clients: { codex: { models: [] }, antigravity: { models: [] } } };
+    let PROJECTS = { groups: [], drives: [] };
+    let CURRENT_VIEW = 'workspace';
+    let HISTORY_SCOPE = 'current';
+    let LAST_HASH = '';
+    let FOCUSED_TASK_ID = null;
+    let STAGE_TAB = 'all'; // 'all' | 'chat' | 'deliverable'
+    let AUTO_POPUP_QUESTIONS = localStorage.getItem('team_q_popup') !== '0';
+    let LANG = localStorage.getItem('roundtable_lang') || 'zh';
+    let ACTIVE_Q_MODAL_KEY = '';
+    const DISMISSED_Q_KEYS = new Set();
+    const OPEN_DETAILS = new Set();
+    const EXPANDED_MSGS = new Set();
+    const USER_CHOICE_DRAFT = {};
+
+    // Persistent Composer Draft State (survives all 1200ms state polls!)
+    const CMP = {
+      mode: 'roundtable',
+      initialized: false,
+      rtParticipants: [],
+      rtHost: '',
+      rtRounds: 2,
+      rtHostOpening: false,
+      chiefId: '',
+      soloId: '',
+      dagStages: []
+    };
+
+    function toast(msg, isErr = false) {
+      const el = document.getElementById('toast');
+      el.style.borderColor = isErr ? 'var(--err)' : 'var(--accent)';
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(window._tt);
+      window._tt = setTimeout(() => { el.style.display = 'none'; }, 3800);
+    }
+
+    function esc(s) {
+      return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function normPath(p) {
+      return String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    }
+
+    function fmtTime(ts) {
+      if (!ts) return '-';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function fmtElapsedSec(sec) {
+      const s = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+    }
+
+    function liveTimerBadge(startedAt) {
+      if (!startedAt) return '';
+      const sec = Math.max(0, (Date.now() / 1000) - startedAt);
+      return `<span class="badge b-run live-timer" data-started-at="${startedAt}">⏱️ ${fmtElapsedSec(sec)}</span>`;
+    }
+
+    function updateLiveTimersInDom() {
+      const nowSec = Date.now() / 1000;
+      document.querySelectorAll('.live-timer[data-started-at]').forEach(el => {
+        const st = parseFloat(el.getAttribute('data-started-at') || '0');
+        if (st > 0) el.textContent = `⏱️ ${fmtElapsedSec(nowSec - st)}`;
+      });
+    }
+
+    function toggleExpandMsg(msgId) {
+      if (EXPANDED_MSGS.has(msgId)) EXPANDED_MSGS.delete(msgId);
+      else EXPANDED_MSGS.add(msgId);
+      refreshState(true);
+    }
+
+    const ZH_EN_EXACT = {
+      '🏛️ AGY Roundtable · 圆桌会议': '🏛️ AGY Roundtable · 圆桌会议 (EN)',
+      '当前工作项目（切换后圆桌/点将/流水线成员将直接在该项目目录下协作）': 'Active Project Directory (All Roundtable / Chief / Pipeline agents operate inside this workspace)',
+      '📂 浏览任意文件夹...': '📂 Browse Folders...',
+      '🪟 系统选目录': '🪟 OS Folder Picker',
+      '当前完整路径：': 'Workspace Path: ',
+      '正在同步团队状态...': 'Syncing studio state...',
+      '🎯 拟人协作现场': '🎯 Live Roundtable Studio',
+      '🗂️ 历史与旧任务 (': '🗂️ Task History (',
+      '👥 团队花名册与双端模型 (': '👥 Roster & Dual Models (',
+      '🎬 在项目 ': '🎬 Organize Team in ',
+      ' 下自由组织团队': ' Workspace',
+      '支持 Agent 实时共享群聊与中途 ': 'Live shared group chat & real-time ',
+      ' 提问互助': ' peer consultation',
+      '队列已暂停': 'Queue Paused',
+      '🔒 只读研判 / 审查（不改文件）': '🔒 Read-Only Analysis / Review (No File Edits)',
+      '✏️ 允许读写修改当前项目文件': '✏️ Read & Write Project Files (Workspace-Write)',
+      '🪑 群聊圆桌议事厅': '🪑 Roundtable Chamber',
+      '自主争鸣': 'Multi-Agent Debate',
+      '勾选多位专家围坐圆桌：主持破题 → 并行独立立论 → 交叉 @质询互评 → 共识定稿': 'Seat 2–6 specialists around an oval table: parallel independent proposals → cross-@critique → Host synthesis',
+      '🎖️ 总管自动点将台': '🎖️ Chief Dispatch Bridge',
+      '智能排兵': 'Auto-Squad DAG',
+      '指定 1 位坐镇主帅先看项目与花名册，按需动态点兵派发并行/串行/审查并在终局签发': 'Pick 1 Chief Commander to inspect the project & roster, dynamically recruit specialists, and sign off',
+      '🧱 多轨搭积木工坊': '🧱 Multi-Track Pipeline',
+      '自由串并行': 'Custom Stages',
+      '像搭积木一样编排第 1~N 阶段工位，同阶段可放多人并行攻关，可插入独立审查关卡': 'Build Stage 1..N swimlanes with parallel workstations and independent review gates',
+      '⚡ 专家一对一专办': '⚡ 1-on-1 Specialist Desk',
+      '极速直达': 'Direct Solo',
+      '面对面直连单名 Codex 或 Antigravity 专家快速完成分析、改码或专项答疑': 'Work directly 1-on-1 with any Codex or Antigravity specialist for fast execution',
+      '⚙️ 高级选项（自定义任务标题、限定子目录、审查人工裁决开关）': '⚙️ Advanced Options (Custom Title, Sub-directory Scope, Manual Review Ruling)',
+      '自定义任务简称（留空自动生成）': 'Custom Task Title (Auto-generated if blank)',
+      '限定子目录范围（默认 . 即整个项目）': 'Subdirectory Scope (Default "." = entire project)',
+      ' 独立审查打回时暂停由我亲自裁决': ' Pause for my manual ruling if review rejects',
+      ' 单人模式接续上次会话记忆': ' Resume previous member session in Solo mode',
+      '🪑 召集圆桌会议 · 立即开议': '🪑 Convene Roundtable · Start Now',
+      '🎖️ 升帐授印 · 由主帅点将开干': '🎖️ Empower Chief · Dispatch Squad',
+      '🧱 启动多轨流水线 · 按阶段推进': '🧱 Launch Multi-Track Pipeline',
+      '⚡ 直连专家 · 立即开干': '⚡ Start 1-on-1 Session',
+      '🚀 召集入席 · 立即开干': '🚀 Convene & Launch',
+      '🎙️ 现场插话 / 点名': '🎙️ Live Interject / @Mention',
+      ' 立即唤醒答复': ' Wake to Reply Immediately',
+      '📨 发送到群聊': '📨 Send to Room',
+      '📢 @全体 / 默认主责成员': '📢 @All / Default Lead',
+      '仅当前项目': 'Current Project Only',
+      '全部项目记录': 'All Projects',
+      '🧹 将工作台已完成任务全部收入历史': '🧹 Archive All Completed Tasks',
+      '👥 团队花名册与双端模型配置': '👥 Team Roster & Dual-Engine Models',
+      '🔄 重新探测官方模型列表': '🔄 Refresh Official CLI Models',
+      '➕ 招募新成员加入花名册（支持任意 Codex 或 Antigravity 模型）': '➕ Recruit New Team Member (Codex or Antigravity)',
+      '🎭 角色职责模板管理与并行工位上限': '🎭 Role Templates & Max Parallel Concurrency',
+      '保存新成员': 'Save Member',
+      '保存/更新角色': 'Save Role',
+      '更新并行数': 'Update Concurrency',
+      '🔔 提问自动弹窗: 开': '🔔 Auto-Prompt Modal: ON',
+      '🔕 提问自动弹窗: 关': '🔕 Auto-Prompt Modal: OFF',
+      '⏸️ 暂停派发': '⏸️ Pause Queue',
+      '▶️ 恢复队列派发': '▶️ Resume Queue',
+      '📁 打开项目目录': '📁 Open Folder',
+      '👑 圆桌主持人:': '👑 Moderator / Host:',
+      '🔄 交叉讨论轮数:': '🔄 Discussion Rounds:',
+      '1 轮独立立论 + 主持定稿（快速）': '1 Round (Parallel Proposals + Synthesis)',
+      '2 轮（立论 + 交叉互评质询 + 定稿）': '2 Rounds (Proposals + Cross-Critique + Synthesis)',
+      '3 轮深度博弈收敛 + 定稿': '3 Rounds (Deep Debate + Synthesis)',
+      '⚡ 首轮直接并行开跑（省去主持开场等待）': '⚡ Instant Parallel Round 1 (Skip Host Opening Wait)',
+      '👑 主持': '👑 Host',
+      '坐镇主帅:': 'Commander:',
+      '预设1: 双人并行调研➔汇总➔审查': 'Preset 1: Dual Parallel Research ➔ Synthesis ➔ Review',
+      '预设2: 实施➔独立审查闭环': 'Preset 2: Implementation ➔ Independent Review',
+      '预设3: 实施➔审查+文档并行': 'Preset 3: Implementation ➔ Review + Docs Parallel',
+      '➕ 新增下一阶段': '➕ Add Next Stage',
+      '➕ 同阶段加并行工位': '➕ Add Parallel Workstation',
+      '删阶段': 'Remove Stage',
+      '单站串行': 'Serial Station',
+      '单站工位': 'Single Station',
+      '🛠️ 执行 / 实施交付': '🛠️ Execution / Deliverable',
+      '💬 独立调研 / 方案研判 (只读)': '💬 Independent Research (Read-Only)',
+      '🔍 独立审查关卡 (不达标可打回)': '🔍 Independent Review Gate (Rejectable)',
+      '📝 吸收前序成果汇总定稿': '📝 Synthesis & Final Draft',
+      '项目负责人 (你)': 'Project Lead (You)',
+      '直接下达指令 / 随时追问': 'Direct Dispatch & Follow-up',
+      '需求方 · 可随时下方插话追问': 'Project Lead · Interject anytime below',
+      '选择一对一专办专家（中途仍可随时 @其他队友 求助）': 'Select 1-on-1 Specialist (Can still @consult peers anytime)',
+      '全景视图': 'Full View',
+      '📄 终稿成果': '📄 Deliverable',
+      '📥 归档收起': '📥 Archive',
+      '📋 复制 Markdown 原文': '📋 Copy Markdown',
+      '⏹️ 紧急中止当前运行': '⏹️ Abort Running Process',
+      '🔄 核对并继续未完节点': '🔄 Verify & Resume Unfinished',
+      '🔁 沿原会话正式追问': '🔁 Follow-up in Session',
+      '⚖️ 总管人工裁决': '⚖️ Coordinator Ruling',
+      '🔀 换人接手当前步': '🔀 Reassign Step',
+      '🔀 改派': '🔀 Reassign',
+      '改派成员': 'Reassign',
+      '✅ 已完成': '✅ Completed',
+      '⟳ 协作进行中': '⟳ In Progress',
+      '🎙️ 在岗执行中': '🎙️ Working',
+      '空闲待命': 'Idle',
+      '⏳ 队列待发': '⏳ Queued',
+      '待上场': 'Pending',
+      '🙋 请你拍板选择': '🙋 Awaiting Your Choice',
+      '⚖️ 待总管裁决': '⚖️ Needs Ruling',
+      '⚠️ 待核对恢复': '⚠️ Needs Verification',
+      '🚫 策略受阻': '🚫 Policy Blocked',
+      '⏹️ 已中止': '⏹️ Aborted',
+      '❌ 执行异常': '❌ Failed',
+      '✅ 已发言': '✅ Spoke',
+      '👂 倾听待命': '👂 Listening',
+      '已归档': 'Archived',
+      '在现场': 'Active',
+      '👁️ 调回现场查看/续聊': '👁️ Restore to Studio',
+      '✏️ 改名 / 换模型与强度': '✏️ Rename / Switch Model',
+      '移除': 'Remove',
+      '🖥️ 用本地默认软件打开': '🖥️ Open in Default App',
+      '📂 在文件夹中定位': '📂 Reveal in Explorer',
+      '✕ 关闭': '✕ Close',
+      '🪟 弹出窗口确认选项': '🪟 Open Confirmation Modal',
+      '✅ 确认选择并继续': '✅ Confirm & Continue',
+      '✅ 确认我的选择并继续执行': '✅ Confirm Choice & Continue',
+      '⚡ 按推荐项自动继续': '⚡ Continue with Recommended',
+      '👁️ 先看上下文': '👁️ View Context First',
+      '暂收起弹窗': 'Minimize Modal',
+      '🔼 收起长文': '🔼 Collapse'
+    };
+
+    const ZH_EN_PATTERNS = [
+      [/^Codex 在线 \((\d+) 模型\)$/, 'Codex Online ($1 Models)'],
+      [/^Antigravity 在线 \((\d+) 模型族\)$/, 'Antigravity Online ($1 Families)'],
+      [/^当前项目活动现场: (\d+) · 在岗忙碌成员: (\d+) · 历史总归档: (\d+)$/, 'Active in Project: $1 · Working Agents: $2 · Total History: $3'],
+      [/^(\d+) 人在岗$/, '$1 Working'],
+      [/^🪑 点选入席成员（点击下方头像入座\/离席，已入席 (\d+) 人）$/, '🪑 Click Avatars to Seat/Unseat Roundtable Specialists ($1 Seated)'],
+      [/^🟢 圆桌实时共享群聊议事厅（(\d+) 轮交锋 \+ 8000字无损上下文 \+ 随时 @队友 互助）$/, '🟢 Live Shared Roundtable Chamber ($1 Rounds + 8,000-char Lossless Context + @Peer Consult)'],
+      [/^⚡ 第 1 秒全员直接并行立论 ➔ (\d+) 人独立调研 ➔ (.*)主持人汇总拍板交付$/, '⚡ Instant Parallel Proposals ($1 Agents) ➔ Cross-@Critique ➔ Host Final Synthesis'],
+      [/^主持开场定调 ➔ (\d+) 人独立调研 ➔ (.*)主持人汇总拍板交付$/, 'Host Framing ➔ $1 Parallel Proposals ➔ Cross-@Critique ➔ Host Final Synthesis'],
+      [/^🎉 圆桌共识已达成 · 主持终稿已签发$/, '🎉 Roundtable Consensus Reached · Final Synthesis Signed Off'],
+      [/^🎙️ 当前议程：(.+)$/, '🎙️ Current Phase: $1'],
+      [/^💬 群聊 \((\d+)\)$/, '💬 Chat ($1)'],
+      [/^💬 团队实时交流与 @队友 协商群聊 \((\d+) 条发言\)$/, '💬 Live Team Group Chat & @Peer Consultations ($1 messages)'],
+      [/^📄 最终汇总交付 \/ 当前主输出（共 (\d+) 字）$/, '📄 Final Synthesis / Primary Deliverable ($1 chars)'],
+      [/^🔽 展开完整发言 \(共 (\d+) 字\)$/, '🔽 Expand Full Message ($1 chars)'],
+      [/^🙋 @(.+) 请求协助$/, '🙋 Asking @$1'],
+      [/^💡 回复 @(.+)$/, '💡 Replying to @$1'],
+      [/^👉 点名 @(.+)$/, '👉 @Mentioned $1'],
+      [/^🔍 独立审查意见$/, '🔍 Independent Review'],
+      [/^📦 阶段\/终稿交付$/, '📦 Deliverable'],
+      [/^第 (\d+) 阶段$/, 'Stage $1'],
+      [/^⚡ (\d+) 人并行$/, '⚡ $1 Parallel'],
+      [/^⚡ (\d+) 工位并行$/, '⚡ $1 Parallel'],
+      [/^工位 (\d+\.\d+)$/, 'Station $1'],
+      [/^✅ 直接采纳已生成的 (\d+) 字成果$/, '✅ Adopt $1-char Streamed Output'],
+      [/^🔄 开启干净新会话重跑此步$/, '🔄 Retry Step in Clean Session'],
+      [/^🔀 换其他成员接手此步$/, '🔀 Reassign Step to Peer']
+    ];
+
+    const ZH_EN_PLACEHOLDERS = {
+      '直接向团队交代任务目标（执行过程中所有参会 Agent 共享实时群聊，支持互相 @提问核查，你也可随时插话指导）...': 'Describe your goal for the team (agents share a live group chat, can @consult teammates mid-step, and you can interject anytime)...',
+      '随时向团队群聊补充要求，或点名 @某位成员 追问/核查（按 Enter 直接发送）...': 'Interject into the live group chat or @mention a specialist (Press Enter to send)...',
+      '搜索任务标题或目标...': 'Search task title or goal...',
+      '自动提炼任务标题': 'Auto-generated if left blank',
+      '可选：给该工位的专属分工叮嘱...': 'Optional instructions for this station...',
+      '或直接填写你的自定义方案 / 补充说明（可选）...': 'Or enter a custom answer / note (optional)...',
+      '整体补充叮嘱（可选）...': 'Global note / additional instructions (optional)...'
+    };
+
+    function translateZhStr(s) {
+      if (!s) return s;
+      if (ZH_EN_EXACT[s]) return ZH_EN_EXACT[s];
+      const trimmed = s.trim();
+      if (ZH_EN_EXACT[trimmed]) {
+        return s.replace(trimmed, ZH_EN_EXACT[trimmed]);
+      }
+      for (const [re, rep] of ZH_EN_PATTERNS) {
+        if (re.test(trimmed)) return trimmed.replace(re, rep);
+      }
+      return s;
+    }
+
+    function applyBilingualDom(root = document.body) {
+      const lBtn = document.getElementById('lang-toggle-btn');
+      if (lBtn) lBtn.textContent = LANG === 'en' ? '🌐 中文' : '🌐 English';
+
+      const skipSelector = '.md-body, .src-viewer, pre, code, script, style, textarea';
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      let node;
+      while ((node = walker.nextNode())) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest(skipSelector) || parent.id === 'lang-toggle-btn') continue;
+        if (node._origZh === undefined) {
+          node._origZh = node.nodeValue;
+        }
+        node.nodeValue = LANG === 'en' ? translateZhStr(node._origZh) : node._origZh;
+      }
+
+      root.querySelectorAll('input[placeholder], textarea[placeholder]').forEach(el => {
+        if (el._origPh === undefined) el._origPh = el.getAttribute('placeholder') || '';
+        el.setAttribute('placeholder', LANG === 'en' ? (ZH_EN_PLACEHOLDERS[el._origPh] || el._origPh) : el._origPh);
+      });
+    }
+
+    function toggleLanguage() {
+      LANG = LANG === 'en' ? 'zh' : 'en';
+      localStorage.setItem('roundtable_lang', LANG);
+      syncQPopupToggleBtn();
+      renderComposerStudio();
+      if (STATE) renderAll(STATE);
+      else applyBilingualDom(document.body);
+      toast(LANG === 'en' ? 'Switched to English UI (Bilingual Mode)' : '已切换为中文界面（双语模式）');
+    }
+
+    function safeSliceMarkdown(rawText, maxLen = 680) {
+      if (!rawText || rawText.length <= maxLen) return rawText;
+      let cut = rawText.lastIndexOf('\n', maxLen);
+      if (cut < maxLen * 0.55) cut = maxLen;
+      // Avoid slicing right inside a [label](url) markdown link
+      const tail = rawText.slice(Math.max(0, cut - 220), cut);
+      const lastOpen = tail.lastIndexOf('[');
+      const lastClose = tail.lastIndexOf(')');
+      if (lastOpen > lastClose) {
+        const closeAfter = rawText.indexOf(')', cut);
+        if (closeAfter !== -1 && closeAfter - cut < 260) cut = closeAfter + 1;
+      }
+      return rawText.slice(0, cut);
+    }
+
+    function formatInlineMd(escapedLine) {
+      return escapedLine
+        .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+        .replace(/\\text\{([^}]*)\}/g, '$1')
+        .replace(/\\ge\b/g, '≥')
+        .replace(/\\le\b/g, '≤')
+        .replace(/\$([^$\n]{1,80})\$/g, '$1')
+        .replace(/\[([^\]]+)\]\(((?:[^()\n]+|\([^()\n]*\))+)\)/g, (m, lbl, href) => {
+          const cleanHref = href.trim();
+          const icon = /^https?:\/\//i.test(cleanHref) ? '🌐' : '📎';
+          return `<a href="#open-link" class="ans-link" data-ans-link="${cleanHref}" title="点击查看真实内容或调用系统软件打开">${icon} ${lbl}</a>`;
+        })
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    }
+
+    function renderLiteMarkdown(rawText) {
+      const src = String(rawText ?? '');
+      if (!src.trim()) return '';
+      const lines = src.replace(/\r\n/g, '\n').split('\n');
+      const out = [];
+      let inCode = false;
+      let codeBuf = [];
+      let tableBuf = [];
+      let listBuf = [];
+
+      const flushList = () => {
+        if (listBuf.length) {
+          out.push('<ul>' + listBuf.map(x => `<li>${x}</li>`).join('') + '</ul>');
+          listBuf = [];
+        }
+      };
+      const flushTable = () => {
+        if (!tableBuf.length) return;
+        const rows = tableBuf.map(r => r.replace(/^\||\|$/g, '').split('|').map(c => formatInlineMd(esc(c.trim()))));
+        tableBuf = [];
+        if (rows.length >= 2 && rows[1].every(c => /^[-:\s]+$/.test(c))) {
+          const head = '<tr>' + rows[0].map(c => `<th>${c}</th>`).join('') + '</tr>';
+          const body = rows.slice(2).map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
+          out.push(`<div class="md-table-wrap"><table class="md-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`);
+        } else {
+          out.push(rows.map(r => `<p>${r.join(' | ')}</p>`).join(''));
+        }
+      };
+
+      for (const line of lines) {
+        if (line.trim().startsWith('```')) {
+          flushList(); flushTable();
+          if (!inCode) { inCode = true; codeBuf = []; }
+          else { out.push(`<pre><code>${esc(codeBuf.join('\n'))}</code></pre>`); inCode = false; }
+          continue;
+        }
+        if (inCode) { codeBuf.push(line); continue; }
+
+        if (/^\s*\|.+\|\s*$/.test(line)) {
+          flushList();
+          tableBuf.push(line.trim());
+          continue;
+        } else {
+          flushTable();
+        }
+
+        const hm = line.match(/^(#{1,4})\s+(.+)$/);
+        if (hm) {
+          flushList();
+          const lvl = hm[1].length;
+          out.push(`<h${lvl}>${formatInlineMd(esc(hm[2]))}</h${lvl}>`);
+          continue;
+        }
+        const lm = line.match(/^\s*[-*]\s+(.+)$/);
+        if (lm) {
+          listBuf.push(formatInlineMd(esc(lm[1])));
+          continue;
+        } else {
+          flushList();
+        }
+        if (!line.trim()) continue;
+        out.push(`<p>${formatInlineMd(esc(line))}</p>`);
+      }
+      if (inCode) out.push(`<pre><code>${esc(codeBuf.join('\n'))}</code></pre>`);
+      flushList(); flushTable();
+      return `<div class="md-body">${out.join('')}</div>`;
+    }
+
+    function memberEmoji(id, member) {
+      if (id === 'user') return '👤';
+      const role = member?.role || '';
+      if (role.includes('coordinator') || role.includes('chief')) return '👑';
+      if (role.includes('review')) return '🔍';
+      if (role.includes('doc')) return '📚';
+      if ((member?.model || '').includes('flash')) return '⚡';
+      if (member?.client === 'antigravity') return '🧠';
+      return '🛠️';
+    }
+
+    function avatarHtml(id, member, extraCls = '') {
+      if (id === 'user') {
+        return `<div class="avatar av-human ${extraCls}">👤</div>`;
+      }
+      const cCls = member?.client === 'antigravity' ? 'av-agy' : 'av-codex';
+      return `<div class="avatar ${cCls} ${extraCls}">${memberEmoji(id, member)}</div>`;
+    }
+
+    function modeMetaBadge(mode) {
+      const m = {
+        roundtable: ['🪑 圆桌议事厅', 'b-ok'],
+        chief_dispatch: ['🎖️ 主帅动态点将', 'b-gold'],
+        custom_dag: ['🧱 多轨搭积木流水线', 'b-run'],
+        coordinator_auto: ['🛡️ 实施+审查闭环', 'b-run'],
+        single_member: ['⚡ 专家一对一专办', 'b-agy']
+      };
+      const [lbl, cls] = m[mode] || [mode || '标准协作', 'b-muted'];
+      return `<span class="badge ${cls}">${esc(lbl)}</span>`;
+    }
+
+    function statusBadge(st) {
+      const m = {
+        succeeded: ['✅ 已完成', 'b-ok'],
+        running: ['⟳ 协作进行中', 'b-run'],
+        working: ['🎙️ 在岗执行中', 'b-run'],
+        idle: ['空闲待命', 'b-ok'],
+        queued: ['⏳ 队列待发', 'b-warn'],
+        pending: ['待上场', 'b-muted'],
+        awaiting_user: ['🙋 请你拍板选择', 'b-agy'],
+        needs_ruling: ['⚖️ 待总管裁决', 'b-warn'],
+        needs_verification: ['⚠️ 待核对恢复', 'b-warn'],
+        blocked: ['🚫 策略受阻', 'b-err'],
+        aborted: ['⏹️ 已中止', 'b-warn'],
+        failed: ['❌ 执行异常', 'b-err'],
+        awaiting_coordinator: ['待拆解', 'b-agy']
+      };
+      const [lbl, cls] = m[st] || [st || '未知', 'b-muted'];
+      return `<span class="badge ${cls}">${esc(lbl)}</span>`;
+    }
+
+    function clientBadge(c) {
+      if (c === 'human') return `<span class="badge b-run">负责人</span>`;
+      return c === 'antigravity'
+        ? `<span class="badge b-agy">Antigravity</span>`
+        : `<span class="badge b-codex">Codex</span>`;
+    }
+
+    async function api(method, path, body) {
+      const opts = { method, headers: {} };
+      if (body !== undefined) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(path, opts);
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || `HTTP ${r.status}`);
+      return d;
+    }
+
+    function switchView(v) {
+      CURRENT_VIEW = v;
+      ['workspace', 'history', 'members'].forEach(k => {
+        document.getElementById('nav-' + k).classList.toggle('active', k === v);
+        document.getElementById('view-' + k).classList.toggle('hidden', k !== v);
+      });
+    }
+
+    function getRunnableIds(st = STATE) {
+      const ms = st?.members || {};
+      return Object.keys(ms).filter(id => ['codex', 'antigravity'].includes(ms[id].client));
+    }
+
+    function ensureComposerDefaults(st) {
+      const ids = getRunnableIds(st);
+      if (!ids.length) return;
+
+      // Filter out any deleted members while keeping valid selections
+      CMP.rtParticipants = CMP.rtParticipants.filter(x => ids.includes(x));
+      if (!CMP.initialized || CMP.rtParticipants.length < 2) {
+        const defaults = ['agy_gemini', 'codex_author', 'agy_claude_reviewer'].filter(x => ids.includes(x));
+        CMP.rtParticipants = defaults.length >= 2 ? defaults : ids.slice(0, Math.min(3, ids.length));
+      }
+      if (!CMP.rtHost || !ids.includes(CMP.rtHost)) {
+        CMP.rtHost = CMP.rtParticipants[0] || ids[0];
+      }
+      if (!CMP.chiefId || !ids.includes(CMP.chiefId)) {
+        CMP.chiefId = ids.includes('agy_gemini') ? 'agy_gemini' : ids[0];
+      }
+      if (!CMP.soloId || !ids.includes(CMP.soloId)) {
+        CMP.soloId = ids.includes('codex_author') ? 'codex_author' : ids[0];
+      }
+      if (!CMP.dagStages.length) {
+        applyDagPreset('parallel_research_review', false);
+      } else {
+        CMP.dagStages.forEach(stg => stg.forEach(n => {
+          if (!ids.includes(n.member_id)) n.member_id = ids[0];
+        }));
+      }
+      CMP.initialized = true;
+    }
+
+    // ==================== COMPOSER 4-MODE INTERACTIVE STUDIO ====================
+
+    function selectComposerMode(mode) {
+      CMP.mode = mode;
+      document.querySelectorAll('#mode-cards .mode-card').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-mode') === mode);
+      });
+      const btnLbl = {
+        roundtable: '🪑 召集圆桌会议 · 立即开议',
+        chief_dispatch: '🎖️ 升帐授印 · 由主帅点将开干',
+        custom_dag: '🧱 启动多轨流水线 · 按阶段推进',
+        single_member: '⚡ 直连专家 · 立即开干'
+      }[mode] || '🚀 开始执行';
+      document.getElementById('btn-launch-task').textContent = btnLbl;
+      renderComposerStudio();
+    }
+
+    function toggleRtParticipant(mid) {
+      const idx = CMP.rtParticipants.indexOf(mid);
+      if (idx >= 0) {
+        if (CMP.rtParticipants.length <= 2) {
+          toast('圆桌协作至少需要保留 2 位参会成员', true);
+          return;
+        }
+        CMP.rtParticipants.splice(idx, 1);
+        if (CMP.rtHost === mid) CMP.rtHost = CMP.rtParticipants[0];
+      } else {
+        CMP.rtParticipants.push(mid);
+      }
+      renderComposerStudio();
+    }
+
+    function applyDagPreset(presetName, showMsg = true) {
+      const ids = getRunnableIds();
+      const pick = (pref, fallbackIdx = 0) => ids.includes(pref) ? pref : (ids[fallbackIdx % ids.length] || 'codex_author');
+      if (presetName === 'parallel_research_review') {
+        CMP.dagStages = [
+          [
+            { member_id: pick('codex_author', 0), step_type: 'discussion', prompt: '从代码实现与工程落地角度梳理方案与潜在风险' },
+            { member_id: pick('agy_gemini', 1), step_type: 'discussion', prompt: '从全局架构与边界完整性角度独立排查问题' }
+          ],
+          [
+            { member_id: pick('codex_author_2', 0), step_type: 'synthesis', prompt: '综合第一阶段两位队友的并行调研结论，完成整合方案或实施交付' }
+          ],
+          [
+            { member_id: pick('agy_claude_reviewer', 2), step_type: 'review', prompt: '严格独立复核上一阶段成果，不达标则打回修复' }
+          ]
+        ];
+      } else if (presetName === 'impl_review_loop') {
+        CMP.dagStages = [
+          [
+            { member_id: pick('codex_author', 0), step_type: 'execution', prompt: '' }
+          ],
+          [
+            { member_id: pick('agy_claude_reviewer', 1), step_type: 'review', prompt: '' }
+          ]
+        ];
+      } else if (presetName === 'impl_doc_parallel') {
+        CMP.dagStages = [
+          [
+            { member_id: pick('codex_author', 0), step_type: 'execution', prompt: '负责核心实施与验证分析' }
+          ],
+          [
+            { member_id: pick('agy_claude_reviewer', 1), step_type: 'discussion', prompt: '独立核查技术严密性与遗漏点' },
+            { member_id: pick('codex_documenter', 2), step_type: 'synthesis', prompt: '同步整理清晰的结构化交付汇报与使用说明' }
+          ]
+        ];
+      }
+      if (showMsg) toast('已载入流水线积木预设，你可继续自由增删阶段或并行工位');
+      renderComposerStudio();
+    }
+
+    function addDagStage() {
+      const ids = getRunnableIds();
+      if (CMP.dagStages.length >= 6) { toast('最多支持 6 个连续阶段', true); return; }
+      CMP.dagStages.push([{ member_id: ids[0] || 'codex_author', step_type: 'execution', prompt: '' }]);
+      renderComposerStudio();
+    }
+
+    function removeDagStage(sIdx) {
+      if (CMP.dagStages.length <= 1) { toast('至少保留 1 个阶段', true); return; }
+      CMP.dagStages.splice(sIdx, 1);
+      renderComposerStudio();
+    }
+
+    function addDagParallelNode(sIdx) {
+      const ids = getRunnableIds();
+      const stage = CMP.dagStages[sIdx];
+      if (!stage || stage.length >= 4) { toast('同一阶段最多放置 4 个并行工位', true); return; }
+      // Default to discussion/execution; if stage had a single 'review' node, switch new parallel node to discussion
+      const used = stage.map(x => x.member_id);
+      const nextM = ids.find(x => !used.includes(x)) || ids[0];
+      stage.push({ member_id: nextM, step_type: 'discussion', prompt: '' });
+      renderComposerStudio();
+    }
+
+    function removeDagNode(sIdx, nIdx) {
+      const stage = CMP.dagStages[sIdx];
+      if (!stage) return;
+      stage.splice(nIdx, 1);
+      if (stage.length === 0) {
+        if (CMP.dagStages.length > 1) CMP.dagStages.splice(sIdx, 1);
+        else stage.push({ member_id: getRunnableIds()[0] || 'codex_author', step_type: 'execution', prompt: '' });
+      }
+      renderComposerStudio();
+    }
+
+    function updateDagNode(sIdx, nIdx, field, val) {
+      if (CMP.dagStages[sIdx] && CMP.dagStages[sIdx][nIdx]) {
+        CMP.dagStages[sIdx][nIdx][field] = val;
+        if (field !== 'prompt') renderComposerStudio();
+      }
+    }
+
+    function renderComposerStudio() {
+      const box = document.getElementById('composer-mode-studio');
+      if (!box || !STATE) return;
+      ensureComposerDefaults(STATE);
+      const ms = STATE.members || {};
+      const roles = STATE.roles || {};
+      const ids = getRunnableIds(STATE);
+
+      const memberOptions = (selectedId) => ids.map(id => {
+        const m = ms[id];
+        const tag = m.client === 'antigravity' ? 'AGY' : 'Codex';
+        return `<option value="${esc(id)}" ${id === selectedId ? 'selected' : ''}>[${tag}] ${esc(m.name || id)} (${esc(m.model)}/${esc(m.reasoning_effort)})</option>`;
+      }).join('');
+
+      if (CMP.mode === 'roundtable') {
+        const chips = ids.map(id => {
+          const m = ms[id];
+          const sel = CMP.rtParticipants.includes(id);
+          return `
+            <div class="seat-chip ${sel ? 'selected' : ''}" onclick="toggleRtParticipant('${esc(id)}')">
+              ${avatarHtml(id, m)}
+              <div>
+                <div style="font-weight:700; line-height:1.2;">${sel ? '✓ ' : ''}${esc(m.name || id)}</div>
+                <div style="font-size:10px; color:var(--muted);">${esc(m.client === 'antigravity' ? 'AGY' : 'Codex')} · ${esc(m.model)}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        const hostSeats = CMP.rtParticipants.includes(CMP.rtHost) ? CMP.rtParticipants : [CMP.rtHost, ...CMP.rtParticipants];
+        const seatsPreview = hostSeats.map(id => {
+          const m = ms[id] || {};
+          const isHost = id === CMP.rtHost;
+          return `
+            <div class="rt-seat-card ${isHost ? 'is-host' : ''}">
+              ${avatarHtml(id, m)}
+              <div style="min-width:0;">
+                <div style="font-weight:700; font-size:12px;">
+                  ${isHost ? '<span class="badge b-gold">👑 主持</span> ' : ''}${esc(m.name || id)}
+                </div>
+                <div style="font-size:11px; color:var(--muted);">${esc(roles[m.role]?.name || '专家')} · ${esc(m.model)}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        box.innerHTML = `
+          <div class="scene-box scene-roundtable">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+              <div>
+                <strong style="color:#6ee7b7;">🪑 点选入席成员（点击下方头像入座/离席，已入席 ${CMP.rtParticipants.length} 人）</strong>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:5px;">
+                  <span style="font-size:11px; color:var(--muted);">👑 圆桌主持人:</span>
+                  <select style="width:auto;" onchange="CMP.rtHost=this.value; renderComposerStudio();">${memberOptions(CMP.rtHost)}</select>
+                </div>
+                <div style="display:flex; align-items:center; gap:5px;">
+                  <span style="font-size:11px; color:var(--muted);">🔄 交叉讨论轮数:</span>
+                  <select style="width:auto;" onchange="CMP.rtRounds=parseInt(this.value,10); renderComposerStudio();">
+                    <option value="1" ${CMP.rtRounds === 1 ? 'selected' : ''}>1 轮独立立论 + 主持定稿（快速）</option>
+                    <option value="2" ${CMP.rtRounds === 2 ? 'selected' : ''}>2 轮（立论 + 交叉互评质询 + 定稿）</option>
+                    <option value="3" ${CMP.rtRounds === 3 ? 'selected' : ''}>3 轮深度博弈收敛 + 定稿</option>
+                  </select>
+                </div>
+                <label style="margin:0; display:inline-flex; align-items:center; gap:4px; color:#a7f3d0; cursor:pointer; font-size:11.5px;">
+                  <input type="checkbox" ${!CMP.rtHostOpening ? 'checked' : ''} onchange="CMP.rtHostOpening=!this.checked; renderComposerStudio();">
+                  ⚡ 首轮直接并行开跑（省去主持开场等待）
+                </label>
+              </div>
+            </div>
+            <div class="member-seat-picks">${chips}</div>
+            <div class="rt-arena" style="margin-top:10px;">
+              <div class="rt-table-ring" style="min-height:92px; padding:12px 20px;">
+                <div style="font-weight:800; color:#a7f3d0; font-size:13px;">🟢 圆桌实时共享群聊议事厅（${CMP.rtRounds} 轮交锋 + 8000字无损上下文 + 随时 @队友 互助）</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:3px;">${CMP.rtHostOpening ? '主持开场定调 ➔ ' : '⚡ 第 1 秒全员直接并行立论 ➔ '}${CMP.rtParticipants.length} 人独立调研 ➔ ${CMP.rtRounds > 1 ? '全员阅读完整群聊互相 @点名质询补充 ➔ ' : ''}主持人汇总拍板交付</div>
+              </div>
+              <div class="rt-seats-grid">${seatsPreview}</div>
+            </div>
+          </div>
+        `;
+      } else if (CMP.mode === 'chief_dispatch') {
+        const chief = ms[CMP.chiefId] || {};
+        const bench = ids.filter(x => x !== CMP.chiefId).map(id => {
+          const m = ms[id];
+          return `
+            <div class="squad-card">
+              ${avatarHtml(id, m)}
+              <div>
+                <div style="font-weight:700; font-size:12px;">${esc(m.name || id)}</div>
+                <div style="font-size:11px; color:var(--muted);">${esc(roles[m.role]?.name || m.role)} · ${esc(m.client === 'antigravity' ? 'AGY' : 'Codex')}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        box.innerHTML = `
+          <div class="scene-box scene-chief">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <strong style="color:#fcd34d;">🎖️ 选择坐镇主帅（主帅将自动探查项目目录，并从下方花名册按需点选精兵强将派单）</strong>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-size:11px; color:var(--muted);">坐镇主帅:</span>
+                <select style="width:auto;" onchange="CMP.chiefId=this.value; renderComposerStudio();">${memberOptions(CMP.chiefId)}</select>
+              </div>
+            </div>
+            <div class="chief-podium">
+              <div style="display:flex; align-items:center; gap:10px;">
+                ${avatarHtml(CMP.chiefId, chief)}
+                <div>
+                  <div style="font-weight:800; font-size:13px; color:#fef3c7;">🎖️ 主帅：${esc(chief.name || CMP.chiefId)} ${clientBadge(chief.client)}</div>
+                  <div style="font-size:11px; color:#fde68a;">第 1 步先勘察项目制定《点将令》 ➔ 自动编排并行/串行/独立审查 ➔ 终局汇总签发</div>
+                </div>
+              </div>
+            </div>
+            <div class="chief-connector">⇣ 帐下听令花名册（共 ${ids.length - 1} 名专家待命，主帅按需抽调，无需全员陪跑） ⇣</div>
+            <div class="squad-row">${bench}</div>
+          </div>
+        `;
+      } else if (CMP.mode === 'custom_dag') {
+        const colsHtml = CMP.dagStages.map((stage, sIdx) => {
+          const isParallel = stage.length > 1;
+          const nodesHtml = stage.map((node, nIdx) => {
+            const m = ms[node.member_id] || {};
+            return `
+              <div class="workstation-node">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    ${avatarHtml(node.member_id, m)}
+                    <strong style="font-size:11px;">工位 ${sIdx + 1}.${nIdx + 1}</strong>
+                  </div>
+                  <button class="btn btn-err btn-sm" style="padding:2px 6px;" onclick="removeDagNode(${sIdx}, ${nIdx})" title="移除此工位">✕</button>
+                </div>
+                <select style="margin-bottom:5px;" onchange="updateDagNode(${sIdx}, ${nIdx}, 'member_id', this.value)">
+                  ${memberOptions(node.member_id)}
+                </select>
+                <select style="margin-bottom:5px;" onchange="updateDagNode(${sIdx}, ${nIdx}, 'step_type', this.value)">
+                  <option value="execution" ${node.step_type === 'execution' ? 'selected' : ''}>🛠️ 执行 / 实施交付</option>
+                  <option value="discussion" ${node.step_type === 'discussion' ? 'selected' : ''}>💬 独立调研 / 方案研判 (只读)</option>
+                  <option value="review" ${node.step_type === 'review' ? 'selected' : ''}>🔍 独立审查关卡 (不达标可打回)</option>
+                  <option value="synthesis" ${node.step_type === 'synthesis' ? 'selected' : ''}>📝 吸收前序成果汇总定稿</option>
+                </select>
+                <input type="text" placeholder="可选：给该工位的专属分工叮嘱..." value="${esc(node.prompt || '')}"
+                  oninput="updateDagNode(${sIdx}, ${nIdx}, 'prompt', this.value)">
+              </div>
+            `;
+          }).join('');
+
+          return `
+            ${sIdx > 0 ? '<div class="stage-arrow">➔</div>' : ''}
+            <div class="stage-col">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <strong style="font-size:12px; color:var(--accent);">第 ${sIdx + 1} 阶段</strong>
+                  <span class="badge ${isParallel ? 'b-ok' : 'b-muted'}">${isParallel ? `⚡ ${stage.length} 人并行` : '单站串行'}</span>
+                </div>
+                <button class="btn btn-sec btn-sm" style="padding:2px 6px;" onclick="removeDagStage(${sIdx})" title="删除整列阶段">删阶段</button>
+              </div>
+              ${nodesHtml}
+              <button class="btn btn-sec btn-sm" onclick="addDagParallelNode(${sIdx})">➕ 同阶段加并行工位</button>
+            </div>
+          `;
+        }).join('');
+
+        box.innerHTML = `
+          <div class="scene-box scene-dag">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:9px;">
+              <strong style="color:#93c5fd;">🧱 自由搭积木流水线（同列上下工位同时并行，跨阶段从左向右自动交接）</strong>
+              <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                <button class="btn btn-sec btn-sm" onclick="applyDagPreset('parallel_research_review')">预设1: 双人并行调研➔汇总➔审查</button>
+                <button class="btn btn-sec btn-sm" onclick="applyDagPreset('impl_review_loop')">预设2: 实施➔独立审查闭环</button>
+                <button class="btn btn-sec btn-sm" onclick="applyDagPreset('impl_doc_parallel')">预设3: 实施➔审查+文档并行</button>
+                <button class="btn btn-sm" onclick="addDagStage()">➕ 新增下一阶段</button>
+              </div>
+            </div>
+            <div class="stages-track">${colsHtml}</div>
+          </div>
+        `;
+      } else {
+        const solo = ms[CMP.soloId] || {};
+        box.innerHTML = `
+          <div class="scene-box scene-solo">
+            <div class="solo-desk">
+              <div style="display:flex; align-items:center; gap:9px;">
+                ${avatarHtml('user', null)}
+                <div>
+                  <div style="font-weight:700;">项目负责人 (你)</div>
+                  <div style="font-size:11px; color:var(--muted);">直接下达指令 / 随时追问</div>
+                </div>
+              </div>
+              <div style="font-size:20px; color:var(--agy); font-weight:800;">⇄</div>
+              <div style="display:flex; align-items:center; gap:10px; flex:1; max-width:440px;">
+                ${avatarHtml(CMP.soloId, solo)}
+                <div style="flex:1;">
+                  <label style="margin-bottom:2px;">选择一对一专办专家（中途仍可随时 @其他队友 求助）</label>
+                  <select onchange="CMP.soloId=this.value; renderComposerStudio();">${memberOptions(CMP.soloId)}</select>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      applyBilingualDom(box);
+    }
+
+    // ==================== CAPABILITIES & PROJECT PICKER ====================
+
+    async function loadCapabilities(refresh = false) {
+      try {
+        CAPS = await api('GET', `/api/models?refresh=${refresh ? 1 : 0}`);
+        const cCli = CAPS.clients?.codex?.cli || {};
+        const aCli = CAPS.clients?.antigravity?.cli || {};
+
+        const cPill = document.getElementById('codex-cli-pill');
+        cPill.className = 'badge ' + (cCli.logged_in ? 'b-codex' : 'b-warn');
+        cPill.textContent = cCli.logged_in ? `Codex 在线 (${(CAPS.clients?.codex?.models||[]).length} 模型)` : 'Codex 待登录';
+
+        const aPill = document.getElementById('agy-cli-pill');
+        aPill.className = 'badge ' + (aCli.logged_in ? 'b-agy' : 'b-warn');
+        aPill.textContent = aCli.logged_in ? `Antigravity 在线 (${(CAPS.clients?.antigravity?.models||[]).length} 模型族)` : 'Antigravity 待登录';
+
+        populateClientModels('add-m-client', 'add-m-model', 'add-m-effort');
+        if (refresh) toast('已重新探测 Codex 与 Antigravity 官方模型目录');
+      } catch (e) {
+        toast('探测模型失败: ' + e.message, true);
+      }
+    }
+
+    function populateClientModels(clientSelId, modelSelId, effortSelId, preferredModel, preferredEffort) {
+      const cSel = document.getElementById(clientSelId);
+      const mSel = document.getElementById(modelSelId);
+      if (!cSel || !mSel) return;
+      const client = cSel.value;
+      const models = (CAPS.clients?.[client]?.models) || [];
+      mSel.innerHTML = models.map(m =>
+        `<option value="${esc(m.slug)}" ${m.slug === preferredModel ? 'selected' : ''}>${esc(m.display_name)}</option>`
+      ).join('') || `<option value="client_default">默认模型</option>`;
+      syncClientEfforts(clientSelId, modelSelId, effortSelId, preferredEffort);
+    }
+
+    function syncClientEfforts(clientSelId, modelSelId, effortSelId, preferredEffort) {
+      const client = document.getElementById(clientSelId)?.value;
+      const slug = document.getElementById(modelSelId)?.value;
+      const eSel = document.getElementById(effortSelId);
+      if (!eSel) return;
+      const models = (CAPS.clients?.[client]?.models) || [];
+      const found = models.find(x => x.slug === slug);
+      const efforts = found?.supported_reasoning_efforts?.length ? found.supported_reasoning_efforts : ['medium'];
+      const chosen = (preferredEffort && efforts.includes(preferredEffort)) ? preferredEffort : (found?.default_reasoning_effort || efforts[0]);
+      eSel.innerHTML = efforts.map(ef =>
+        `<option value="${esc(ef)}" ${ef === chosen ? 'selected' : ''}>${esc(ef)}</option>`
+      ).join('');
+    }
+
+    async function loadProjects() {
+      try {
+        PROJECTS = await api('GET', '/api/projects');
+        renderProjectDropdown();
+      } catch (e) { console.error(e); }
+    }
+
+    function renderProjectDropdown() {
+      const sel = document.getElementById('project-select');
+      const curPath = STATE?.binding?.project_path || PROJECTS.current_project_path || '';
+      const curNorm = normPath(curPath);
+      let matched = false;
+      let html = '';
+
+      for (const grp of (PROJECTS.groups || [])) {
+        const opts = (grp.items || []).map(it => {
+          const isCur = normPath(it.path) === curNorm;
+          if (isCur) matched = true;
+          return `<option value="${esc(it.path)}" ${isCur ? 'selected' : ''}>${esc(it.name)}  —  ${esc(it.path)}</option>`;
+        }).join('');
+        if (opts) html += `<optgroup label="${esc(grp.group)}">${opts}</optgroup>`;
+      }
+      if (!matched && curPath) {
+        html = `<optgroup label="📍 当前选定目录"><option value="${esc(curPath)}" selected>${esc(curPath)}</option></optgroup>` + html;
+      }
+      sel.innerHTML = html;
+    }
+
+    async function onQuickProjectSelect(targetPath) {
+      if (!targetPath) return;
+      try {
+        await api('POST', '/api/projects/switch', { project_path: targetPath });
+        toast(`已切换工作项目至: ${targetPath}`);
+        await loadProjects();
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function pickNativeFolder() {
+      toast('正在打开 Windows 系统文件夹选择窗口...');
+      try {
+        const r = await api('POST', '/api/fs/pick_native', {});
+        if (!r.cancelled && r.path) {
+          toast(`已切换到所选目录: ${r.path}`);
+          await loadProjects();
+          await refreshState(true);
+        }
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function openCurrentFolder() {
+      try { await api('POST', '/api/fs/open_explorer', {}); } catch (e) { toast(e.message, true); }
+    }
+
+    async function openFolderBrowserModal(startPath) {
+      const initP = startPath || STATE?.binding?.project_path || '';
+      try {
+        const data = await api('GET', `/api/fs/browse?path=${encodeURIComponent(initP)}`);
+        renderFolderBrowserModal(data);
+      } catch (e) {
+        const fallback = await api('GET', `/api/fs/browse`);
+        renderFolderBrowserModal(fallback);
+      }
+    }
+
+    function renderFolderBrowserModal(data) {
+      const driveBtns = (data.drives || []).map(d =>
+        `<button class="btn btn-sec btn-sm" onclick="openFolderBrowserModal('${esc(d.replace(/\\/g, '\\\\'))}')">${esc(d)}</button>`
+      ).join(' ');
+
+      const rows = [];
+      if (data.parent_path) {
+        rows.push(`
+          <div class="fs-item" onclick="openFolderBrowserModal('${esc(data.parent_path.replace(/\\/g, '\\\\'))}')">
+            <span>⬆️ <strong>.. (返回上级目录)</strong></span>
+            <span style="color:var(--muted); font-size:11px;">上级</span>
+          </div>
+        `);
+      }
+      for (const sub of (data.subdirs || [])) {
+        const pJs = esc(sub.path.replace(/\\/g, '\\\\'));
+        rows.push(`
+          <div class="fs-item">
+            <span style="flex:1;" onclick="openFolderBrowserModal('${pJs}')">📁 ${esc(sub.name)}</span>
+            <button class="btn btn-sec btn-sm" onclick="selectFolderFromModal('${pJs}')">选用此目录</button>
+          </div>
+        `);
+      }
+
+      openModal(`
+        <h3 style="margin-top:0;">📂 自由浏览选择项目目录</h3>
+        <div style="margin-bottom:6px; display:flex; gap:5px; flex-wrap:wrap;">
+          <span style="font-size:11px; color:var(--muted); align-self:center;">切换磁盘:</span> ${driveBtns}
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <input type="text" id="mdl-fs-path" value="${esc(data.current_path)}" placeholder="可直接粘贴任意文件夹路径...">
+          <button class="btn btn-sec btn-sm" onclick="openFolderBrowserModal(document.getElementById('mdl-fs-path').value)">跳转</button>
+        </div>
+        <div class="fs-list">${rows.join('') || '<div style="padding:14px; color:var(--muted); text-align:center;">该目录下没有子文件夹，可直接点击下方“选定当前目录”</div>'}</div>
+        <div class="action-bar" style="justify-content:space-between;">
+          <button class="btn" onclick="selectFolderFromModal(document.getElementById('mdl-fs-path').value)">✅ 选定当前目录作为工作项目</button>
+          <button class="btn btn-sec" onclick="closeModal()">关闭</button>
+        </div>
+      `);
+    }
+
+    async function selectFolderFromModal(p) {
+      closeModal();
+      await onQuickProjectSelect(p);
+    }
+
+    // ==================== STATE POLLING & SAFE RENDERING ====================
+
+    function saveOpenDetails() {
+      document.querySelectorAll('details[data-persist-id]').forEach(d => {
+        const id = d.getAttribute('data-persist-id');
+        if (d.open) OPEN_DETAILS.add(id); else OPEN_DETAILS.delete(id);
+      });
+    }
+    function restoreOpenDetails() {
+      document.querySelectorAll('details[data-persist-id]').forEach(d => {
+        if (OPEN_DETAILS.has(d.getAttribute('data-persist-id'))) d.open = true;
+      });
+    }
+
+    let LAST_MEMBER_SIG = '';
+
+    async function refreshState(force = false) {
+      try {
+        const st = await api('GET', '/api/state');
+        STATE = st;
+        const h = JSON.stringify(st) + '|' + HISTORY_SCOPE + '|' + STAGE_TAB;
+        if (force || h !== LAST_HASH) {
+          LAST_HASH = h;
+          renderAll(st);
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    function renderAll(st) {
+      saveOpenDetails();
+      const b = st.binding || {};
+      const curProjPath = b.project_path || '';
+      const curProjNorm = normPath(curProjPath);
+      const curProjName = b.project_name || curProjPath;
+
+      document.getElementById('cur-proj-path').textContent = curProjPath;
+      document.getElementById('composer-proj-name').textContent = curProjName;
+      renderProjectDropdown();
+
+      const pauseBtn = document.getElementById('pause-btn');
+      pauseBtn.textContent = st.paused ? '▶️ 恢复队列派发' : '⏸️ 暂停派发';
+      pauseBtn.className = st.paused ? 'btn btn-warn btn-sm' : 'btn btn-sec btn-sm';
+      document.getElementById('paused-hint').classList.toggle('hidden', !st.paused);
+
+      const runnableIds = getRunnableIds(st);
+      // Only re-render Composer Studio when member config signatures change (never clobber user typing in custom_dag!)
+      const memberSig = JSON.stringify(runnableIds.map(id => [id, st.members[id].name, st.members[id].client, st.members[id].model, st.members[id].reasoning_effort, st.members[id].role]));
+      if (memberSig !== LAST_MEMBER_SIG) {
+        LAST_MEMBER_SIG = memberSig;
+        renderComposerStudio();
+      }
+
+      // Populate role dropdown in Members tab
+      const rSel = document.getElementById('add-m-role');
+      if (rSel) {
+        const prevR = rSel.value;
+        rSel.innerHTML = Object.keys(st.roles || {}).map(rid =>
+          `<option value="${esc(rid)}">${esc(st.roles[rid].name)}</option>`
+        ).join('');
+        if (prevR && st.roles[prevR]) rSel.value = prevR;
+      }
+
+      const allTasks = st.tasks || [];
+      const projUnarchived = allTasks.filter(t => !t.archived && normPath(t.project_path) === curProjNorm);
+      const workingMembers = runnableIds.filter(id => st.members[id].status === 'working').length;
+
+      document.getElementById('cur-proj-stats').textContent =
+        `当前项目活动现场: ${projUnarchived.length} · 在岗忙碌成员: ${workingMembers} · 历史总归档: ${allTasks.length}`;
+
+      const actBadge = document.getElementById('badge-active-count');
+      if (workingMembers > 0) {
+        actBadge.textContent = `${workingMembers} 人在岗`;
+        actBadge.classList.remove('hidden');
+      } else {
+        actBadge.classList.add('hidden');
+      }
+
+      document.getElementById('badge-history-count').textContent = allTasks.length;
+      document.getElementById('badge-member-count').textContent = runnableIds.length;
+
+      renderActiveStage(st, projUnarchived);
+      renderHistoryView();
+      renderMembersView(st);
+      restoreOpenDetails();
+      applyBilingualDom(document.body);
+    }
+
+    // ==================== MODE-ADAPTIVE ANTHROPOMORPHIC ACTIVE STAGE ====================
+
+    function renderAnthropomorphicLiveScene(st, task) {
+      const mode = task.execution_mode || task.dispatch_mode || 'single_member';
+      const ms = st.members || {};
+      const roles = st.roles || {};
+      const steps = task.steps || [];
+      const meta = task.mode_meta || {};
+
+      // Latest snippet per member in this task
+      const latestByMember = {};
+      steps.forEach(s => {
+        const lastAtt = (s.attempts || [])[s.attempts.length - 1];
+        const txt = (s.status === 'running' && lastAtt?.partial_text)
+          ? lastAtt.partial_text
+          : (s.latest_result_text || '');
+        if (txt) latestByMember[s.member_id] = { text: txt, round_label: s.round_label || s.title, status: s.status };
+      });
+      (task.chat_room || []).forEach(cm => {
+        if (cm.sender_id && cm.sender_id !== 'user' && cm.content) {
+          if (!latestByMember[cm.sender_id] || cm.kind === 'mention_reply' || cm.kind === 'mention_ask') {
+            latestByMember[cm.sender_id] = { text: cm.content, round_label: cm.round_label || cm.kind, status: 'chat' };
+          }
+        }
+      });
+
+      if (mode === 'roundtable') {
+        const hostId = meta.host_member_id || steps[0]?.member_id || 'agy_gemini';
+        const parts = meta.participants || [...new Set(steps.map(s => s.member_id))];
+        const orderedSeats = parts.includes(hostId) ? parts : [hostId, ...parts];
+        const curStep = steps.find(s => s.status === 'running') || steps[task.current_step_index || 0] || steps[steps.length - 1];
+        const curPhase = task.status === 'succeeded'
+          ? '🎉 圆桌共识已达成 · 主持终稿已签发'
+          : `🎙️ 当前议程：${curStep?.round_label || curStep?.title || '准备开议'}`;
+        const consultTotal = steps.reduce((acc, s) => acc + (s.consult_count || 0), 0);
+
+        const seatCards = orderedSeats.map(mid => {
+          const m = ms[mid] || { name: mid, client: 'codex', model: '-' };
+          const isHost = mid === hostId;
+          const isSpeaking = m.status === 'working' && (m.current_task_id === task.id || (m.live_activity || '').includes('@'));
+          const runStep = steps.find(s => s.status === 'running' && s.member_id === mid);
+          const runAtt = runStep?.attempts?.[runStep.attempts.length - 1];
+          const snip = latestByMember[mid];
+          const statePill = isSpeaking
+            ? `<span class="badge b-ok">${esc(m.live_activity || '🎙️ 正在发言')}</span> ${liveTimerBadge(runAtt?.started_at)}`
+            : (snip ? `<span class="badge b-muted">✅ 已发言</span>` : `<span class="badge b-muted">👂 倾听待命</span>`);
+          return `
+            <div class="rt-seat-card ${isHost ? 'is-host' : ''} ${isSpeaking ? 'is-speaking' : ''}">
+              ${avatarHtml(mid, m, isSpeaking ? 'speaking' : '')}
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; flex-wrap:wrap;">
+                  <strong style="font-size:12px;">${isHost ? '👑 ' : ''}${esc(m.name || mid)}</strong>
+                  ${statePill}
+                </div>
+                <div style="font-size:10.5px; color:var(--muted); margin-top:2px;">
+                  ${esc(roles[m.role]?.name || '参会专家')} · ${esc(m.client === 'antigravity' ? 'AGY' : 'Codex')}/${esc(m.model)}
+                </div>
+                ${snip?.text ? `<div class="speech-snippet">“${esc(snip.text.slice(0, 68))}${snip.text.length > 68 ? '…' : ''}”</div>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="scene-box scene-roundtable">
+            <div class="rt-arena">
+              <div class="rt-table-ring">
+                <div style="font-size:14px; font-weight:800; color:#6ee7b7;">${esc(curPhase)}</div>
+                <div style="font-size:11.5px; color:#cbd5e1; margin-top:4px;">
+                  参会席位 ${orderedSeats.length} 人 · 设定 ${meta.discussion_rounds || 2} 轮思辨 · 已触发实时 <code>@队友协商</code> ${consultTotal} 次 · 群聊消息 ${(task.chat_room || []).length} 条
+                </div>
+              </div>
+              <div class="rt-seats-grid">${seatCards}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      if (mode === 'chief_dispatch') {
+        const chiefId = meta.chief_member_id || steps[0]?.member_id || 'agy_gemini';
+        const chief = ms[chiefId] || { name: chiefId, client: 'antigravity', model: '-' };
+        const chiefWorking = chief.status === 'working' && chief.current_task_id === task.id;
+        const recruited = meta.recruited_members || [];
+        const rationale = meta.rationale || (steps[0]?.status === 'running' ? '正在勘察当前项目目录并拟定《点将令》...' : '已下发战术分工');
+
+        const workerSteps = steps.slice(1);
+        const squadHtml = workerSteps.length
+          ? workerSteps.map(s => {
+              const m = ms[s.member_id] || { name: s.member_id, client: 'codex' };
+              const isW = s.status === 'running';
+              return `
+                <div class="squad-card recruited ${isW ? 'working' : ''}">
+                  ${avatarHtml(s.member_id, m, isW ? 'speaking' : '')}
+                  <div style="min-width:0; flex:1;">
+                    <div style="display:flex; justify-content:space-between; gap:4px; align-items:center;">
+                      <strong style="font-size:12px;">${esc(m.name || s.member_id)}</strong>
+                      ${statusBadge(s.status)}
+                    </div>
+                    <div style="font-size:11px; color:#93c5fd; margin-top:2px;">令箭 #${s.step_index}: ${esc(s.title)}</div>
+                    <div style="font-size:10.5px; color:var(--muted);">依赖: ${s.depends_on?.length ? s.depends_on.map(d => '#'+d).join(',') : '无'} ${s.consult_count ? `· @协商 ${s.consult_count}次` : ''}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')
+          : `<div style="color:#fde68a; font-size:12px; padding:8px;">⏳ 主帅 <strong>${esc(chief.name)}</strong> 正在审阅项目与团队花名册，点将名单即将揭晓...</div>`;
+
+        const standbyIds = getRunnableIds(st).filter(id => id !== chiefId && !recruited.includes(id));
+        const standbyHtml = standbyIds.length
+          ? `<div style="margin-top:10px; text-align:center; font-size:11px; color:var(--muted);">
+               🛡️ 营帐待命（可随时被 <code>@点名</code> 支援）：${standbyIds.map(id => `<span class="badge b-muted" style="margin:2px;">${memberEmoji(id, ms[id])} ${esc(ms[id]?.name || id)}</span>`).join('')}
+             </div>`
+          : '';
+
+        return `
+          <div class="scene-box scene-chief">
+            <div class="chief-podium">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+                <div style="display:flex; gap:10px; align-items:center;">
+                  ${avatarHtml(chiefId, chief, chiefWorking ? 'speaking' : '')}
+                  <div>
+                    <div style="font-weight:800; font-size:13.5px; color:#fef3c7;">🎖️ 坐镇主帅：${esc(chief.name)} ${clientBadge(chief.client)}</div>
+                    <div style="font-size:11.5px; color:#fde68a; margin-top:2px;">📜 战术点将令：${esc(rationale)}</div>
+                  </div>
+                </div>
+                ${chiefWorking ? `<span class="badge b-gold">🎙️ ${esc(chief.live_activity || '主帅调度中')}</span>` : ''}
+              </div>
+            </div>
+            <div class="chief-connector">⇣ 已点将出战编队 (${recruited.length} 名成员受命协同) ⇣</div>
+            <div class="squad-row">${squadHtml}</div>
+            ${standbyHtml}
+          </div>
+        `;
+      }
+
+      if (mode === 'single_member' && steps.length <= 2) {
+        const curS = steps[steps.length - 1] || {};
+        const mid = curS.member_id || 'codex_author';
+        const m = ms[mid] || { name: mid, client: 'codex', model: '-' };
+        const isW = curS.status === 'running';
+        return `
+          <div class="scene-box scene-solo">
+            <div class="solo-desk">
+              <div style="display:flex; align-items:center; gap:9px;">
+                ${avatarHtml('user', null)}
+                <div>
+                  <div style="font-weight:700;">项目负责人 (你)</div>
+                  <div style="font-size:11px; color:var(--muted);">需求方 · 可随时下方插话追问</div>
+                </div>
+              </div>
+              <div style="font-size:18px; color:var(--agy); font-weight:800;">${isW ? '⚡ 实时作业中 ➔' : '⇄ 专办对接 ⇄'}</div>
+              <div class="rt-seat-card ${isW ? 'is-speaking' : ''}" style="max-width:340px;">
+                ${avatarHtml(mid, m, isW ? 'speaking' : '')}
+                <div>
+                  <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <strong>${esc(m.name || mid)}</strong> ${clientBadge(m.client)} ${statusBadge(curS.status)}
+                  </div>
+                  <div style="font-size:11px; color:var(--muted); margin-top:2px;">模型: <code>${esc(m.model)}/${esc(m.reasoning_effort)}</code> ${curS.consult_count ? `· 已 @队友协商 ${curS.consult_count} 次` : ''}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Default / custom_dag / coordinator_auto -> Multi-Track Studio Assembly Pipeline!
+      const stageMap = new Map();
+      steps.forEach(s => {
+        const k = s.stage_index ?? s.step_index;
+        if (!stageMap.has(k)) stageMap.set(k, []);
+        stageMap.get(k).push(s);
+      });
+      const sortedStageKeys = Array.from(stageMap.keys()).sort((a, b) => a - b);
+      const trackHtml = sortedStageKeys.map((sk, idx) => {
+        const stageSteps = stageMap.get(sk);
+        const isPar = stageSteps.length > 1;
+        const cards = stageSteps.map(s => {
+          const m = ms[s.member_id] || { name: s.member_id, client: 'codex' };
+          const cls = s.status === 'running' ? 'ws-run' : (s.status === 'succeeded' ? 'ws-ok' : (['needs_ruling','awaiting_user','aborted'].includes(s.status) ? 'ws-warn' : (['failed','blocked'].includes(s.status) ? 'ws-err' : '')));
+          return `
+            <div class="workstation-node ${cls}">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:5px;">
+                <div style="display:flex; gap:7px; align-items:center;">
+                  ${avatarHtml(s.member_id, m, s.status === 'running' ? 'speaking' : '')}
+                  <div>
+                    <div style="font-weight:700; font-size:12px;">${esc(m.name || s.member_id)}</div>
+                    <div style="font-size:10.5px; color:var(--muted);">${esc(s.title)}</div>
+                  </div>
+                </div>
+                ${statusBadge(s.status)}
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10.5px; color:var(--muted);">
+                <span>${clientBadge(m.client)} ${s.repair_count ? `<span class="badge b-warn">修复${s.repair_count}轮</span>` : ''} ${s.consult_count ? `<span class="badge b-ok">@协商${s.consult_count}</span>` : ''}</span>
+                ${s.status !== 'running' ? `<button class="btn btn-sec btn-sm" style="padding:2px 6px;" onclick="openReassignModal('${esc(task.id)}', ${s.step_index}, '${esc(s.member_id)}')">🔀 改派</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          ${idx > 0 ? '<div class="stage-arrow">➔</div>' : ''}
+          <div class="stage-col">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong style="font-size:12px; color:#93c5fd;">第 ${idx + 1} 阶段</strong>
+              <span class="badge ${isPar ? 'b-ok' : 'b-muted'}">${isPar ? `⚡ ${stageSteps.length} 工位并行` : '单站工位'}</span>
+            </div>
+            ${cards}
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="scene-box scene-dag">
+          <div style="font-size:12px; font-weight:700; color:#93c5fd; margin-bottom:8px;">
+            🧱 多轨工位实时流水线（共 ${sortedStageKeys.length} 个阶段 / ${steps.length} 个工位节点）
+          </div>
+          <div class="stages-track">${trackHtml}</div>
+        </div>
+      `;
+    }
+
+    function renderChatRoomHtml(st, task) {
+      const msgs = task.chat_room || [];
+      const ms = st.members || {};
+      if (!msgs.length) {
+        return `<div style="padding:16px; color:var(--muted); text-align:center;">群聊已建立，等待首位成员发言...</div>`;
+      }
+      let lastRound = '';
+      const items = [];
+      for (const cm of msgs) {
+        const rl = cm.round_label || '';
+        if (rl && rl !== lastRound) {
+          lastRound = rl;
+          items.push(`<div class="chat-divider">── ${esc(rl)} ──</div>`);
+        }
+        const isUser = cm.sender_id === 'user';
+        const mem = ms[cm.sender_id] || { client: cm.sender_client || 'codex', role: '' };
+        let headerTag = '';
+        if (cm.kind === 'mention_ask') {
+          headerTag = `<span class="badge b-gold">🙋 @${esc(cm.to_member_name || cm.to_member_id)} 请求协助</span>`;
+        } else if (cm.kind === 'mention_reply') {
+          headerTag = `<span class="badge b-codex">💡 回复 @${esc(cm.to_member_name || cm.to_member_id)}</span>`;
+        } else if (cm.kind === 'review') {
+          headerTag = `<span class="badge b-agy">🔍 独立审查意见</span>`;
+        } else if (cm.kind === 'deliverable') {
+          headerTag = `<span class="badge b-ok">📦 阶段/终稿交付</span>`;
+        } else if (cm.kind === 'user_interjection' && cm.to_member_name) {
+          headerTag = `<span class="badge b-run">👉 点名 @${esc(cm.to_member_name)}</span>`;
+        }
+
+        items.push(`
+          <div class="chat-msg ${isUser ? 'from-user' : ''}">
+            ${avatarHtml(cm.sender_id, mem)}
+            <div class="chat-bubble kind-${esc(cm.kind || 'speech')}">
+              <div class="chat-meta">
+                <strong style="color:var(--text);">${esc(cm.sender_name || cm.sender_id)}</strong>
+                <span>${esc(cm.sender_role || '')}</span>
+                ${cm.sender_model ? `<code>${esc(cm.sender_model)}</code>` : ''}
+                ${headerTag}
+                <span>${fmtTime(cm.ts)}</span>
+              </div>
+              ${(() => {
+                const rawC = cm.content || '';
+                const isLong = rawC.length > 720;
+                const expanded = EXPANDED_MSGS.has(cm.id);
+                const shown = (isLong && !expanded) ? (safeSliceMarkdown(rawC, 680) + '\n\n*...（内容较长，点击下方按钮展开完整表格与论述）*') : rawC;
+                return renderLiteMarkdown(shown) + (isLong
+                  ? `<div style="margin-top:6px;"><button class="btn btn-sec btn-sm" onclick="toggleExpandMsg('${esc(cm.id)}')">${expanded ? '🔼 收起长文' : `🔽 展开完整发言 (共 ${rawC.length} 字)`}</button></div>`
+                  : '');
+              })()}
+            </div>
+          </div>
+        `);
+      }
+
+      // Also append live streaming indicator bubbles for any currently running steps!
+      (task.steps || []).filter(s => s.status === 'running').forEach(s => {
+        const m = ms[s.member_id] || { name: s.member_id, client: 'codex' };
+        const att = (s.attempts || [])[s.attempts.length - 1];
+        const partial = att?.partial_text || (m.live_activity ? `当前动作：${m.live_activity}` : '正在思考与查阅项目文件...');
+        items.push(`
+          <div class="chat-msg">
+            ${avatarHtml(s.member_id, m, 'speaking')}
+            <div class="chat-bubble" style="border-style:dashed; border-color:var(--accent);">
+              <div class="chat-meta">
+                <strong style="color:var(--accent);">${esc(m.name || s.member_id)}</strong>
+                <span class="badge b-run">${esc(m.live_activity || `🎙️ 正在输出 (${s.title})`)}</span>
+                ${liveTimerBadge(att?.started_at)}
+              </div>
+              <div style="color:#cbd5e1;">${renderLiteMarkdown(partial.slice(-900))}</div>
+            </div>
+          </div>
+        `);
+      });
+
+      return items.join('');
+    }
+
+    function syncInterjectBar(st, focused) {
+      const wrap = document.getElementById('active-stage-interject');
+      if (!focused) {
+        wrap.classList.add('hidden');
+        FOCUSED_TASK_ID = null;
+        return;
+      }
+      wrap.classList.remove('hidden');
+      const sel = document.getElementById('interject-target');
+      const ids = getRunnableIds(st);
+      const sig = focused.id + '|' + ids.map(id => `${id}:${st.members[id].name}`).join(',');
+      if (sel.getAttribute('data-sig') !== sig) {
+        const prev = sel.value;
+        sel.innerHTML = `<option value="">📢 @全体 / 默认主责成员</option>` + ids.map(id => {
+          const m = st.members[id];
+          return `<option value="${esc(id)}">👉 @${esc(m.name || id)} (${m.client === 'antigravity' ? 'AGY' : 'Codex'})</option>`;
+        }).join('');
+        if (prev && ids.includes(prev)) sel.value = prev;
+        sel.setAttribute('data-sig', sig);
+      }
+      FOCUSED_TASK_ID = focused.id;
+    }
+
+    function renderActiveStage(st, projUnarchived) {
+      const pillsEl = document.getElementById('stage-pills');
+      const stageEl = document.getElementById('active-stage-dynamic');
+
+      // Preserve chat stream scroll offset before re-rendering dynamic pane
+      const prevStream = document.getElementById('live-chat-stream');
+      const wasNearBottom = !prevStream || (prevStream.scrollHeight - prevStream.scrollTop - prevStream.clientHeight < 60);
+      const prevScrollTop = prevStream ? prevStream.scrollTop : 0;
+
+      if (!projUnarchived.length) {
+        pillsEl.classList.add('hidden');
+        syncInterjectBar(st, null);
+        syncQuestionPopupModal(st, null);
+        stageEl.innerHTML = `
+          <div class="stage-empty">
+            <div style="font-size:15px; font-weight:800; color:var(--text); margin-bottom:6px;">✨ 协作现场已就绪，上方任选一种拟人阵型即可开场</div>
+            <div>你可以召集 <strong>🪑 群聊圆桌议事</strong>、任命 <strong>🎖️ 总管动态点将</strong>、搭建 <strong>🧱 多轨串并行流水线</strong> 或 <strong>⚡ 单人极速专办</strong>。<br>旧任务已自动整理至顶部 <strong>“🗂️ 历史与旧任务”</strong>，保持现场清爽。</div>
+          </div>
+        `;
+        return;
+      }
+
+      const focused = projUnarchived.find(t => t.id === st.active_task_id) || projUnarchived[projUnarchived.length - 1];
+      syncInterjectBar(st, focused);
+      syncQuestionPopupModal(st, focused);
+
+      if (projUnarchived.length > 1) {
+        pillsEl.classList.remove('hidden');
+        pillsEl.innerHTML = `<span style="font-size:11px; color:var(--muted); align-self:center;">切换当前项目活动任务:</span>` +
+          projUnarchived.slice().reverse().map(t => `
+            <button class="task-pill ${t.id === focused.id ? 'active' : ''}" onclick="focusTask('${esc(t.id)}')">
+              ${t.status === 'running' ? '⟳ ' : ''}${esc(t.title)}
+            </button>
+          `).join('');
+      } else {
+        pillsEl.classList.add('hidden');
+      }
+
+      const steps = focused.steps || [];
+      const curStep = steps.find(s => s.status === 'running') || steps[focused.current_step_index ?? (steps.length - 1)] || steps[steps.length - 1];
+      const lastAtt = curStep?.attempts?.[curStep.attempts.length - 1];
+
+      let mainOutput = '';
+      if (focused.summary) {
+        mainOutput = focused.summary;
+      } else if (focused.status === 'running' && lastAtt?.partial_text) {
+        mainOutput = lastAtt.partial_text;
+      } else if (curStep?.latest_result_text) {
+        mainOutput = curStep.latest_result_text;
+      } else if (lastAtt?.result_text || lastAtt?.partial_text) {
+        mainOutput = lastAtt.result_text || lastAtt.partial_text;
+      } else if (focused.status === 'running') {
+        mainOutput = '⏳ 团队成员正在协同分析与推进中，上方拟人现场与群聊流将实时刷新发言...';
+      } else {
+        mainOutput = '暂无定稿文本';
+      }
+
+      const sceneHtml = renderAnthropomorphicLiveScene(st, focused);
+      const qCardHtml = renderQuestionCardHtml(focused);
+
+      const latestRev = (focused.reviews || [])[focused.reviews.length - 1];
+      const revBanner = latestRev
+        ? `<div class="alert ${latestRev.verdict === 'ACCEPT' ? 'alert-ok' : 'alert-warn'}">
+             <strong>🔍 独立审查结论 (${esc(latestRev.verdict)} · 第${latestRev.round}轮)：</strong>
+             ${latestRev.problem ? `发现问题：${esc(latestRev.problem)} | ` : ''}核查依据：${esc(latestRev.evidence)}
+           </div>`
+        : '';
+
+      const evHtml = (focused.recent_events || []).slice().reverse().map(ev =>
+        `<div style="margin-bottom:3px;">[${fmtTime(ev.ts)}] <code>${esc(ev.type)}</code> ${esc(ev.summary)}</div>`
+      ).join('');
+
+      const stepTechHtml = steps.map(s => {
+        const atts = (s.attempts || []).map(a => `
+          <div style="padding:6px 8px; background:#0b0f18; border-radius:5px; margin-top:4px; font-size:11px;">
+            <div><strong>尝试 #${a.round_num}</strong> (${esc(a.member_id)}) · PID: ${esc(a.pid || '-')} · 状态: ${esc(a.status)}</div>
+            <div>请求配置: <code>${esc(a.requested_config?.client)} / ${esc(a.requested_config?.model)} (${esc(a.requested_config?.reasoning_effort)})</code>
+              → 实际运行: <code>${esc(a.accepted_config?.full_model_slug || a.accepted_config?.model || '-')}</code></div>
+            <div>官方会话 ID: <code>${esc(a.session_id || '-')}</code></div>
+          </div>
+        `).join('');
+        return `<div style="margin-top:6px;"><strong>节点 #${s.step_index} (${esc(s.title)})</strong> <button class="btn btn-sec btn-sm" onclick="openReassignModal('${esc(focused.id)}', ${s.step_index}, '${esc(s.member_id)}')">改派成员</button>${atts}</div>`;
+      }).join('');
+
+      // Detect if a failed/aborted step already generated substantial text that can be rescued in 1 click!
+      const troubledStep = steps.find(s => ['failed', 'aborted', 'blocked'].includes(s.status));
+      let rescueBannerHtml = '';
+      if (troubledStep) {
+        const tAtt = [...(troubledStep.attempts || [])].reverse().find(a => (a.result_text || a.partial_text || '').trim().length > 60);
+        const rescuedLen = tAtt ? (tAtt.result_text || tAtt.partial_text || '').trim().length : 0;
+        rescueBannerHtml = `
+          <div class="partial-rescue-banner">
+            <div>
+              <strong style="color:#fcd34d;">⚡ 节点 #${troubledStep.step_index}（${esc(troubledStep.title)}）恢复台</strong>
+              <div style="font-size:12px; color:#e2e8f0; margin-top:2px;">
+                ${rescuedLen > 0
+                  ? `检测到该步在收尾断连前<strong>已完整流式生成 ${rescuedLen} 字内容</strong>！你可直接一键采纳免重跑，或清空旧会话单独重跑此步：`
+                  : `你可以清空异常旧会话单独重跑此步，或直接换另一名专家接手此步（前序已完成步骤不会重跑）：`}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              ${rescuedLen > 0 ? `<button class="btn" onclick="acceptStepPartial('${esc(focused.id)}', ${troubledStep.step_index})">✅ 直接采纳已生成的 ${rescuedLen} 字成果</button>` : ''}
+              <button class="btn btn-warn" onclick="retrySingleStep('${esc(focused.id)}', ${troubledStep.step_index})">🔄 开启干净新会话重跑此步</button>
+              <button class="btn btn-sec" onclick="openReassignModal('${esc(focused.id)}', ${troubledStep.step_index}, '${esc(troubledStep.member_id)}')">🔀 换其他成员接手此步</button>
+            </div>
+          </div>
+        `;
+      }
+      window._LATEST_MAIN_OUTPUT = mainOutput;
+      const showChat = STAGE_TAB === 'all' || STAGE_TAB === 'chat';
+      const showDeliv = STAGE_TAB === 'all' || STAGE_TAB === 'deliverable';
+
+      stageEl.innerHTML = `
+        <div class="stage-card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+            <div>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span style="font-size:16px; font-weight:800;">${esc(focused.title)}</span>
+                ${modeMetaBadge(focused.execution_mode || focused.dispatch_mode)}
+                ${statusBadge(focused.status)}
+              </div>
+              <div style="font-size:11.5px; color:var(--muted); margin-top:3px;">
+                项目：<code>${esc(focused.project_path)}</code> · 权限：<code>${esc(focused.sandbox || 'read-only')}</code> · 创建于 ${fmtTime(focused.created_at)}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="btn ${STAGE_TAB==='all'?'':'btn-sec'} btn-sm" onclick="STAGE_TAB='all'; refreshState(true);">全景视图</button>
+              <button class="btn ${STAGE_TAB==='chat'?'':'btn-sec'} btn-sm" onclick="STAGE_TAB='chat'; refreshState(true);">💬 群聊 (${(focused.chat_room||[]).length})</button>
+              <button class="btn ${STAGE_TAB==='deliverable'?'':'btn-sec'} btn-sm" onclick="STAGE_TAB='deliverable'; refreshState(true);">📄 终稿成果</button>
+              <button class="btn btn-sec btn-sm" onclick="archiveSingleTask('${esc(focused.id)}')" title="移入历史归档，清空当前现场">📥 归档收起</button>
+            </div>
+          </div>
+
+          <!-- Anthropomorphic Live Topology Scene -->
+          ${sceneHtml}
+
+          ${qCardHtml}
+          ${(!qCardHtml && focused.blocking_reason) ? `<div class="alert alert-err"><strong>当前待处理 / 受阻说明：</strong>${esc(focused.blocking_reason)}</div>` : ''}
+          ${rescueBannerHtml}
+          ${revBanner}
+
+          <!-- Shared Real-Time Group Chat & @Mention Stream -->
+          ${showChat ? `
+            <div class="chat-room-panel">
+              <div class="chat-room-header">
+                <strong style="font-size:12.5px; color:#6ee7b7;">💬 团队实时交流与 @队友 协商群聊 (${(focused.chat_room || []).length} 条发言)</strong>
+                <span style="font-size:11px; color:var(--muted);">Agent 可自动发起 <code>@队友</code> 提问互助，你也可在底部直接插话点名</span>
+              </div>
+              <div class="chat-stream" id="live-chat-stream">${renderChatRoomHtml(st, focused)}</div>
+            </div>
+          ` : ''}
+
+          <!-- Primary Deliverable Output -->
+          ${showDeliv ? `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+              <strong style="font-size:12.5px; color:var(--accent);">📄 最终汇总交付 / 当前主输出（共 ${mainOutput.length} 字）</strong>
+              <button class="btn btn-sec btn-sm" onclick="copyText(window._LATEST_MAIN_OUTPUT || '')">📋 复制 Markdown 原文</button>
+            </div>
+            <div class="deliverable-box">${renderLiteMarkdown(mainOutput)}</div>
+          ` : ''}
+
+          <div class="action-bar">
+            ${focused.status === 'running' ? `<button class="btn btn-err" onclick="abortTask('${esc(focused.id)}')">⏹️ 紧急中止当前运行</button>` : ''}
+            ${['aborted','failed','needs_verification','blocked'].includes(focused.status) ? `<button class="btn btn-warn" onclick="continueTask('${esc(focused.id)}')">🔄 核对并继续未完节点</button>` : ''}
+            ${focused.status !== 'running' ? `<button class="btn btn-sec" onclick="openFollowupModal('${esc(focused.id)}')">🔁 沿原会话正式追问</button>` : ''}
+            <button class="btn ${focused.status === 'needs_ruling' ? 'btn-warn' : 'btn-sec'}" onclick="openRulingModal('${esc(focused.id)}', ${curStep ? curStep.step_index : 0})">⚖️ 总管人工裁决</button>
+            <button class="btn btn-sec" onclick="openReassignModal('${esc(focused.id)}', ${curStep ? curStep.step_index : 0}, '${esc(curStep ? curStep.member_id : 'codex_author')}')">🔀 换人接手当前步</button>
+          </div>
+
+          <details data-persist-id="tech-${focused.id}">
+            <summary>🔍 展开底层进程流水 (${(focused.recent_events||[]).length})、PID、Session ID 与双端模型回读核验</summary>
+            <div style="background:#0a0d15; padding:8px; border-radius:6px; font-size:11px; color:var(--muted); max-height:145px; overflow-y:auto; margin-top:6px;">
+              ${evHtml || '暂无事件'}
+            </div>
+            ${stepTechHtml}
+          </details>
+        </div>
+      `;
+
+      const newStream = document.getElementById('live-chat-stream');
+      if (newStream) {
+        newStream.scrollTop = wasNearBottom ? newStream.scrollHeight : prevScrollTop;
+      }
+    }
+
+    // ==================== HISTORY & MEMBERS VIEWS ====================
+
+    function setHistoryScope(sc) {
+      HISTORY_SCOPE = sc;
+      renderHistoryView();
+    }
+
+    function renderHistoryView() {
+      if (!STATE) return;
+      document.getElementById('hist-scope-cur').className = 'btn btn-sm ' + (HISTORY_SCOPE === 'current' ? '' : 'btn-sec');
+      document.getElementById('hist-scope-all').className = 'btn btn-sm ' + (HISTORY_SCOPE === 'all' ? '' : 'btn-sec');
+
+      const curNorm = normPath(STATE.binding?.project_path);
+      const q = (document.getElementById('hist-search')?.value || '').trim().toLowerCase();
+
+      const list = (STATE.tasks || []).slice().reverse().filter(t => {
+        if (HISTORY_SCOPE === 'current' && normPath(t.project_path) !== curNorm) return false;
+        if (q && !(String(t.title).toLowerCase().includes(q) || String(t.goal).toLowerCase().includes(q))) return false;
+        return true;
+      });
+
+      const box = document.getElementById('history-container');
+      if (!list.length) {
+        box.innerHTML = `<div class="stage-empty">暂无符合筛选条件的历史任务记录。</div>`;
+        return;
+      }
+
+      box.innerHTML = list.map(t => {
+        const memNames = [...new Set((t.steps || []).map(s => (STATE.members[s.member_id]?.name || s.member_id)))].join(' · ');
+        const preview = (t.summary || t.steps?.[t.steps.length - 1]?.latest_result_text || '').slice(0, 180);
+        return `
+          <div class="card" style="padding:11px 13px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span class="badge b-muted">${esc(t.project_name || '项目')}</span>
+                ${modeMetaBadge(t.execution_mode || t.dispatch_mode)}
+                <strong>${esc(t.title)}</strong>
+                ${t.archived ? `<span class="badge b-muted">已归档</span>` : `<span class="badge b-run">在现场</span>`}
+              </div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                ${statusBadge(t.status)}
+                <button class="btn btn-sec btn-sm" onclick="bringToWorkspace('${esc(t.id)}', '${esc((t.project_path||'').replace(/\\/g, '\\\\'))}')">👁️ 调回现场查看/续聊</button>
+              </div>
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin-top:4px;">
+              参战成员: ${esc(memNames || '-')} · 群聊 ${(t.chat_room || []).length} 条 · 时间: ${fmtTime(t.created_at)} · ID: <code>${esc(t.id)}</code>
+            </div>
+            ${preview ? `<div style="font-size:12px; color:#cbd5e1; margin-top:5px; background:#0b0e16; padding:6px 8px; border-radius:5px;">${esc(preview)}${preview.length >= 180 ? '...' : ''}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderMembersView(st) {
+      const grid = document.getElementById('members-grid');
+      const members = st.members || {};
+      const ids = getRunnableIds(st);
+
+      grid.innerHTML = ids.map(id => {
+        const m = members[id];
+        const r = st.roles[m.role] || { name: m.role };
+        return `
+          <div class="card" style="margin-bottom:0;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+              <div style="display:flex; gap:10px; align-items:center;">
+                ${avatarHtml(id, m, m.status === 'working' ? 'speaking' : '')}
+                <div>
+                  ${clientBadge(m.client)}
+                  <strong style="margin-left:4px; cursor:pointer; font-size:13.5px;" onclick="openSwitchMemberModal('${esc(id)}', true)" title="点击修改成员名字">${esc(m.name || id)} ✏️</strong>
+                  <div style="font-size:11px; color:var(--muted); margin-top:2px;">ID: <code>${esc(id)}</code> · 职责: <strong>${esc(r.name)}</strong></div>
+                </div>
+              </div>
+              ${statusBadge(m.status)}
+            </div>
+            <div style="margin-top:8px; padding:7px 9px; background:#0c101b; border-radius:6px; font-size:12px;">
+              模型: <strong><code>${esc(m.model)}</code></strong> · 思考强度: <strong><code>${esc(m.reasoning_effort)}</code></strong>
+              ${m.live_activity ? `<div style="color:var(--ok); font-size:11px; margin-top:3px;">🎙️ 当前动态: ${esc(m.live_activity)}</div>` : ''}
+              ${m.session_id ? `<div style="font-size:11px; color:var(--muted); margin-top:3px; word-break:break-all;">最近会话: <code>${esc(m.session_id)}</code></div>` : ''}
+            </div>
+            ${m.pending_config ? `<div class="alert alert-warn">下轮自动切换至: ${esc(m.pending_config.client)} / ${esc(m.pending_config.model)} (${esc(m.pending_config.reasoning_effort)})</div>` : ''}
+            <div class="action-bar">
+              <button class="btn btn-sec btn-sm" onclick="openSwitchMemberModal('${esc(id)}', false)">✏️ 改名 / 换模型与强度</button>
+              ${m.status !== 'working' ? `<button class="btn btn-err btn-sm" onclick="deleteMember('${esc(id)}')">移除</button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const rBox = document.getElementById('roles-box');
+      rBox.innerHTML = Object.keys(st.roles || {}).map(rid => {
+        const r = st.roles[rid];
+        return `<div style="display:flex; justify-content:space-between; padding:5px 8px; background:#0c101b; border-radius:5px; margin-bottom:4px; font-size:12px;">
+          <span><strong>${esc(r.name)}</strong> (<code>${esc(rid)}</code>): ${esc(r.description)}</span>
+        </div>`;
+      }).join('');
+      document.getElementById('cfg-conc').value = st.max_concurrency || 3;
+    }
+
+    // ==================== SUBMIT TASK & LIVE CHAT INTERJECTION ====================
+
+    async function submitTask() {
+      const goal = document.getElementById('cmp-goal').value.trim();
+      if (!goal) { toast('请先输入要交给团队的目标或议题', true); return; }
+
+      const mode = CMP.mode;
+      const payload = {
+        title: document.getElementById('cmp-title').value.trim(),
+        goal,
+        dispatch_mode: mode,
+        execution_mode: mode,
+        workspace_scope: document.getElementById('cmp-subscope').value.trim() || '.',
+        sandbox: document.getElementById('cmp-sandbox').value,
+        require_manual_ruling: document.getElementById('cmp-manual-rule').checked,
+        reuse_member_session: document.getElementById('cmp-reuse-sess').checked
+      };
+
+      if (mode === 'roundtable') {
+        if (CMP.rtParticipants.length < 2) { toast('圆桌会议请至少点选 2 位入席成员', true); return; }
+        payload.participants = CMP.rtParticipants.slice();
+        payload.host_member_id = CMP.rtHost;
+        payload.discussion_rounds = CMP.rtRounds;
+        payload.enable_host_opening = Boolean(CMP.rtHostOpening);
+      } else if (mode === 'chief_dispatch') {
+        payload.chief_member_id = CMP.chiefId;
+      } else if (mode === 'custom_dag') {
+        payload.stages = CMP.dagStages;
+      } else {
+        payload.target_member_id = CMP.soloId;
+      }
+
+      try {
+        const r = await api('POST', '/api/tasks', payload);
+        document.getElementById('cmp-goal').value = '';
+        document.getElementById('cmp-title').value = '';
+        toast(`🎬 已开场启动: ${r.task.title}`);
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function sendInterjection() {
+      if (!FOCUSED_TASK_ID) return;
+      const inp = document.getElementById('interject-input');
+      const content = inp.value.trim();
+      if (!content) { toast('请输入插话或提问内容', true); return; }
+      const target = document.getElementById('interject-target').value || null;
+      const wake = document.getElementById('interject-wake').checked;
+
+      try {
+        inp.value = '';
+        await api('POST', '/api/tasks/interject', {
+          task_id: FOCUSED_TASK_ID,
+          content,
+          target_member_id: target,
+          trigger_reply: wake
+        });
+        toast(target ? `已向群聊发送并 @${STATE?.members?.[target]?.name || target}` : '已发送到团队实时群聊');
+        await refreshState(true);
+      } catch (e) {
+        inp.value = content;
+        toast(e.message, true);
+      }
+    }
+
+    async function focusTask(tid) {
+      await api('POST', '/api/tasks/focus', { task_id: tid });
+      await refreshState(true);
+    }
+
+    async function archiveSingleTask(tid) {
+      await api('POST', '/api/tasks/archive', { task_id: tid, archived: true });
+      toast('已收入“历史与旧任务”，当前协作现场已清空');
+      await refreshState(true);
+    }
+
+    async function archiveAllCompleted() {
+      const r = await api('POST', '/api/tasks/archive_completed', { keep_active: false });
+      toast(`已归档 ${r.archived_count} 条已完成旧任务`);
+      await refreshState(true);
+    }
+
+    async function bringToWorkspace(tid, projPath) {
+      if (projPath && normPath(projPath) !== normPath(STATE?.binding?.project_path)) {
+        await api('POST', '/api/projects/switch', { project_path: projPath });
+      }
+      await api('POST', '/api/tasks/focus', { task_id: tid });
+      switchView('workspace');
+      await refreshState(true);
+    }
+
+    async function togglePause() {
+      const r = await api('POST', '/api/toggle_pause');
+      toast(r.paused ? '已暂停新节点派发' : '已恢复队列派发');
+      await refreshState(true);
+    }
+
+    async function abortTask(tid) {
+      const r = await api('POST', '/api/tasks/abort', { task_id: tid });
+      toast(r.aborted ? '已中止当前运行进程并保留已有记录' : '中止指令已发送');
+      await refreshState(true);
+    }
+
+    async function continueTask(tid) {
+      const r = await api('POST', '/api/tasks/continue', { task_id: tid });
+      toast(r.message || '已恢复继续执行未完成节点');
+      await refreshState(true);
+    }
+
+    async function acceptStepPartial(tid, stepIdx) {
+      try {
+        await api('POST', '/api/tasks/accept_partial', { task_id: tid, step_index: stepIdx });
+        toast('🎉 已成功采纳已生成的流式成果并更新任务状态！');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function retrySingleStep(tid, stepIdx) {
+      try {
+        await api('POST', '/api/tasks/retry_step', { task_id: tid, step_index: stepIdx, reset_session: true });
+        toast(`🔄 已开启干净会话重跑节点 #${stepIdx}`);
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function copyText(txt) {
+      navigator.clipboard.writeText(txt || '').then(() => toast('已复制到剪贴板'));
+    }
+
+    // ==================== REAL LINK PREVIEWER & QUESTION POPUP MODAL ====================
+
+    function openModal(html, wide = false) {
+      const mEl = document.getElementById('modal-body');
+      mEl.classList.toggle('modal-wide', Boolean(wide));
+      mEl.innerHTML = html;
+      document.getElementById('modal-backdrop').style.display = 'flex';
+      applyBilingualDom(mEl);
+    }
+    function closeModal() {
+      document.getElementById('modal-backdrop').style.display = 'none';
+    }
+
+    function syncQPopupToggleBtn() {
+      const btn = document.getElementById('q-popup-toggle-btn');
+      if (!btn) return;
+      btn.textContent = AUTO_POPUP_QUESTIONS ? '🔔 提问自动弹窗: 开' : '🔕 提问自动弹窗: 关';
+      btn.className = AUTO_POPUP_QUESTIONS ? 'btn btn-sec btn-sm' : 'btn btn-warn btn-sm';
+    }
+
+    function toggleAutoQuestionPopup() {
+      AUTO_POPUP_QUESTIONS = !AUTO_POPUP_QUESTIONS;
+      localStorage.setItem('team_q_popup', AUTO_POPUP_QUESTIONS ? '1' : '0');
+      syncQPopupToggleBtn();
+      toast(AUTO_POPUP_QUESTIONS ? '已开启：AI 提出问题时将自动弹出确认窗口' : '已关闭自动弹窗：提问将在页面内展示（也可随时手动点按钮弹窗确认）');
+      if (AUTO_POPUP_QUESTIONS && STATE) {
+        DISMISSED_Q_KEYS.clear();
+        refreshState(true);
+      }
+    }
+
+    async function openItemNatively(target, reveal = false) {
+      try {
+        const res = await api('POST', '/api/fs/open_item', {
+          target,
+          task_id: FOCUSED_TASK_ID,
+          reveal
+        });
+        if (res.kind === 'web') toast('🌐 已在系统默认浏览器中打开该链接');
+        else if (reveal) toast(`📂 已在资源管理器中定位: ${res.name || res.opened}`);
+        else toast(`🖥️ 已调用本机默认程序打开: ${res.name || res.opened}`);
+      } catch (e) {
+        toast('打开失败: ' + e.message, true);
+      }
+    }
+
+    async function openAnswerLink(rawTarget) {
+      if (!rawTarget) return;
+      if (/^https?:\/\//i.test(rawTarget)) {
+        await openItemNatively(rawTarget, false);
+        return;
+      }
+      try {
+        const data = await api(
+          'GET',
+          `/api/fs/preview_file?target=${encodeURIComponent(rawTarget)}&task_id=${encodeURIComponent(FOCUSED_TASK_ID || '')}`
+        );
+        if (data.preview_type === 'web') {
+          await openItemNatively(data.url, false);
+          return;
+        }
+        renderFilePreviewModal(data);
+      } catch (e) {
+        toast('无法打开该链接目标: ' + e.message, true);
+      }
+    }
+
+    function renderFilePreviewModal(data) {
+      const pJs = esc((data.path || '').replace(/\\/g, '\\\\'));
+      const lineBadge = data.start_line
+        ? `<span class="badge b-gold">定位行 #L${data.start_line}${data.end_line && data.end_line !== data.start_line ? '-L' + data.end_line : ''}</span>`
+        : '';
+
+      let bodyHtml = '';
+      if (data.preview_type === 'directory') {
+        const rows = (data.entries || []).map(en => {
+          const subJs = esc(en.path.replace(/\\/g, '\\\\'));
+          return `
+            <div class="fs-item" onclick="openAnswerLink('${subJs}')">
+              <span>${en.is_dir ? '📁' : '📄'} <strong>${esc(en.name)}</strong></span>
+              <span style="font-size:11px; color:var(--muted);">${en.is_dir ? '进入子目录' : (Math.round(en.size / 1024 * 10) / 10 + ' KB · 点击预览')}</span>
+            </div>
+          `;
+        }).join('');
+        bodyHtml = `<div class="fs-list" style="max-height:55vh;">${rows || '<div style="padding:14px; color:var(--muted); text-align:center;">目录为空</div>'}</div>`;
+      } else if (data.preview_type === 'image') {
+        bodyHtml = `<div style="text-align:center; background:#080b12; padding:12px; border-radius:8px;"><img src="${esc(data.raw_url)}" style="max-width:100%; max-height:62vh; border-radius:6px;"></div>`;
+      } else if (data.preview_type === 'pdf') {
+        bodyHtml = `<iframe src="${esc(data.raw_url)}" style="width:100%; height:64vh; border:1px solid var(--border); border-radius:8px; background:#fff;"></iframe>`;
+      } else if (data.preview_type === 'docx') {
+        bodyHtml = `
+          <div class="alert alert-ok" style="margin-bottom:8px;">📄 已实时提取 Word 文档正文与表格供直接阅读；如需查看原版排版或批注，可点击右上角 <strong>“🖥️ 用本地 Word 打开”</strong>。</div>
+          <div class="deliverable-box" style="max-height:58vh;">${renderLiteMarkdown(data.content || '')}</div>
+        `;
+      } else if (data.preview_type === 'markdown') {
+        bodyHtml = `<div class="deliverable-box" style="max-height:60vh;">${renderLiteMarkdown(data.content || '')}</div>`;
+      } else if (data.preview_type === 'table') {
+        const rows = data.rows || [];
+        if (rows.length) {
+          const head = '<tr>' + rows[0].map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+          const body = rows.slice(1).map(r => '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('');
+          bodyHtml = `<div class="md-table-wrap" style="max-height:60vh; overflow:auto;"><table class="md-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+        } else {
+          bodyHtml = `<div class="stage-empty">数据表为空</div>`;
+        }
+      } else if (data.preview_type === 'text') {
+        const lines = String(data.content || '').replace(/\r\n/g, '\n').split('\n');
+        const sLine = data.start_line || 0;
+        const eLine = data.end_line || sLine;
+        const rowsHtml = lines.map((ln, idx) => {
+          const lNum = idx + 1;
+          const isHl = sLine > 0 && lNum >= sLine && lNum <= eLine;
+          return `<div class="src-line ${isHl ? 'hl' : ''}" ${lNum === sLine ? 'id="preview-target-line"' : ''}><span class="src-ln">${lNum}</span><span>${esc(ln)}</span></div>`;
+        }).join('');
+        bodyHtml = `<div class="src-viewer" id="preview-src-viewer">${rowsHtml}</div>`;
+      } else {
+        bodyHtml = `
+          <div class="stage-empty" style="padding:24px;">
+            <div style="font-size:14px; color:var(--text); font-weight:700; margin-bottom:6px;">📦 ${esc(data.name)} (${Math.round((data.size || 0) / 1024)} KB)</div>
+            <div>${esc(data.note || '请点击上方按钮调用系统关联程序打开查看。')}</div>
+          </div>
+        `;
+      }
+
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+          <div style="min-width:0; flex:1;">
+            <div style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">
+              <strong style="font-size:15px;">📄 ${esc(data.name)}</strong>
+              ${lineBadge}
+            </div>
+            <div style="font-size:11px; color:var(--muted); word-break:break-all; margin-top:3px;">真实路径：<code>${esc(data.path)}</code></div>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="openItemNatively('${pJs}', false)">🖥️ 用本地默认软件打开</button>
+            <button class="btn btn-sec btn-sm" onclick="openItemNatively('${pJs}', true)">📂 在文件夹中定位</button>
+            <button class="btn btn-sec btn-sm" onclick="closeModal()">✕ 关闭</button>
+          </div>
+        </div>
+        ${bodyHtml}
+      `, true);
+
+      if (data.start_line) {
+        setTimeout(() => {
+          const targetEl = document.getElementById('preview-target-line');
+          if (targetEl) targetEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 50);
+      }
+    }
+
+    document.addEventListener('click', (ev) => {
+      const linkEl = ev.target.closest && ev.target.closest('a.ans-link');
+      if (!linkEl) return;
+      ev.preventDefault();
+      const rawHref = linkEl.getAttribute('data-ans-link') || '';
+      openAnswerLink(rawHref);
+    });
+
+    function ensureQuestionDraft(task) {
+      const qs = task?.pending_questions?.questions || [];
+      if (!USER_CHOICE_DRAFT[task.id]) {
+        const initAns = {};
+        qs.forEach((q, idx) => {
+          const qid = q.id || `q${idx + 1}`;
+          initAns[qid] = {
+            selected: q.multi_select ? (q.options?.[0] ? [q.options[0]] : []) : (q.options?.[0] || ''),
+            other: ''
+          };
+        });
+        USER_CHOICE_DRAFT[task.id] = { answers: initAns, custom_note: '' };
+      }
+      return USER_CHOICE_DRAFT[task.id];
+    }
+
+    function buildQuestionBlocksHtml(task, idPrefix = 'inline') {
+      const qs = task?.pending_questions?.questions || [];
+      const draft = ensureQuestionDraft(task);
+      return qs.map((q, idx) => {
+        const qid = q.id || `q${idx + 1}`;
+        const cur = draft.answers[qid] || { selected: q.multi_select ? [] : '', other: '' };
+        const optsHtml = (q.options || []).map((opt, oIdx) => {
+          const isChecked = q.multi_select
+            ? (Array.isArray(cur.selected) && cur.selected.includes(opt))
+            : (cur.selected === opt);
+          const inputType = q.multi_select ? 'checkbox' : 'radio';
+          return `
+            <label class="q-opt">
+              <input type="${inputType}" name="${idPrefix}_q_${esc(task.id)}_${esc(qid)}"
+                ${isChecked ? 'checked' : ''}
+                onchange="onChoiceChange('${esc(task.id)}', '${esc(qid)}', ${q.multi_select}, ${oIdx}, this.checked)">
+              <span>${esc(opt)}</span>
+            </label>
+          `;
+        }).join('');
+
+        return `
+          <div class="q-block">
+            <div style="font-weight:700; font-size:13px;">
+              ${idx + 1}. ${esc(q.question)}
+              <span class="badge b-muted" style="margin-left:5px;">${q.multi_select ? '可多选' : '单选'}</span>
+            </div>
+            ${optsHtml}
+            <div style="margin-top:6px;">
+              <input type="text" placeholder="或直接填写你的自定义方案 / 补充说明（可选）..."
+                value="${esc(cur.other || '')}"
+                oninput="onChoiceOtherInput('${esc(task.id)}', '${esc(qid)}', this.value)">
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function getQuestionModalKey(task) {
+      if (!task || task.status !== 'awaiting_user' || !task.pending_questions?.questions?.length) return '';
+      return `${task.id}_${task.pending_questions.ts || task.steps?.length || 0}`;
+    }
+
+    function openQuestionPopupModal(taskId) {
+      const task = (STATE?.tasks || []).find(t => t.id === taskId);
+      if (!task || task.status !== 'awaiting_user') return;
+      const qKey = getQuestionModalKey(task);
+      DISMISSED_Q_KEYS.delete(qKey);
+      ACTIVE_Q_MODAL_KEY = '';
+      syncQuestionPopupModal(STATE, task, true);
+    }
+
+    function dismissQuestionPopupModal(qKey) {
+      if (qKey) DISMISSED_Q_KEYS.add(qKey);
+      ACTIVE_Q_MODAL_KEY = '';
+      document.getElementById('q-modal-backdrop').style.display = 'none';
+      toast('已暂收起提问弹窗，你可先查阅页面群聊上下文，随时点击“🪟 弹窗确认选项”恢复');
+    }
+
+    function syncQuestionPopupModal(st, focused, forceOpen = false) {
+      const backdrop = document.getElementById('q-modal-backdrop');
+      const bodyEl = document.getElementById('q-modal-body');
+      const qKey = getQuestionModalKey(focused);
+
+      if (!qKey) {
+        ACTIVE_Q_MODAL_KEY = '';
+        backdrop.style.display = 'none';
+        return;
+      }
+
+      if (!forceOpen && (!AUTO_POPUP_QUESTIONS || DISMISSED_Q_KEYS.has(qKey))) {
+        return;
+      }
+
+      // Avoid clobbering user cursor/typing if the exact same question modal is already open!
+      if (backdrop.style.display === 'flex' && ACTIVE_Q_MODAL_KEY === qKey) {
+        return;
+      }
+
+      ACTIVE_Q_MODAL_KEY = qKey;
+      const pq = focused.pending_questions;
+      const qs = pq.questions || [];
+      const draft = ensureQuestionDraft(focused);
+      const askMem = st?.members?.[pq.member_id] || { name: pq.member_id || 'AI 成员', client: 'antigravity', model: '-' };
+      const askStep = (focused.steps || [])[pq.step_index ?? 0];
+      const contextNote = askStep?.latest_result_text || '';
+
+      bodyEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            ${avatarHtml(pq.member_id, askMem, 'speaking')}
+            <div>
+              <div style="font-size:15px; font-weight:800; color:#f3e8ff;">🙋 ${esc(askMem.name || pq.member_id)} 请你拍板确认选项</div>
+              <div style="font-size:11.5px; color:var(--muted);">任务：${esc(focused.title)} · 确认后将自动沿原会话继续执行</div>
+            </div>
+          </div>
+          <button class="btn btn-sec btn-sm" onclick="dismissQuestionPopupModal('${esc(qKey)}')">👁️ 先看上下文</button>
+        </div>
+        ${contextNote ? `<div style="background:#0b0f19; border:1px solid var(--border); border-radius:8px; padding:9px 11px; max-height:140px; overflow-y:auto; margin-bottom:8px; font-size:12px;">${renderLiteMarkdown(contextNote)}</div>` : ''}
+        ${buildQuestionBlocksHtml(focused, 'modal')}
+        <div style="margin-top:8px;">
+          <input type="text" placeholder="整体补充叮嘱（可选）..."
+            value="${esc(draft.custom_note || '')}"
+            oninput="onChoiceGlobalNote('${esc(focused.id)}', this.value)">
+        </div>
+        <div class="action-bar" style="justify-content:space-between; margin-top:12px;">
+          <div style="display:flex; gap:7px; flex-wrap:wrap;">
+            <button class="btn" onclick="submitQuestionAnswers('${esc(focused.id)}', false)">✅ 确认我的选择并继续执行</button>
+            <button class="btn btn-sec" onclick="submitQuestionAnswers('${esc(focused.id)}', true)">⚡ 按推荐项自动继续</button>
+          </div>
+          <button class="btn btn-sec btn-sm" onclick="dismissQuestionPopupModal('${esc(qKey)}')">暂收起弹窗</button>
+        </div>
+      `;
+      backdrop.style.display = 'flex';
+      applyBilingualDom(bodyEl);
+    }
+
+    function renderQuestionCardHtml(task) {
+      const pq = task.pending_questions;
+      const qs = pq?.questions || [];
+      if (task.status !== 'awaiting_user' || !qs.length) return '';
+      const draft = ensureQuestionDraft(task);
+      const blocks = buildQuestionBlocksHtml(task, 'inline');
+
+      return `
+        <div class="q-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <strong style="font-size:14px; color:#e9d5ff;">🙋 团队成员向你请示了 ${qs.length} 个关键选项（点选后直接沿原会话继续）</strong>
+            <button class="btn btn-sec btn-sm" onclick="openQuestionPopupModal('${esc(task.id)}')">🪟 弹出窗口确认选项</button>
+          </div>
+          ${blocks}
+          <div style="margin-top:8px;">
+            <input type="text" placeholder="整体补充叮嘱（可选）..."
+              value="${esc(draft.custom_note || '')}"
+              oninput="onChoiceGlobalNote('${esc(task.id)}', this.value)">
+          </div>
+          <div class="action-bar">
+            <button class="btn" onclick="submitQuestionAnswers('${esc(task.id)}', false)">✅ 确认选择并继续</button>
+            <button class="btn btn-sec" onclick="submitQuestionAnswers('${esc(task.id)}', true)">⚡ 按推荐项自动继续</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function onChoiceChange(taskId, qid, isMulti, optIdx, checked) {
+      const task = (STATE?.tasks || []).find(t => t.id === taskId);
+      const q = (task?.pending_questions?.questions || []).find((x, i) => (x.id || `q${i + 1}`) === qid);
+      if (!q || !USER_CHOICE_DRAFT[taskId]) return;
+      const optVal = q.options[optIdx];
+      const slot = USER_CHOICE_DRAFT[taskId].answers[qid];
+      if (isMulti) {
+        const arr = new Set(Array.isArray(slot.selected) ? slot.selected : []);
+        if (checked) arr.add(optVal); else arr.delete(optVal);
+        slot.selected = Array.from(arr);
+      } else {
+        slot.selected = optVal;
+      }
+    }
+    function onChoiceOtherInput(taskId, qid, val) {
+      if (USER_CHOICE_DRAFT[taskId]?.answers?.[qid]) USER_CHOICE_DRAFT[taskId].answers[qid].other = val;
+    }
+    function onChoiceGlobalNote(taskId, val) {
+      if (USER_CHOICE_DRAFT[taskId]) USER_CHOICE_DRAFT[taskId].custom_note = val;
+    }
+
+    async function submitQuestionAnswers(taskId, useRecommended) {
+      const draft = USER_CHOICE_DRAFT[taskId] || { answers: {}, custom_note: '' };
+      const answersArr = Object.keys(draft.answers).map(qid => ({
+        id: qid,
+        selected: draft.answers[qid].selected,
+        other: draft.answers[qid].other
+      }));
+      try {
+        await api('POST', '/api/tasks/answer', {
+          task_id: taskId,
+          answers: answersArr,
+          custom_note: draft.custom_note || '',
+          use_recommended: useRecommended
+        });
+        delete USER_CHOICE_DRAFT[taskId];
+        ACTIVE_Q_MODAL_KEY = '';
+        document.getElementById('q-modal-backdrop').style.display = 'none';
+        toast('已提交你的选择，成员正在原会话继续推进');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function openFollowupModal(tid) {
+      const t = (STATE?.tasks || []).find(x => x.id === tid);
+      const lastTxt = (t?.summary || t?.steps?.[t.steps.length - 1]?.latest_result_text || '').slice(-420);
+      openModal(`
+        <h3 style="margin-top:0;">🔁 沿原会话正式追问</h3>
+        ${lastTxt ? `<div style="font-size:11px; color:var(--muted); background:#0c0f17; border:1px solid var(--border); padding:7px 9px; border-radius:6px; max-height:120px; overflow-y:auto; white-space:pre-wrap; margin-bottom:8px;">${esc(lastTxt)}</div>` : ''}
+        <label>输入后续指令（你也可以直接在现场底部的群聊栏点名任意成员插话）</label>
+        <textarea id="mdl-fup" placeholder="输入追问或补充交付要求..."></textarea>
+        <div class="action-bar">
+          <button class="btn" onclick="doFollowup('${esc(tid)}')">发送并继续</button>
+          <button class="btn btn-sec" onclick="closeModal()">取消</button>
+        </div>
+      `);
+    }
+    async function doFollowup(tid) {
+      try {
+        await api('POST', '/api/tasks/followup', { task_id: tid, prompt: document.getElementById('mdl-fup').value });
+        closeModal();
+        toast('已发起同会话追问');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function openRulingModal(tid, stepIdx) {
+      openModal(`
+        <h3 style="margin-top:0;">⚖️ 总管人工裁决</h3>
+        <div style="margin-bottom:8px;">
+          <label>裁决决定</label>
+          <select id="mdl-r-dec">
+            <option value="accept">采纳审查意见 → 退回原成员定向修复并复审</option>
+            <option value="reject">驳回审查异议 → 认可当前结果直接放行</option>
+            <option value="defer">暂缓处理</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label>裁决理由 / 修复指示</label>
+          <textarea id="mdl-r-reason" placeholder="输入你的裁决意见..."></textarea>
+        </div>
+        <div class="action-bar">
+          <button class="btn" onclick="doRuling('${esc(tid)}', ${stepIdx})">提交裁决</button>
+          <button class="btn btn-sec" onclick="closeModal()">取消</button>
+        </div>
+      `);
+    }
+    async function doRuling(tid, stepIdx) {
+      try {
+        const reason = document.getElementById('mdl-r-reason').value.trim() || '负责人人工裁决';
+        await api('POST', '/api/tasks/ruling', { task_id: tid, step_index: stepIdx, decision: document.getElementById('mdl-r-dec').value, reason });
+        closeModal();
+        toast('裁决已生效');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function openReassignModal(tid, stepIdx, curMem) {
+      const ms = STATE.members || {};
+      const opts = getRunnableIds(STATE).filter(k => k !== curMem)
+        .map(k => `<option value="${esc(k)}">[${ms[k].client === 'antigravity' ? 'AGY' : 'Codex'}] ${esc(ms[k].name || k)} (${esc(ms[k].model)})</option>`).join('');
+      openModal(`
+        <h3 style="margin-top:0;">🔀 换其他成员接手该节点</h3>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">自动打包目标、群聊上下文、前序成果与待解问题交接给新成员。</div>
+        <div style="margin-bottom:8px;"><label>选择接手成员</label><select id="mdl-rea-m">${opts}</select></div>
+        <div><label>改派说明</label><input type="text" id="mdl-rea-r" value="负责人调换专家接手处理"></div>
+        <div class="action-bar">
+          <button class="btn" onclick="doReassign('${esc(tid)}', ${stepIdx})">确认改派</button>
+          <button class="btn btn-sec" onclick="closeModal()">取消</button>
+        </div>
+      `);
+    }
+    async function doReassign(tid, stepIdx) {
+      try {
+        await api('POST', '/api/tasks/reassign', {
+          task_id: tid, step_index: stepIdx,
+          new_member_id: document.getElementById('mdl-rea-m').value,
+          reason: document.getElementById('mdl-rea-r').value
+        });
+        closeModal();
+        toast('已完成跨成员交接并启动');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    function openSwitchMemberModal(mid, focusName = false) {
+      const m = STATE.members[mid];
+      const isWorking = m.status === 'working';
+      const roleOpts = Object.keys(STATE.roles).map(rid =>
+        `<option value="${esc(rid)}" ${rid === m.role ? 'selected' : ''}>${esc(STATE.roles[rid].name)}</option>`
+      ).join('');
+      openModal(`
+        <h3 style="margin-top:0;">✏️ 编辑成员姓名与模型配置 (<code>${esc(mid)}</code>)</h3>
+        <div style="margin-bottom:8px;">
+          <label>成员显示名称（随时自定义改名，圆桌与群聊同步显示）</label>
+          <input type="text" id="sw-name" value="${esc(m.name || mid)}" placeholder="输入你喜欢的成员称呼...">
+        </div>
+        <div class="grid-2" style="margin-bottom:8px;">
+          <div>
+            <label>客户端引擎</label>
+            <select id="sw-client" onchange="populateClientModels('sw-client', 'sw-model', 'sw-effort')">
+              <option value="antigravity" ${m.client === 'antigravity' ? 'selected' : ''}>Antigravity (Gemini / Claude)</option>
+              <option value="codex" ${m.client === 'codex' ? 'selected' : ''}>Codex (GPT 系列)</option>
+            </select>
+          </div>
+          <div>
+            <label>角色职责</label>
+            <select id="sw-role">${roleOpts}</select>
+          </div>
+          <div>
+            <label>官方可用模型</label>
+            <select id="sw-model" onchange="syncClientEfforts('sw-client', 'sw-model', 'sw-effort')"></select>
+          </div>
+          <div>
+            <label>思考强度</label>
+            <select id="sw-effort"></select>
+          </div>
+        </div>
+        ${isWorking ? `
+          <div style="margin-bottom:8px;">
+            <label>该成员正在执行任务，模型变更生效方式（改名立即生效）</label>
+            <select id="sw-mode">
+              <option value="next_round">本步完成后下一轮自动切换 (next_round)</option>
+              <option value="abort_now">立即中止当前尝试并切换 (abort_now)</option>
+            </select>
+          </div>
+        ` : ''}
+        <div class="action-bar">
+          <button class="btn" onclick="doSwitchMember('${esc(mid)}', ${isWorking})">保存修改</button>
+          <button class="btn btn-sec" onclick="closeModal()">取消</button>
+        </div>
+      `);
+      populateClientModels('sw-client', 'sw-model', 'sw-effort', m.model, m.reasoning_effort);
+      if (focusName) {
+        setTimeout(() => {
+          const inp = document.getElementById('sw-name');
+          if (inp) { inp.focus(); inp.select(); }
+        }, 40);
+      }
+    }
+
+    async function doSwitchMember(mid, isWorking) {
+      const newName = document.getElementById('sw-name').value.trim();
+      if (!newName) { toast('成员姓名不能为空', true); return; }
+      try {
+        await api('POST', '/api/members/switch', {
+          id: mid,
+          name: newName,
+          client: document.getElementById('sw-client').value,
+          role: document.getElementById('sw-role').value,
+          model: document.getElementById('sw-model').value,
+          reasoning_effort: document.getElementById('sw-effort').value,
+          mode: isWorking ? document.getElementById('sw-mode').value : 'next_round',
+          reason: '界面修改成员名称与模型配置'
+        });
+        closeModal();
+        toast(`已保存“${newName}”的设置`);
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function createMember() {
+      try {
+        await api('POST', '/api/members', {
+          id: document.getElementById('add-m-id').value.trim(),
+          name: document.getElementById('add-m-name').value.trim(),
+          role: document.getElementById('add-m-role').value,
+          client: document.getElementById('add-m-client').value,
+          model: document.getElementById('add-m-model').value,
+          reasoning_effort: document.getElementById('add-m-effort').value
+        });
+        document.getElementById('add-m-id').value = '';
+        document.getElementById('add-m-name').value = '';
+        toast('新成员已加入团队花名册');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function deleteMember(id) {
+      try {
+        await api('POST', '/api/members/delete', { id });
+        toast(`已移除成员 ${id}`);
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function saveRole() {
+      try {
+        await api('POST', '/api/roles', {
+          id: document.getElementById('r-id').value.trim(),
+          name: document.getElementById('r-name').value.trim(),
+          description: document.getElementById('r-desc').value.trim()
+        });
+        toast('角色模板已保存');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    async function saveConcurrency() {
+      try {
+        await api('POST', '/api/binding', { max_concurrency: parseInt(document.getElementById('cfg-conc').value, 10) });
+        toast('最大同时并行成员数已更新');
+        await refreshState(true);
+      } catch (e) { toast(e.message, true); }
+    }
+
+    // Boot
+    (async function boot() {
+      syncQPopupToggleBtn();
+      await loadCapabilities(false);
+      await refreshState(true);
+      selectComposerMode('roundtable');
+      await loadProjects();
+      setInterval(() => refreshState(false), 1200);
+      setInterval(updateLiveTimersInDom, 1000);
+    })();
+  </script>
+</body>
+</html>

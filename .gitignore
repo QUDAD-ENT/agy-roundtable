@@ -1,0 +1,37 @@
+# Runtime state & local session history (contains private project paths & transcripts)
+prototype/team_state.json
+prototype/team_state.json.*
+*.bak
+*.bak.*
+*.tmp
+*.log
+
+# Python & OS caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+
+# Local CLI / QA sandboxes & internal verification artifacts
+.codex/
+qa/.codex/
+verification/
+qa/cooperation_audit_*/
+qa/sandbox_out/
+prototype/run_live_e2e_acceptance.py
+
+# Local-only Chinese planning scratchpad files (kept on disk, excluded from public repo)
+一键登录并发布GitHub.cmd
+旧项目清理状态.md
+执行记录.md
+方案草案.md
+实施计划.md
+目标与验收.md
+功能与官方调用边界评估.md
+开源项目实现与功能对照.md
+Antigravity-CLI官方能力核查.md
+
+.github/
