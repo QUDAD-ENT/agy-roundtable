@@ -107,6 +107,14 @@ class TeamRuntimeClient:
     def get_models(self, refresh: bool = False) -> Dict[str, Any]:
         return self._request("GET", f"/api/models?refresh={'1' if refresh else '0'}", timeout=20.0)
 
+    def optimize_roster(self, apply_names: bool = True, refresh_cli: bool = True) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/specialists/optimize_roster",
+            {"apply_names": apply_names, "refresh_cli": refresh_cli},
+            timeout=25.0,
+        )
+
     def create_task(self, **kwargs: Any) -> Dict[str, Any]:
         self._request("POST", "/api/coordinator/heartbeat", {"source": "antigravity_cli"})
         return self._request("POST", "/api/tasks", kwargs)

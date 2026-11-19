@@ -1380,7 +1380,10 @@
           <div style="font-size:15px; font-weight:600;" id="lbl-members-heading"></div>
           <div style="font-size:12px; color:var(--text-2);" id="lbl-members-sub"></div>
         </div>
-        <button class="btn btn-sec btn-sm" id="btn-refresh-models" onclick="loadCapabilities(true)"></button>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sm" id="btn-optimize-roster" onclick="optimizeRosterAction()"></button>
+          <button class="btn btn-sec btn-sm" id="btn-refresh-models" onclick="loadCapabilities(true)"></button>
+        </div>
       </div>
 
       <div id="members-grid" class="grid-2" style="margin-bottom:14px;"></div>
@@ -1580,12 +1583,13 @@
         rtFastR1: '首轮直接并行开跑',
         hostTag: '主持',
         setHost: '设为主持',
-        flowFastMulti: '首秒 {n} 人并行立论 → {r} 轮交叉互评 → 主持汇总定稿',
-        flowOpenMulti: '主持破题 → {n} 人并行立论 → {r} 轮交叉互评 → 主持定稿',
-        flowFastOne: '首秒 {n} 人并行立论 → 主持直接汇总定稿',
-        flowOpenOne: '主持破题 → {n} 人并行立论 → 主持汇总定稿',
+        flowFastMulti: '首秒 {n} 人盲评并行立论 → {r} 轮对抗互评与假说演化 → 主持多维仲裁定稿',
+        flowOpenMulti: '主持破题 → {n} 人盲评并行立论 → {r} 轮对抗互评与演化 → 主持仲裁定稿',
+        flowFastOne: '首秒 {n} 人盲评并行立论 → 主持直接多维仲裁定稿',
+        flowOpenOne: '主持破题 → {n} 人盲评并行立论 → 主持仲裁定稿',
         chiefCommander: '坐镇主帅',
         chiefFlow: '主帅勘察项目 → 从 {n} 名待命成员中按需点兵 → 终局签发',
+        dagPresetOpenScience: 'OpenScience：勘察+假说 → 审稿+复算 → 演化定稿',
         dagPreset1: '双人并行调研 → 汇总 → 审查',
         dagPreset2: '实施 → 独立审查',
         dagPreset3: '实施 → 审查 + 文档并行',
@@ -1744,7 +1748,9 @@
         squadHealthOk: '双引擎交叉 · 严格防幻觉',
         squadHealthWarn: '单引擎阵容 · 建议混编 AGY+Codex',
         presetApplied: '已套用阵容：{name}',
-        tplGalleryTitle: '内置科研 + 工程专家模板库（一键招募）',
+        tplGalleryTitle: 'OpenScience 科研 + 代码工程专家模板库（11 位 · 一键招募）',
+        optimizeRoster: '一键校准模型与 OpenScience 身份',
+        optimizeRosterDone: '已按双端实测能力校准 {n} 位专家模型与身份',
         recruitBtn: '一键招募',
         cloneBtn: '克隆',
         mSpecialty: '专长标签',
@@ -1814,12 +1820,13 @@
         rtFastR1: 'Instant parallel Round 1',
         hostTag: 'Host',
         setHost: 'Set Host',
-        flowFastMulti: 'Parallel Round 1 ({n} agents) → {r} rounds cross-critique → Host synthesis',
-        flowOpenMulti: 'Host framing → Parallel Round 1 ({n} agents) → {r} rounds cross-critique → Host synthesis',
-        flowFastOne: 'Parallel Round 1 ({n} agents) → Direct Host synthesis',
-        flowOpenOne: 'Host framing → Parallel Round 1 ({n} agents) → Host synthesis',
+        flowFastMulti: 'Blind Parallel Round 1 ({n} agents) → {r} rounds adversarial critique → M-MAD Host synthesis',
+        flowOpenMulti: 'Host framing → Blind Parallel Round 1 ({n} agents) → {r} rounds critique → M-MAD synthesis',
+        flowFastOne: 'Blind Parallel Round 1 ({n} agents) → Direct M-MAD Host synthesis',
+        flowOpenOne: 'Host framing → Blind Parallel Round 1 ({n} agents) → M-MAD Host synthesis',
         chiefCommander: 'Commander',
         chiefFlow: 'Commander inspects workspace → Recruits from {n} standby specialists → Final sign-off',
+        dagPresetOpenScience: 'OpenScience: Scout+Hypotheses → Peer Review+Audit → Evolution',
         dagPreset1: 'Parallel Research → Synthesis → Review',
         dagPreset2: 'Implementation → Review',
         dagPreset3: 'Implementation → Review + Docs',
@@ -1978,7 +1985,9 @@
         squadHealthOk: 'Cross-Engine · Strict Grounding',
         squadHealthWarn: 'Single Engine · Mix AGY+Codex recommended',
         presetApplied: 'Applied squad preset: {name}',
-        tplGalleryTitle: 'Curated Research + Engineering Specialist Templates (1-Click Recruit)',
+        tplGalleryTitle: 'OpenScience Research + Engineering Specialist Templates (11 · 1-Click Recruit)',
+        optimizeRoster: 'Auto-Calibrate Models & OpenScience Roles',
+        optimizeRosterDone: 'Calibrated {n} specialist(s) against live CLI benchmarks',
         recruitBtn: 'Recruit',
         cloneBtn: 'Clone',
         mSpecialty: 'Specialty',
@@ -2240,6 +2249,8 @@
       // Members
       document.getElementById('lbl-members-heading').textContent = t('membersHeading');
       document.getElementById('lbl-members-sub').textContent = t('membersSub');
+      const optBtn = document.getElementById('btn-optimize-roster');
+      if (optBtn) optBtn.innerHTML = `${svgIcon('sliders', 13)} ${esc(t('optimizeRoster'))}`;
       document.getElementById('btn-refresh-models').innerHTML = `${svgIcon('refresh', 13)} ${esc(t('refreshModels'))}`;
       document.getElementById('lbl-tpl-gallery').textContent = t('tplGalleryTitle');
       document.getElementById('lbl-add-member').textContent = t('addMember');
@@ -2583,7 +2594,21 @@
     function applyDagPreset(presetName, showMsg = true) {
       const ids = getRunnableIds();
       const pick = (pref, idx = 0) => ids.includes(pref) ? pref : (ids[idx % Math.max(1, ids.length)] || 'codex_author');
-      if (presetName === 'parallel_research_review') {
+      if (presetName === 'openscience_4stage') {
+        CMP.dagStages = [
+          [
+            { member_id: pick('agy_flash_worker', 0), step_type: 'discussion', prompt: '快速扫描工作区核心文件、原始数据与结果表，输出决策就绪的《证据索引卡》与数据缺口清单。' },
+            { member_id: pick('agy_gemini', 1), step_type: 'discussion', prompt: '基于真实证据先测绘已知/争议/前提，用 5 类创新算子提出 ≥3 条正交假说或架构路线（含竞争性解释与最小判别实验）。' }
+          ],
+          [
+            { member_id: pick('agy_claude_reviewer', 2), step_type: 'discussion', prompt: '执行顶刊方法学同行评议：Steelman 后给出 BLOCKING / OBSERVATION 分级审查，检查是否遗漏领域常规必报指标或存在过度外推/怯懦回避。' },
+            { member_id: pick('codex_author_2', 3), step_type: 'discussion', prompt: '独立复算关键数值/数据表一致性并核验工程/统计边界条件，给出可执行机械验收标准（Acceptance Checks）。' }
+          ],
+          [
+            { member_id: pick('agy_gemini', 1), step_type: 'synthesis', prompt: '输出 M-MAD 多维仲裁矩阵与 OpenScience 演化终稿：结论先行、保留亚军正交创新路径、完整三层认知标定与证据溯源台账。' }
+          ]
+        ];
+      } else if (presetName === 'parallel_research_review') {
         CMP.dagStages = [
           [
             { member_id: pick('codex_author', 0), step_type: 'discussion', prompt: '' },
@@ -2778,6 +2803,7 @@
           <div class="setup-strip">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
               <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-sec btn-sm" onclick="applyDagPreset('openscience_4stage')">${esc(t('dagPresetOpenScience'))}</button>
                 <button class="btn btn-sec btn-sm" onclick="applyDagPreset('parallel_research_review')">${esc(t('dagPreset1'))}</button>
                 <button class="btn btn-sec btn-sm" onclick="applyDagPreset('impl_review_loop')">${esc(t('dagPreset2'))}</button>
                 <button class="btn btn-sec btn-sm" onclick="applyDagPreset('impl_doc_parallel')">${esc(t('dagPreset3'))}</button>
@@ -2827,7 +2853,12 @@
         || pool.find(id => !picked.includes(id) && ms[id].role === tagPref)
         || pool.find(id => !picked.includes(id));
 
-      if (p.id === 'fast_cross_check') {
+      if (p.id === 'openscience_discovery') {
+        addUniq(findBest(agyIds, 'hypothesis') || findBest(agyIds, 'openscience') || agyIds[0]);
+        addUniq(findBest(agyIds, 'review') || agyIds[1]);
+        addUniq(findBest(codexIds, 'fact_check') || findBest(codexIds, 'implementation') || codexIds[0]);
+        addUniq(findBest(codexIds, 'review') || findBest(agyIds, 'scout') || codexIds[1]);
+      } else if (p.id === 'fast_cross_check') {
         addUniq(findBest(agyIds, 'implementation') || agyIds[0]);
         addUniq(findBest(codexIds, 'review') || findBest(codexIds, 'implementation') || codexIds[0]);
       } else if (p.id === 'research_submission') {
@@ -4306,7 +4337,15 @@
       if (!tpl || !STATE) return;
       const client = tpl.recommended_client || 'codex';
       const models = (CAPS.clients?.[client]?.models) || [];
-      const firstM = models[0] || { slug: client === 'antigravity' ? 'gemini-4-carbon' : 'gpt-6.1-sol', default_reasoning_effort: 'medium' };
+      let chosenM = null;
+      for (const prefSlug of (tpl.recommended_models || [])) {
+        chosenM = models.find(m => m.slug === prefSlug);
+        if (chosenM) break;
+      }
+      if (!chosenM) chosenM = models[0] || { slug: client === 'antigravity' ? 'gemini-4-neon' : 'gpt-6.1-sol', default_reasoning_effort: 'medium', supported_reasoning_efforts: ['medium'] };
+      const suppEffs = chosenM.supported_reasoning_efforts || [];
+      const prefEff = tpl.recommended_effort || chosenM.default_reasoning_effort || 'medium';
+      const chosenEff = suppEffs.includes(prefEff) ? prefEff : (chosenM.default_reasoning_effort || suppEffs[0] || 'medium');
       let baseId = tpl.template_id;
       let newId = baseId;
       let n = 2;
@@ -4318,8 +4357,8 @@
           name: nm,
           role: STATE.roles?.[tpl.role] ? tpl.role : 'review',
           client,
-          model: firstM.slug,
-          reasoning_effort: firstM.default_reasoning_effort || 'medium',
+          model: chosenM.slug,
+          reasoning_effort: chosenEff,
           specialty: LANG === 'en' ? tpl.specialty_en : tpl.specialty_zh,
           persona_prompt: tpl.persona_prompt,
           grounding_mode: tpl.grounding_mode || 'strict',
@@ -4327,6 +4366,39 @@
         });
         toast(t('recruitedToast', { name: nm }));
         await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function optimizeRosterAction() {
+      try {
+        const res = await api('POST', '/api/specialists/optimize_roster', { apply_names: true, refresh_cli: true });
+        await loadCapabilities(false);
+        await refreshState(true);
+        toast(t('optimizeRosterDone', { n: res.count || 0 }));
+        const rows = (res.changes || []).map(c => `
+          <tr>
+            <td><code>${esc(c.member_id)}</code></td>
+            <td>${esc(c.from?.model || '-')} (${esc(c.from?.reasoning_effort || '-')})</td>
+            <td><strong>${esc(c.to?.model || '-')} (${esc(c.to?.reasoning_effort || '-')})</strong></td>
+            <td>${esc(c.to?.name || '')}<br><span style="font-size:11px; color:var(--text-3);">${esc(c.to?.specialty || '')}</span></td>
+          </tr>
+        `).join('');
+        openModal(`
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <strong style="font-size:15px;">${esc(t('optimizeRoster'))}</strong>
+            <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+          </div>
+          <div style="font-size:12px; color:var(--text-2); margin-bottom:10px;">
+            ${LANG === 'en' ? 'Calibrated idle specialists to verified live CLI models and OpenScience + Engineering SOP personas.' : '已依据双端官方 CLI 实时模型目录与实测基准，校准全部空闲专家的模型、思考强度与 OpenScience 科研/工程 SOP 身份：'}
+          </div>
+          <div class="md-table-wrap"><table class="md-table">
+            <thead><tr><th>ID</th><th>Before</th><th>After</th><th>${LANG === 'en' ? 'Identity & Specialty' : '新身份与专长'}</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>
+          <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+            <button class="btn btn-sm" onclick="closeModal()">${esc(t('close'))}</button>
+          </div>
+        `, true);
       } catch (e) { toast(t('toastFail', { err: e.message }), true); }
     }
 
@@ -4614,6 +4686,12 @@
           run: () => { closeCmdK(); openReanswerModal(FOCUSED_TASK_ID); }
         });
       }
+      actions.push({
+        label: t('optimizeRoster'),
+        sub: LANG === 'en' ? 'Align all idle members with verified live CLI models & OpenScience personas' : '按双端实测能力一键修复失效模型并升级 OpenScience 科研/工程身份',
+        icon: 'sliders',
+        run: () => { closeCmdK(); optimizeRosterAction(); }
+      });
       actions.push({
         label: t('themeToggle'),
         sub: THEME === 'light' ? 'Switch to Dark' : 'Switch to Light',

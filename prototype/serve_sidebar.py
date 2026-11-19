@@ -386,7 +386,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 9})
+                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 10})
             elif route == "/api/state":
                 self._send_json(200, ORCHESTRATOR.store.snapshot())
             elif route == "/api/models":
@@ -518,6 +518,12 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     tags=body.get("tags"),
                     mode=body.get("mode", "next_round"),
                     reason=body.get("reason", "界面编辑成员名称/配置"),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/specialists/optimize_roster":
+                res = ORCHESTRATOR.optimize_roster(
+                    apply_names=bool(body.get("apply_names", True)),
+                    refresh_cli=bool(body.get("refresh_cli", False)),
                 )
                 self._send_json(200, {"ok": True, **res})
             elif route == "/api/tasks":

@@ -925,6 +925,255 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
         finally:
             orch.stop_scheduler()
 
+    def test_12_openscience_blind_r1_dialect_structured_consult_and_roster_calibration(self) -> None:
+        captured: list[dict] = []
+        consult_triggered = {"done": False}
+
+        def sci_runner(prompt, session_id, **kwargs):
+            cfg = kwargs["requested_config"]
+            captured.append({"client": cfg["client"], "model": cfg["model"], "prompt": prompt})
+            if "团队实时协助请求" in prompt:
+                return CodexExecutionResult(
+                    session_id="peer-consult-sess",
+                    response_text="**判定 (Verdict)**：`CONFIRMED`\n**核查证据**：`prototype/serve_sidebar.py#L389` 返回 `server_rev: 10`。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if "第 1 轮独立盲评阶段" in prompt:
+                if "(ID: agy_gemini)" in prompt:
+                    return CodexExecutionResult(
+                        session_id="r1-gemini",
+                        response_text="ROUND1_SECRET_ANCHOR_ALPHA：提出两条正交假说 H1/H2 与最小判别实验。",
+                        partial_text="",
+                        exit_code=0,
+                        turn_completed=True,
+                        requested_config=cfg,
+                        accepted_config=kwargs["accepted_config"],
+                    )
+                if "(ID: agy_claude_reviewer)" in prompt and not consult_triggered["done"]:
+                    consult_triggered["done"] = True
+                    return CodexExecutionResult(
+                        session_id="r1-claude",
+                        response_text=(
+                            "准备核验边界条件。\n"
+                            "```team_consult\n"
+                            '{"to":"codex_reviewer","claim_to_verify":"server_rev 等于 10","evidence_needed":"serve_sidebar.py#L389","question":"请独立核对 health 返回值"}\n'
+                            "```"
+                        ),
+                        partial_text="",
+                        exit_code=0,
+                        turn_completed=True,
+                        requested_config=cfg,
+                        accepted_config=kwargs["accepted_config"],
+                    )
+                return CodexExecutionResult(
+                    session_id="r1-other",
+                    response_text="独立盲评完成（含实证与竞争性解释）。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if "请仔细阅读共享群聊中其他参会队友上一轮的全部发言" in prompt:
+                return CodexExecutionResult(
+                    session_id="r2-sess",
+                    response_text="Steelman 后指出 1 项 BLOCKING 与 1 项 OBSERVATION，已完成锦标赛对比。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id="synth-sess",
+                response_text="### 终稿\n已输出 M-MAD 多维仲裁矩阵与证据溯源台账。",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=cfg,
+                accepted_config=kwargs["accepted_config"],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=sci_runner),
+            agy_adapter=AgyAdapter(runner_override=sci_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            # Verify 11 OpenScience + Engineering templates & openscience_discovery preset
+            cat = orch.get_specialist_catalog()
+            self.assertGreaterEqual(len(cat["templates"]), 11)
+            self.assertEqual(cat["squad_presets"][0]["id"], "openscience_discovery")
+
+            # Force max_concurrency=1 so Round 1 executes strictly serially (stress-testing Blind Round 1 isolation!)
+            orch.update_binding(max_concurrency=1)
+
+            # Test roster auto-calibration against live capabilities
+            opt_res = orch.optimize_roster(apply_names=True, refresh_cli=False)
+            self.assertGreaterEqual(opt_res["count"], 5)
+
+            t = orch.create_task(
+                title="OpenScience 盲评与结构化协商闭环测试",
+                goal="提出并检验多模型科研协作改进假说",
+                execution_mode="roundtable",
+                host_member_id="agy_gemini",
+                participants=["agy_gemini", "agy_claude_reviewer", "codex_reviewer"],
+                discussion_rounds=2,
+                enable_host_opening=False,
+            )
+
+            deadline = time.time() + 20.0
+            cur = None
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+
+            self.assertEqual(cur["status"], "succeeded")
+
+            # 1. Blind Round 1 Isolation: agy_claude_reviewer & codex_reviewer MUST NOT see agy_gemini's R1 secret anchor
+            #    AND codex_reviewer MUST NOT see agy_claude_reviewer's directed R1 consult text ("server_rev 等于 10")!
+            r1_gemini = [c["prompt"] for c in captured if "第 1 轮独立盲评阶段" in c["prompt"] and "(ID: agy_gemini)" in c["prompt"]]
+            r1_claude = [c["prompt"] for c in captured if "第 1 轮独立盲评阶段" in c["prompt"] and "(ID: agy_claude_reviewer)" in c["prompt"]]
+            r1_codex = [c["prompt"] for c in captured if "第 1 轮独立盲评阶段" in c["prompt"] and "(ID: codex_reviewer)" in c["prompt"] and "团队实时协助请求" not in c["prompt"]]
+            self.assertTrue(r1_gemini and r1_claude and r1_codex)
+            self.assertNotIn("ROUND1_SECRET_ANCHOR_ALPHA", r1_claude[0])
+            self.assertNotIn("ROUND1_SECRET_ANCHOR_ALPHA", r1_codex[0])
+            self.assertNotIn("server_rev 等于 10", r1_codex[0])
+            self.assertNotIn("server_rev: 10", r1_codex[0])
+            self.assertNotIn("team_rooms", r1_codex[0])
+
+            # 2. Round 2 MUST see Round 1's output + Triad role differentiation!
+            r2_prompts = [c["prompt"] for c in captured if "请仔细阅读共享群聊中其他参会队友上一轮的全部发言" in c["prompt"]]
+            self.assertGreaterEqual(len(r2_prompts), 3)
+            self.assertTrue(any("ROUND1_SECRET_ANCHOR_ALPHA" in p for p in r2_prompts))
+            self.assertTrue(any("Skeptical Challenger" in p for p in r2_prompts))
+
+            # 3. Model-Family Prompt Dialects + OpenScience 3-Tier Epistemic Calibration + M-MAD Host Synthesis
+            self.assertIn('<dialect_calibration model_family="claude">', r1_claude[0])
+            self.assertIn("Gemini 旗舰广域综合与假说演化模式", r1_gemini[0])
+            self.assertIn("Codex / GPT 工具先行与机械验收模式", r1_codex[0])
+            self.assertIn("[机制假说/深度外推 Hypothesis]", r1_claude[0])
+            synth_prompts = [c["prompt"] for c in captured if "多维仲裁与演化矩阵" in c["prompt"]]
+            self.assertEqual(len(synth_prompts), 1)
+
+            # 4. Structured Persona-Aware @consult Handoff!
+            consult_prompts = [c["prompt"] for c in captured if "团队实时协助请求" in c["prompt"]]
+            self.assertEqual(len(consult_prompts), 1)
+            self.assertIn("待核验声明：server_rev 等于 10", consult_prompts[0])
+            self.assertIn("需核对证据：serve_sidebar.py#L389", consult_prompts[0])
+            self.assertIn("你的专业核查视角", consult_prompts[0])
+            self.assertIn("Verdict", consult_prompts[0])
+        finally:
+            orch.stop_scheduler()
+
+    def test_13_consult_failure_safety_worker_crash_guard_and_state_rollback(self) -> None:
+        # 1. Corrupt state file must be backed up (never silently wiped without .corrupt.*.bak)
+        corrupt_path = os.path.join(self.tmp_dir, "corrupt_state.json")
+        for old_f in os.listdir(self.tmp_dir):
+            if old_f.startswith("corrupt_state.json"):
+                os.remove(os.path.join(self.tmp_dir, old_f))
+        with open(corrupt_path, "w", encoding="utf-8") as cf:
+            cf.write("{invalid json content")
+        mgr = TeamStateManager(state_file=corrupt_path)
+        baks = [f for f in os.listdir(self.tmp_dir) if f.startswith("corrupt_state.json.corrupt.") and f.endswith(".bak")]
+        self.assertEqual(len(baks), 1, "Corrupt state file must be preserved as .bak!")
+
+        # 2. Transactional mutate() rollback on disk write failure
+        orig_pause = mgr.snapshot()["paused"]
+        orig_write = mgr._write_atomic
+
+        def _boom(_data):
+            raise OSError("Simulated disk full")
+
+        mgr._write_atomic = _boom
+        with self.assertRaises(OSError):
+            mgr.mutate(lambda st: st.__setitem__("paused", not orig_pause))
+        mgr._write_atomic = orig_write
+        self.assertEqual(mgr.snapshot()["paused"], orig_pause, "Failed disk write must roll back in-memory state!")
+
+        # 3. Failed @consult must produce UNVERIFIABLE (never fake '无补充异议') + worker exception must never hang!
+        consult_state = {"asked": False}
+
+        def fail_runner(prompt, session_id, **kwargs):
+            cfg = kwargs["requested_config"]
+            if "SIMULATE_OS_CRASH" in prompt:
+                raise OSError("Simulated WinError 206")
+            if "团队实时协助请求" in prompt:
+                return CodexExecutionResult(
+                    session_id=None,
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    error="Simulated peer timeout",
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if not consult_state["asked"]:
+                consult_state["asked"] = True
+                return CodexExecutionResult(
+                    session_id="c-fail-sess",
+                    response_text='先请队友复核：\n```team_consult\n{"to":"codex_reviewer","question":"请核查样本量"}\n```',
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id="c-fail-sess",
+                response_text="收到失败提示，保留为待核实。",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=cfg,
+                accepted_config=kwargs["accepted_config"],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=fail_runner),
+            agy_adapter=AgyAdapter(runner_override=fail_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            t1 = orch.create_task(title="协商失败防误判", goal="核验失败回退", execution_mode="single_member", target_member_id="agy_gemini")
+            deadline = time.time() + 15.0
+            cur1 = None
+            while time.time() < deadline:
+                cur1 = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t1["id"])
+                if cur1["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur1["status"], "succeeded")
+            replies = [c["content"] for c in cur1["chat_room"] if c["kind"] == "mention_reply"]
+            self.assertEqual(len(replies), 1)
+            self.assertIn("UNVERIFIABLE", replies[0])
+            self.assertNotIn("可按原计划推进", replies[0])
+
+            # Worker crash guard: must mark failed & release member to idle (no zombie hang!)
+            t2 = orch.create_task(title="线程异常防卡死", goal="SIMULATE_OS_CRASH", execution_mode="single_member", target_member_id="codex_author")
+            deadline = time.time() + 15.0
+            cur2 = None
+            while time.time() < deadline:
+                snap = orch.store.snapshot()
+                cur2 = next(x for x in snap["tasks"] if x["id"] == t2["id"])
+                if cur2["status"] == "failed":
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur2["status"], "failed")
+            self.assertIn("WinError 206", cur2["steps"][0]["blocking_reason"])
+            self.assertEqual(orch.store.snapshot()["members"]["codex_author"]["status"], "idle")
+        finally:
+            orch.stop_scheduler()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

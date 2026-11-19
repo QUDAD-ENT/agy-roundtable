@@ -352,7 +352,12 @@ class AgyAdapter:
                 return res
 
             combined_err = f"{res.error or ''}\n" + "\n".join(res.stderr_lines[-8:])
-            if retry_idx < max_transient_retries and is_transient_network_error(combined_err):
+            is_backend_hiccup = (
+                is_transient_network_error(combined_err)
+                or "empty conversation id" in combined_err.lower()
+                or "failed to start conversation" in combined_err.lower()
+            )
+            if retry_idx < max_transient_retries and is_backend_hiccup:
                 backoff = 2.5 * (retry_idx + 1)
                 if on_event:
                     on_event({
@@ -434,10 +439,13 @@ class AgyAdapter:
         os.makedirs(work_dir, exist_ok=True)
         settings_json = self._build_session_settings_json(work_dir, sandbox)
 
+        # Stream the prompt over stdin as NDJSON (--input-format stream-json) so Windows never hits
+        # CreateProcess's 32KB argv limit ([WinError 206]) on rich multi-round Roundtable transcripts!
         argv = [
             self.agy_bin,
-            "-p",
-            prompt,
+            "--print=",
+            "--input-format",
+            "stream-json",
             "--output-format",
             "stream-json",
             "--mode",
@@ -458,6 +466,7 @@ class AgyAdapter:
 
         proc = subprocess.Popen(
             argv,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -467,6 +476,27 @@ class AgyAdapter:
             env=_safe_env(),
             creationflags=CREATE_NO_WINDOW,
         )
+
+        # Feed prompt via background stdin writer so large multi-turn prompts never deadlock pipes
+        def _feed_stdin() -> None:
+            if not proc.stdin:
+                return
+            try:
+                ndjson_line = json.dumps(
+                    {"event": "user", "message": {"role": "user", "content": prompt}},
+                    ensure_ascii=False,
+                ) + "\n"
+                proc.stdin.write(ndjson_line)
+                proc.stdin.flush()
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_feed_stdin, daemon=True).start()
 
         meta: Dict[str, Any] = {"abort_requested": False, "watchdog_timed_out": False, "last_io_ts": time.time()}
         key = attempt_id or f"agy-{proc.pid}-{time.time()}"

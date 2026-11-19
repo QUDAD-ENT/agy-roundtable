@@ -67,7 +67,7 @@ def _extract_json_obj(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _extract_team_consult(text: str, valid_members: Dict[str, Any], self_id: str) -> Tuple[Optional[Dict[str, str]], str]:
-    """Extract ```team_consult {"to": "member_id", "question": "..."} ``` block if present."""
+    """Extract ```team_consult {"to": "member_id", "question": "...", "claim_to_verify": "...", "evidence_needed": "..."} ``` block."""
     if not text:
         return None, ""
     m = re.search(r"```team_consult\s*(\{.*?\})\s*```", text, re.S)
@@ -76,6 +76,8 @@ def _extract_team_consult(text: str, valid_members: Dict[str, Any], self_id: str
             obj = json.loads(m.group(1))
             to_id = str(obj.get("to") or "").strip().lstrip("@")
             q_txt = str(obj.get("question") or "").strip()
+            claim_txt = str(obj.get("claim_to_verify") or obj.get("claim") or "").strip()
+            ev_txt = str(obj.get("evidence_needed") or obj.get("evidence") or "").strip()
             # Match by ID or display name
             resolved_id = None
             if to_id in valid_members and to_id != self_id:
@@ -85,12 +87,51 @@ def _extract_team_consult(text: str, valid_members: Dict[str, Any], self_id: str
                     if mid != self_id and minfo.get("name") == to_id:
                         resolved_id = mid
                         break
+            if not q_txt and claim_txt:
+                q_txt = f"请独立核验以下声明：{claim_txt}" + (f"（所需证据：{ev_txt}）" if ev_txt else "")
             if resolved_id and q_txt:
                 cleaned = (text[: m.start()] + text[m.end() :]).strip()
-                return {"to": resolved_id, "question": q_txt}, cleaned
+                return {
+                    "to": resolved_id,
+                    "question": q_txt,
+                    "claim_to_verify": claim_txt,
+                    "evidence_needed": ev_txt,
+                }, cleaned
         except Exception:
             pass
     return None, text
+
+
+def _build_model_family_tuning(client: str, model: str) -> str:
+    """Return model-family-specific prompt dialect calibration distilled from OpenScience & empirical benchmarks."""
+    low_m = (model or "").lower()
+    low_c = (client or "").lower()
+
+    if "claude" in low_m:
+        return (
+            "<dialect_calibration model_family=\"claude\">\n"
+            "- 发挥你最擅长的深度批判性审稿、方法学纠偏与高密度学术表达：结论前置，避免客套铺垫与空泛免责声明。\n"
+            "- 发现缺陷时必须明确区分 `BLOCKING`（阻断结论成立的硬伤）与 `OBSERVATION`（优化建议），并先 Steelman 对方最强逻辑再反驳。\n"
+            "- 遵循 OpenScience 原则：严禁以“无法确定/观察性数据无法推断”为借口回避机理与转化解读；请在给出客观实证后，显式以 `[机制假说/深度外推]` 提出可证伪机制与下一步判别实验。\n"
+            "</dialect_calibration>"
+        )
+    if "flash" in low_m:
+        return (
+            "【模型族协同调优 · Gemini Flash 极速勘察模式】\n"
+            "- 发挥极速多文件并行扫描优势（借鉴 OpenScience explore.txt）：优先并行读取关键文件、数据表与核心符号，输出紧凑的《证据索引卡》。\n"
+            "- 严格逐条给出精确路径、行号、原样数值与单位，明确区分 `[实证观察]`、推断与证据缺口；零过程废话，文末给出 1~3 条最关键发现与最小下一步动作。"
+        )
+    if "gemini" in low_m or (low_c == "antigravity" and "oss" not in low_m):
+        return (
+            "【模型族协同调优 · Gemini 旗舰广域综合与假说演化模式】\n"
+            "- 发挥超长上下文全局映射与跨学科综合优势（借鉴 OpenScience brainstorming/hypotheses + AI Co-Scientist）：先测绘全局事实与矛盾点，再使用 5 类创新算子（Gap / Transfer / Inversion / Constraint / Failure）生成正交备选路线。\n"
+            "- 综合多方观点时请输出清晰的【多维仲裁矩阵】，在收敛主推荐方案的同时保留具有独特机理价值的亚军路径与最小判别实验，切勿抹平多样性。"
+        )
+    return (
+        "【模型族协同调优 · Codex / GPT 工具先行与机械验收模式】\n"
+        "- 发挥精确代码/数据执行与机械核验优势（借鉴 OpenScience codex.txt + acceptance-checks）：先读文件、并行检索、对关键数值/边界条件做独立复算，绝不凭直觉猜测。\n"
+        "- 工程与分析坚持最小精准改动原则：不破坏已有有效变更；修改或计算后必须复跑验收检查并明确区分已实测验证区间与未覆盖边界。"
+    )
 
 
 def _extract_ai_questions(text: str) -> Tuple[Optional[List[Dict[str, Any]]], str]:
@@ -254,12 +295,26 @@ class TeamOrchestrator:
         }
         task.setdefault("chat_room", []).append(entry)
         try:
+            # Seal Blind Round 1 disk side-channel: do not write Round 1 peer speeches/consults into
+            # the shared markdown transcript file until ALL Round 1 roundtable steps have succeeded!
+            r1_still_blind = (
+                task.get("execution_mode") == "roundtable"
+                and any(
+                    s.get("step_type") == "discussion"
+                    and int(s.get("stage_index") or 0) == 1
+                    and s.get("status") != "succeeded"
+                    for s in task.get("steps", [])
+                )
+            )
             tmp_dir, _ = get_runtime_dirs()
             rooms_dir = os.path.join(tmp_dir, "team_rooms")
             os.makedirs(rooms_dir, exist_ok=True)
             room_md_path = os.path.join(rooms_dir, f"{task.get('id', 'task')}.md")
             md_lines = [f"# 协作任务实时群聊完整纪要：{task.get('title', '')}\n"]
             for cm in task.get("chat_room", []):
+                if r1_still_blind and cm.get("kind") not in ("user_goal", "user_interjection", "user_choice", "ruling"):
+                    if not (cm.get("step_index") == 0 and (task.get("mode_meta") or {}).get("enable_host_opening")):
+                        continue
                 to_s = f" -> @{cm['to_member_name']}" if cm.get("to_member_name") else ""
                 md_lines.append(f"## [{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name')}{to_s}\n\n{cm.get('content', '')}\n")
             with open(room_md_path, "w", encoding="utf-8") as rf:
@@ -416,6 +471,18 @@ class TeamOrchestrator:
             "templates": SPECIALIST_TEMPLATES,
             "squad_presets": [
                 {
+                    "id": "openscience_discovery",
+                    "name_zh": "OpenScience 科研发现闭环",
+                    "name_en": "OpenScience Discovery Loop",
+                    "desc_zh": "盲评假说发散（科研首席+统计复算+顶刊审稿）→ 对抗锦标赛互评 → 多维仲裁演化与溯源终稿",
+                    "desc_en": "Blind hypothesis generation -> adversarial peer-review & data audit -> M-MAD evolutionary synthesis",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "read-only",
+                    "preferred_tags": ["openscience", "hypothesis", "review", "fact_check"],
+                    "target_count": 4,
+                },
+                {
                     "id": "dual_redteam",
                     "name_zh": "双引擎红队核查",
                     "name_en": "Dual-Engine Red-Team",
@@ -431,8 +498,8 @@ class TeamOrchestrator:
                     "id": "research_submission",
                     "name_zh": "科研投稿与统计核查",
                     "name_en": "Research & Stats Panel",
-                    "desc_zh": "方法学审稿 + 数据表复算 + 稿件统筹，严禁编造数据与期刊指标",
-                    "desc_en": "Methodologist + data audit + synthesis strategist with strict citation grounding",
+                    "desc_zh": "方法学审稿 + 数据表复算 + 稿件统筹，三层认知标定兼顾严谨与机理深度",
+                    "desc_en": "Methodologist + data audit + synthesis strategist with 3-tier epistemic calibration",
                     "mode": "roundtable",
                     "rounds": 2,
                     "sandbox": "read-only",
@@ -443,7 +510,7 @@ class TeamOrchestrator:
                     "id": "code_arch_audit",
                     "name_zh": "代码架构与安全审计",
                     "name_en": "Arch & Security Audit",
-                    "desc_zh": "系统架构统筹 + 工程实施 + 独立安全与边界审计",
+                    "desc_zh": "系统架构统筹 + 工程实施验收 + 独立安全与边界审计",
                     "desc_en": "System architect + implementation + edge-case security audit",
                     "mode": "roundtable",
                     "rounds": 2,
@@ -465,6 +532,130 @@ class TeamOrchestrator:
                 },
             ],
         }
+
+    def optimize_roster(self, apply_names: bool = True, refresh_cli: bool = False) -> Dict[str, Any]:
+        """Auto-calibrate all idle members against live CLI capabilities & benchmark-proven OpenScience/Engineering roles."""
+        caps = self.get_capabilities(refresh_cli=refresh_cli)
+        tpl_map = {t["template_id"]: t for t in SPECIALIST_TEMPLATES}
+
+        def _pick_live_model(client: str, preferred: List[str], pref_effort: str) -> Tuple[Optional[str], str]:
+            avail = (caps.get("clients") or {}).get(client, {}).get("models") or []
+            by_slug = {m["slug"]: m for m in avail if m.get("slug")}
+            chosen_obj = None
+            for slug in preferred:
+                if slug in by_slug:
+                    chosen_obj = by_slug[slug]
+                    break
+            if not chosen_obj and avail:
+                chosen_obj = avail[0]
+            if not chosen_obj:
+                return (preferred[0] if preferred else None), pref_effort
+            effs = chosen_obj.get("supported_reasoning_efforts") or []
+            if pref_effort in effs:
+                eff = pref_effort
+            elif "high" in effs and pref_effort in ("xhigh", "max"):
+                eff = "high"
+            elif "medium" in effs:
+                eff = "medium"
+            elif effs:
+                eff = effs[0]
+            else:
+                eff = chosen_obj.get("default_reasoning_effort") or "medium"
+            return chosen_obj["slug"], eff
+
+        def _classify_member(mid: str, mem: Dict[str, Any]) -> Tuple[str, str]:
+            low = mid.lower()
+            client = mem.get("client", "codex")
+            role = mem.get("role", "implementation")
+            if "flash" in low or "scout" in low:
+                return "openscience_scout", "极速证据勘察员 (Gemini 3.8 Flash)"
+            if client == "antigravity" and (role == "review" or "claude" in low or "review" in low):
+                return "journal_reviewer", "顶刊方法学审稿官 (Claude Opus 5.5)"
+            if client == "antigravity" and ("gemini" in low or "pi" in low or role == "implementation"):
+                return "openscience_pi", "OpenScience 科研首席 (Gemini 4 Neon)"
+            if client == "codex" and (role == "review" or "review" in low or "fact" in low):
+                return "fact_checker", "红队事实核查官 (Codex Auto Review)"
+            if role == "documentation" or "doc" in low or "writ" in low:
+                return "academic_strategist", "学术撰写与交付官 (GPT-6.1 Terra)"
+            if "2" in low or "stat" in low or "data" in low or "biostat" in low:
+                return "biostat_auditor", "统计与数据复算官 (GPT-6 Astra)"
+            return "openscience_experimenter", "实验与工程实施官 (GPT-6.1 Sol)"
+
+        changes: List[Dict[str, Any]] = []
+        skipped: List[str] = []
+
+        def _opt(st: Dict[str, Any]) -> Dict[str, Any]:
+            for mid, mem in st.get("members", {}).items():
+                if mem.get("client") not in SUPPORTED_CLIENTS:
+                    continue
+                if mem.get("status") == "working":
+                    skipped.append(mid)
+                    continue
+                tpl_id, default_label = _classify_member(mid, mem)
+                tpl = tpl_map.get(tpl_id) or SPECIALIST_TEMPLATES[0]
+                client = mem.get("client", tpl.get("recommended_client", "codex"))
+                new_model, new_effort = _pick_live_model(
+                    client,
+                    list(tpl.get("recommended_models") or []),
+                    tpl.get("recommended_effort") or "medium",
+                )
+                old_snapshot = {
+                    "name": mem.get("name"),
+                    "model": mem.get("model"),
+                    "reasoning_effort": mem.get("reasoning_effort"),
+                    "specialty": mem.get("specialty"),
+                }
+                if new_model:
+                    mem["model"] = new_model
+                mem["reasoning_effort"] = new_effort
+                mem["specialty"] = tpl["specialty_zh"]
+                mem["persona_prompt"] = tpl["persona_prompt"]
+                mem["grounding_mode"] = "strict"
+                mem["tags"] = list(tpl["tags"])
+                if apply_names:
+                    # Reflect actual live model slug cleanly in label if fallback happened
+                    short_base = default_label.split("(")[0].strip()
+                    live_disp = next(
+                        (
+                            m.get("display_name") or new_model
+                            for m in (caps.get("clients") or {}).get(client, {}).get("models", [])
+                            if m.get("slug") == new_model
+                        ),
+                        new_model or "",
+                    )
+                    mem["name"] = f"{short_base} ({live_disp})" if live_disp else default_label
+                mem["pending_config"] = None
+                mem.setdefault("config_history", []).append(
+                    {
+                        "changed_at": time.time(),
+                        "from": old_snapshot,
+                        "to": {
+                            "name": mem.get("name"),
+                            "model": mem.get("model"),
+                            "reasoning_effort": mem.get("reasoning_effort"),
+                            "specialty": mem.get("specialty"),
+                            "template_id": tpl_id,
+                        },
+                        "reason": "OpenScience + 实测能力基准一键校准",
+                    }
+                )
+                changes.append(
+                    {
+                        "member_id": mid,
+                        "template_id": tpl_id,
+                        "from": old_snapshot,
+                        "to": {
+                            "name": mem.get("name"),
+                            "client": client,
+                            "model": mem.get("model"),
+                            "reasoning_effort": mem.get("reasoning_effort"),
+                            "specialty": mem.get("specialty"),
+                        },
+                    }
+                )
+            return {"changes": changes, "skipped_working": skipped, "count": len(changes)}
+
+        return self.store.mutate(_opt)
 
     def upsert_member(
         self,
@@ -815,22 +1006,48 @@ class TeamOrchestrator:
                     for mid in valid_ids:
                         idx = len(built_steps)
                         cur_round_indices.append(idx)
-                        m_name = st["members"][mid]["name"]
+                        m_info = st["members"][mid]
+                        m_name = m_info["name"]
+                        m_role = m_info.get("role", "implementation")
+                        m_tags = set(m_info.get("tags") or [])
                         if r_num == 1:
-                            r_title = f"首轮独立研判 ({m_name})"
-                            r_label = "第 1 轮 · 独立立论"
+                            r_title = f"首轮盲评独立立论 ({m_name})"
+                            r_label = "第 1 轮 · 盲评立论"
                             r_prompt = (
-                                f"你是本次圆桌正式参会成员（同席参会者：{roster_desc}）。请结合你的专业职责，独立检查当前项目材料并提出你的具体方案、完整证据表或发现的问题。\n"
-                                f"如果有需要其他本场参会队友核实的地方，可在发言中直接点名（或用 team_consult 向本场参会队友提问）。\n总目标：{goal}"
+                                f"你是本次圆桌正式参会成员（同席参会者：{roster_desc}）。当前处于【第 1 轮独立盲评阶段（Blind Round 1）】，你看不到其他队友的本轮草稿，以杜绝早期锚定偏倚。\n"
+                                "请结合你的专业职责独立检查当前项目材料，并按以下高质量科研/工程标准作答：\n"
+                                "1. 事实锚定：先读后引，所有项目内文件、代码行号与统计数值均标注 `[文件名](路径)`；\n"
+                                "2. 多路径发散与合理深度外推：若任务涉及方案选择、机理阐释或科研创新，请提出 ≥2 条真正正交的竞争假说/架构路线（含更简洁的竞争性解释），并用 `[实证观察]` / `[统计推断]` / `[机制假说/深度外推 · 证伪条件]` 清晰分层，拒绝回避解读；\n"
+                                "3. 如有必须由本场特定队友核验的关键声明，可在末尾附 `team_consult` 发起结构化核验。\n"
+                                f"总目标：{goal}"
                             )
                         else:
-                            r_title = f"第{r_num}轮交叉质询与事实核验 ({m_name})"
-                            r_label = f"第 {r_num} 轮 · 交叉互评"
+                            r_title = f"第{r_num}轮对抗质询与锦标赛演化 ({m_name})"
+                            r_label = f"第 {r_num} 轮 · 对抗互评"
+                            if m_role == "review" or "fact_check" in m_tags:
+                                role_lens = (
+                                    "【你的本轮认知分工：红队审稿与证伪官（Skeptical Challenger）】\n"
+                                    "- 先用 1~2 句 Steelman 精准复述队友最强论点，再亲自打开工作区文件独立复核队友引用的 ≥2 处关键数字、路径或前提假设；\n"
+                                    "- 明确列出 `BLOCKING`（动摇核心结论的硬伤/幻觉/统计或逻辑漏洞）与 `OBSERVATION`（优化建议），并检验是否存在更简洁的竞争性解释或未覆盖边界。"
+                                )
+                            elif "openscience" in m_tags or "hypothesis" in m_tags or m_role == "documentation":
+                                role_lens = (
+                                    "【你的本轮认知分工：假说锦标赛评比与演化官（Evolution & Tournament Lead）】\n"
+                                    "- 对各队友第 1 轮提出的核心方案/假说做横向成对比较（证据强度 × 创新深度 × 证伪成本），指出谁的论据被实证打穿、谁提出了最值得嫁接的跨学科/架构亮点；\n"
+                                    "- 遵循多样性保留原则：在进化出更优综合方案的同时，保留有独特价值的亚军正交路径及最小判别实验。"
+                                )
+                            else:
+                                role_lens = (
+                                    "【你的本轮认知分工：实证复算与工程现实核验官（Empirical & Engineering Verifier）】\n"
+                                    "- 亲自检查队友方案的可落地性、数据/统计口径一致性（防伪重复/泄漏）、代码接口兼容性与边界条件；\n"
+                                    "- 至少验证 2 处队友声明并给出可执行的机械验收标准（Acceptance Checks）或最小判别实验脚本设计。"
+                                )
                             r_prompt = (
                                 "请仔细阅读共享群聊中其他参会队友上一轮的全部发言，并执行严格交叉核验：\n"
-                                "1. 严禁盲目附和或重复队友观点；必须至少亲自核对 2 处队友引用的关键数字、文件路径或前提假设；\n"
-                                "2. 若发现队友存在数字偏差、文件未读先猜、过度外推或遗漏反例，请直接用 @名字 点名纠错并附真实证据锚点；\n"
-                                "3. 给出修正并收敛后的最终落地建议。"
+                                f"{role_lens}\n"
+                                "【强制沟通纪律】\n"
+                                "1. 严禁盲目附和或复读队友观点；发现数字偏差、未读先猜、过度外推或怯懦回避解读时，必须直接 `@名字` 点名纠错并附真实证据锚点；\n"
+                                "2. 给出经过质询压力测试后修正并演化的收敛建议。"
                             )
                         built_steps.append(
                             self._make_step(
@@ -857,13 +1074,18 @@ class TeamOrchestrator:
                 built_steps.append(
                     self._make_step(
                         step_index=fin_idx,
-                        title="主持人吸纳共识并完成最终交付",
+                        title="主持人多维仲裁与终稿演化交付",
                         step_type="synthesis",
                         stage_index=rounds + 1,
                         round_label="终稿拍板与交付",
                         member_id=host_id,
                         prompt=(
-                            f"作为圆桌主持人，请综合群聊中全体成员的多轮讨论与质询意见，明确说明采纳点与分歧裁决，并完成最终任务交付（若开启了写入权限请直接落地修改文件并核验）：\n{goal}"
+                            "作为圆桌主持人，请综合群聊中全体成员的多轮讨论与质询意见，明确说明采纳点与分歧裁决，并完成最终任务交付（若开启了写入权限请直接落地修改文件并核验）：\n"
+                            f"{goal}\n\n"
+                            "【终稿质量与 OpenScience 演化交付要求】\n"
+                            "1. 结论先行、不和稀泥：给出最受证据支持的主推荐路线/结论、置信度，以及“什么新观测/实验结果会推翻该结论”；\n"
+                            "2. 多维仲裁与演化矩阵（M-MAD Grid）：用简洁 Markdown 表对比各候选方案/假说在「实证扎实度」「方法/工程严谨度」「创新与合理外推价值」「执行与证伪成本」上的表现，说明采纳了谁的实证纠错、驳回了哪些缺陷论点，并保留 1~2 条有价值的亚军正交备选路线；\n"
+                            "3. 认知三层标定与完整溯源：完整保留已核实的数据表与 `[文件名](路径)` 真实链接，严格区分 `[实证观察]`、`[统计/逻辑推断]` 与 `[机制假说/深度外推 · 证伪条件]`，文末附【证据溯源与外推假说台账】。"
                         ),
                         depends_on=list(prev_round_indices),
                         review_of=None,
@@ -2277,39 +2499,73 @@ class TeamOrchestrator:
         if persona_prompt:
             parts.append(f"【专家专属视角与核查清单】\n{persona_prompt}")
 
+        dialect_block = _build_model_family_tuning(mem.get("client", "codex"), mem.get("model", ""))
+        if dialect_block:
+            parts.append(dialect_block)
+
         if grounding_mode == "strict":
             parts.append(
-                "【证据核证与反幻觉硬规约 (Strict Grounding)】\n"
-                "1. 禁止编造：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、最新期刊影响因子、文献作者或 DOI；\n"
-                "2. 先读后引：引用项目内任何数字、表格结论或代码实现时，必须先读取真实文件，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出证据锚点；\n"
-                "3. 不确定性显式标注：无法从工作区或工具直接证实的外部经验推断，必须显式标注 `[推断/待外部核实]`；\n"
-                "4. 反回音室：阅读其他队友发言时不得盲目附和；发现无依据数字或矛盾结论必须直接 `@队友` 纠错；\n"
-                "5. 末尾请附简短【证据与不确定性台账】（列出本条回答直接核验过的真实文件，以及仍需外部核实的推断项）。"
+                "【OpenScience 证据核证、合理深度外推与反幻觉规约 (Strict Grounding)】\n"
+                "1. 事实层零编造：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、最新期刊影响因子、文献作者或 DOI；引用项目内任何数字、表格结论或代码实现必须先读后引，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出锚点；\n"
+                "2. 推演层鼓励合理深度外推（三层认知标定）：遵循 OpenScience 原则，严禁以“观察性数据无法推断/无法确定”为借口回避机理阐释、跨学科迁移或前瞻假说；所有核心陈述须显式分层：\n"
+                "   - `[实证观察 Observed]`：直接由工作区文件/数据表/代码或实测命令证实的客观事实；\n"
+                "   - `[统计/逻辑推断 Inferred]`：基于实证推导出的方向性判断（注明置信度与会推翻该判断的证据边界）；\n"
+                "   - `[机制假说/深度外推 Hypothesis]`：有科研/工程创新价值的机制解释、迁移路径或前瞻外推（每条必须附带具体的“可证伪检验/最小判别实验”）；\n"
+                "3. 覆盖边界与代码验收纪律：禁止将局部子集上测得的结论宣称为普适结果；若涉及代码/脚本改动，改动后必须重新运行验证并如实报告实测状态（严禁空口宣称已通过）；\n"
+                "4. 反回音室与 Steelman 沟通：阅读其他队友发言时严禁盲目附和；反驳前先准确复述对方最强论点，再用真实文件证据或更简洁的竞争性解释 `@队友` 纠错；\n"
+                "5. 末尾附简短【证据溯源与外推假说台账】（列出本条直接核验过的真实文件/命令，以及关键外推假说及其证伪条件/待外部核实项）。"
             )
         else:
             parts.append(
                 "【证据规范 (Balanced Grounding)】\n"
-                "引用项目文件与数据时请优先读取真实文件并用 `[文件名](路径)` 标注来源；未验证的外部推断请注明 `[推断/待核实]`，切勿编造具体数据或文献。"
+                "引用项目文件与数据时请优先读取真实文件并用 `[文件名](路径)` 标注来源；鼓励给出机理与前瞻推演，但未实证项须注明 `[推断/假说]` 与验证路径，切勿编造具体数据或文献。"
             )
         if step.get("read_only", True):
             parts.append("【权限边界】当前为只读模式 (read-only)：可读取检查项目内文件，不得修改或删除文件。")
 
         # Inject Shared Team Chat Room transcript (up to 8,000 chars per message so tables & evidence are never cut!)
+        # Enforce True Blind Round 1 isolation in roundtable mode so fast Round 1 peers do not anchor slower siblings!
+        is_blind_r1 = (
+            task.get("execution_mode") == "roundtable"
+            and step.get("step_type") == "discussion"
+            and int(step.get("stage_index") or 0) == 1
+        )
         room_msgs = task.get("chat_room") or []
+        if is_blind_r1:
+            # Strictly seal Blind Round 1: exclude sibling drafts, directed peer consults, AND
+            # this member's own mention_reply written while assisting a sibling Round 1 step!
+            visible_msgs = [
+                cm
+                for cm in room_msgs
+                if cm.get("kind") in ("user_goal", "user_interjection", "user_choice", "ruling")
+                or (cm.get("step_index") == 0 and (task.get("mode_meta") or {}).get("enable_host_opening"))
+                or (cm.get("sender_id") == step["member_id"] and cm.get("step_index") == step["step_index"])
+            ]
+        else:
+            visible_msgs = room_msgs
+
         tmp_dir, _ = get_runtime_dirs()
         room_md_path = os.path.join(tmp_dir, "team_rooms", f"{task.get('id', 'task')}.md")
-        if len(room_msgs) > 1:
+        if len(visible_msgs) > 1:
+            recent_slice = visible_msgs[-16:]
+            total_raw = sum(len(cm.get("content") or "") for cm in recent_slice)
             transcript_lines = []
-            for cm in room_msgs[-16:]:
+            for i_cm, cm in enumerate(recent_slice):
                 to_tag = f" @{cm['to_member_name']}" if cm.get("to_member_name") else ""
+                # Keep the most recent round at lossless 8,000 chars; gently trim older rounds only when
+                # total transcript exceeds 26,000 chars (full verbatim transcript always lives in room_md_path)
+                is_recent_turn = (len(recent_slice) - i_cm) <= 4
+                per_msg_limit = 8000 if (is_recent_turn or total_raw <= 26000) else 3200
                 transcript_lines.append(
-                    f"[{cm.get('round_label') or cm['kind']}] {cm['sender_name']}{to_tag}：\n{_smart_clip(cm['content'], 8000)}"
+                    f"[{cm.get('round_label') or cm['kind']}] {cm['sender_name']}{to_tag}：\n{_smart_clip(cm['content'], per_msg_limit)}"
                 )
-            parts.append(
-                f"【团队共享群聊记录（完整纪要文件：{room_md_path}）】\n"
-                + "\n---\n".join(transcript_lines)
+            hdr = (
+                "【本轮可见上下文（Blind Round 1 隔离视图，不包含同轮其他席位草稿）】\n"
+                if is_blind_r1
+                else f"【团队共享群聊记录（完整纪要文件：{room_md_path}）】\n"
             )
-        elif step.get("depends_on"):
+            parts.append(hdr + "\n---\n".join(transcript_lines))
+        elif step.get("depends_on") and not is_blind_r1:
             dep_blocks = []
             for d_idx in step["depends_on"]:
                 d_step = task["steps"][d_idx]
@@ -2361,11 +2617,11 @@ class TeamOrchestrator:
                 if standby_peers:
                     roster_block += f"\n场外支援专员（未参加本场圆桌发言，仅可请教具体技术/文献核查，切勿向其索要本场发言记录）：{', '.join(standby_peers)}"
                 parts.append(
-                    "【团队内部 @ 提问协商协议（可选）】\n"
+                    "【团队内部 @ 结构化核验协商协议（可选）】\n"
                     f"{roster_block}\n"
-                    "注意：上方共享群聊记录已包含队友的完整发言，无需为索要聊天记录而提问。仅当需要某位队友协助核查某个关键事实/细节时，可在末尾附上代码块唤醒TA答复：\n"
+                    "注意：上方共享群聊记录已包含队友的完整发言，无需为索要聊天记录而提问。仅当需要某位队友结合其专长独立核验某条关键声明、数据表或代码边界时，可在末尾附上结构化代码块唤醒TA答复：\n"
                     "```team_consult\n"
-                    '{"to":"队友id","question":"具体请教或要求协助核对的问题"}\n'
+                    '{"to":"队友id","claim_to_verify":"待核验的核心声明或数值（可选）","evidence_needed":"希望读取核对的具体文件或口径（可选）","question":"具体请教或要求协助核对的问题"}\n'
                     "```"
                 )
             parts.append(
@@ -2542,7 +2798,21 @@ class TeamOrchestrator:
                 consult_loops += 1
                 peer_id = consult_req["to"]
                 peer_q = consult_req["question"]
+                peer_claim = consult_req.get("claim_to_verify", "")
+                peer_ev_need = consult_req.get("evidence_needed", "")
                 peer_mem = cur_snap["members"][peer_id]
+                peer_role_name = cur_snap.get("roles", {}).get(peer_mem.get("role", ""), {}).get("name", "专员")
+
+                ask_display = peer_q
+                if peer_claim or peer_ev_need:
+                    extra_lines = []
+                    if peer_claim:
+                        extra_lines.append(f"- 待核验声明：{peer_claim}")
+                    if peer_ev_need:
+                        extra_lines.append(f"- 需核对证据：{peer_ev_need}")
+                    if peer_q and peer_q not in peer_claim:
+                        extra_lines.append(f"- 具体问题：{peer_q}")
+                    ask_display = "\n".join(extra_lines)
 
                 def _log_ask(st: Dict[str, Any]) -> None:
                     t = self._find_task(st, task_id)
@@ -2552,29 +2822,53 @@ class TeamOrchestrator:
                             step_index=step_index, round_label=step.get("round_label") or step["title"]
                         )
                     self._append_room_chat(
-                        st, t, sender_id=step["member_id"], kind="mention_ask", content=peer_q,
-                        to_member_id=peer_id, step_index=step_index, round_label="@队友协商"
+                        st, t, sender_id=step["member_id"], kind="mention_ask", content=ask_display,
+                        to_member_id=peer_id, step_index=step_index, round_label="@队友结构化协商"
                     )
                     st["members"][step["member_id"]]["live_activity"] = f"正在等待 @{peer_mem['name']} 答复..."
                     if st["members"][peer_id]["status"] == "idle":
                         st["members"][peer_id]["status"] = "working"
                         st["members"][peer_id]["live_activity"] = f"正在回应 @{mem['name']} 的提问"
                     t["recent_events"].append(
-                        {"ts": time.time(), "type": "agent.mention_ask", "summary": f"{mem['name']} @{peer_mem['name']} 发起协商提问"}
+                        {"ts": time.time(), "type": "agent.mention_ask", "summary": f"{mem['name']} @{peer_mem['name']} 发起结构化协商"}
                     )
 
                 self.store.mutate(_log_ask)
 
-                peer_prompt = (
-                    f"【当前项目工作目录】{work_dir}\n"
-                    f"【团队实时协助请求】队友 {mem['name']} 在执行“{task['title']}”时向你 (@{peer_mem['name']}) 提问求助：\n"
-                    f"“{peer_q}”\n\n"
-                    "请只读查看必要材料或依据你的专业职责给出简明、准确、可直接采纳的核查意见（不要再发起新的 team_consult）。"
+                peer_spec = (peer_mem.get("specialty") or "").strip()
+                peer_persona = (peer_mem.get("persona_prompt") or "").strip()
+                peer_dialect = _build_model_family_tuning(peer_mem.get("client", "codex"), peer_mem.get("model", ""))
+                peer_parts = [
+                    f"【当前项目工作目录】{work_dir}",
+                    f"【你的专员身份】{peer_mem.get('name')} (ID: {peer_id}) · 职责：{peer_role_name}" + (f" · 专长：{peer_spec}" if peer_spec else ""),
+                ]
+                if peer_persona:
+                    peer_parts.append(f"【你的专业核查视角】\n{peer_persona}")
+                if peer_dialect:
+                    peer_parts.append(peer_dialect)
+                peer_parts.append(
+                    f"【团队实时协助请求】队友 {mem['name']} 在执行“{task['title']}”时向你 (@{peer_mem['name']}) 发起只读独立核验：\n"
+                    f"{ask_display}\n\n"
+                    "【结构化交接契约（OpenScience Specialist Handoff，严禁再发起新的 team_consult）】\n"
+                    "请亲自只读检查相关真实文件或数据，按以下紧凑结构直接答复：\n"
+                    "- **判定 (Verdict)**：`CONFIRMED`（证实）/ `REFUTED`（证伪）/ `PARTIAL`（部分成立）/ `UNVERIFIABLE`（现有材料无法核实）\n"
+                    "- **核查证据 (Evidence)**：精确 `[文件名](路径#L行号)` 与实测数值/代码行为（绝不猜测）\n"
+                    "- **最小修正或竞争性解释 (Correction / Alternative)**：若存在偏差或更优解释，给出可直接采纳的纠偏建议或下一步最小判别检验"
                 )
+                peer_prompt = "\n\n".join(peer_parts)
                 peer_res = self._invoke_member_turn(
                     peer_mem, peer_prompt, None, work_dir, "read-only", agy_proj_id, f"{attempt_id}-c{consult_loops}", lightweight_effort=True
                 )
-                peer_reply = peer_res.response_text.strip() or "（已完成核查，无补充异议，可按原计划推进）"
+                raw_peer_txt = (peer_res.response_text or "").strip()
+                if peer_res.final_status != "succeeded" or not raw_peer_txt:
+                    err_detail = peer_res.error or peer_res.blocking_reason or f"status={peer_res.final_status}, exit={peer_res.exit_code}"
+                    peer_reply = (
+                        f"**判定 (Verdict)**：`UNVERIFIABLE`（协商核验调用未成功，严禁视为“无异议/通过”）\n"
+                        f"**失败原因**：{err_detail}\n"
+                        "**后续要求**：请将相关声明保留为 `[待核实]`，切勿依据失败的协商调用声称已获队友确认。"
+                    )
+                else:
+                    peer_reply = raw_peer_txt
 
                 def _log_reply(st: Dict[str, Any]) -> None:
                     t = self._find_task(st, task_id)
@@ -2603,6 +2897,22 @@ class TeamOrchestrator:
                 )
 
             self._finalize_attempt(task_id, step_index, attempt_id, res, used_fallback, fallback_of)
+        except Exception as exc:
+            # Never leave a step permanently stuck in "running" or a member stuck in "working" on OS/adapter errors!
+            try:
+                err_res = CodexExecutionResult(
+                    session_id=None,
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    error=f"工作线程执行异常: {type(exc).__name__}: {exc}",
+                    requested_config={},
+                    accepted_config={},
+                )
+                self._finalize_attempt(task_id, step_index, attempt_id, err_res, False, None)
+            except Exception:
+                pass
         finally:
             with self._sched_lock:
                 self._running_attempts.pop(attempt_id, None)

@@ -38,15 +38,17 @@
    - **🧱 Multi-Track Pipeline Studio (`custom_dag`)**: Visually stack Stage `1..N` columns with parallel workstations and independent review gates (bounded 2-round auto-repair before escalating to human ruling).
    - **⚡ 1-on-1 Specialist Desk (`single_member`)**: Direct low-latency specialist execution with session continuation.
 
-2. **Genuine Inter-Agent Communication & `@Peer` Consultation**
-   - Every task maintains a live **`chat_room`** shared across all participating agents and the human lead.
-   - Any agent can emit a `team_consult` block mid-step to **`@mention` a teammate**, waking that teammate to verify facts in read-only mode and injecting the reply straight back into the caller's session.
-   - The human lead can **interject live** at the bottom bar (`@All` or `@SpecificMember`) to steer discussion or wake idle specialists.
+2. **OpenScience-Inspired Scientific Reasoning & Anti-Sycophancy Protocol**
+   - **🔬 Blind Round 1 Initialization (`Blind Round 1`)**: Roundtable Round 1 specialists are strictly isolated from sibling Round 1 drafts so fast models never anchor slower peers.
+   - **🧠 Model-Family Prompt Dialect Calibration**: Dynamically adapts prompt structure to the model family — XML-structured adversarial peer review (`BLOCKING` vs `OBSERVATION`) for **Claude**, wide-context hypothesis evolution & M-MAD matrices for **Gemini Flagship**, rapid `explore`-style Evidence Indexing for **Gemini Flash**, and tool-first mechanical acceptance checks for **Codex / GPT**.
+   - **⚖️ Three-Tier Epistemic Calibration (`Strict Grounding` + Disciplined Extrapolation)**: Zero fabrication on files/numbers/DOIs (`[Observed]`), calibrated directional inference (`[Inferred]`), and explicitly encouraged mechanistic/scientific deep extrapolation (`[Hypothesis · Falsifiable Test]`) rather than cowardly hedging.
+   - **🤝 Persona-Aware Structured `@consult` Handoffs**: Mid-step `team_consult` wakes teammates with their full specialist persona & dialect and returns structured `Verdict (CONFIRMED/REFUTED/PARTIAL/UNVERIFIABLE) + Evidence + Correction` contracts.
+   - **🛡️ Independent Cross-Engine Fact-Checking & 1-Click Live Roster Calibration**: Run clean-session opposite-engine audits (`POST /api/tasks/fact_check`), apply 1-click audit revisions (`POST /api/tasks/revise_from_audit`), switch specialists via `Ctrl+K`, or auto-calibrate all idle members against live CLI models (`POST /api/specialists/optimize_roster`).
 
-3. **Human-in-the-Loop UX & Local Workspace Integration**
-   - **🌐 One-Click Bilingual UI (`EN / 中文`)**: Switch the entire web console between English and Chinese instantly in the top header.
-   - **🔔 Auto-Popup Confirmation Modal**: When an agent poses structured choices (`team_questions`), a frosted-glass modal automatically pops up (with toggleable auto-popup & "View Context First" minimize support).
-   - **📎 Real Local File & Line-Anchor Previewer**: Clicking any file link in agent answers (`file:///...`, `.docx`, `.csv`, `.md#L29-L35`, `.pdf`, images, or relative paths) previews the real content in-browser (including zero-dependency Word `.docx` text/table extraction and highlighted line anchors) and offers 1-click launch in native OS apps (Word/Excel/Explorer/Finder).
+3. **Minimalist Dual-Theme UI (Dark / Paper Light), Bilingual (`EN / 中文`) & Local File Previewer**
+   - **✨ Quiet Reading-First Studio**: Single-line sticky top bar, Dark + Paper Light theme toggle, 11 curated OpenScience + Engineering specialist templates, 5 one-click Squad Presets (including **OpenScience Discovery Loop** & 3-stage OpenScience DAG pipeline), and `Ctrl+K` Command Palette.
+   - **🔔 Auto-Popup Confirmation Modal**: When an agent poses structured choices (`team_questions`), a modal automatically pops up (with toggleable auto-popup & "View Context First" minimize support).
+   - **📎 Real Local File & Line-Anchor Previewer**: Clicking any file link in agent answers (`file:///...`, `.docx`, `.csv`, `.md#L29-L35`, `.pdf`, images, or relative paths) previews the real content in-browser (including zero-dependency Word `.docx` text/table extraction and highlighted line anchors) and offers 1-click launch in native OS apps or Win32 Shell `SHOpenFolderAndSelectItems` Explorer reveal (spaces-safe!).
    - **🛡️ Resilience & Safety**: Session-scoped `--settings` read/write boundaries, write-scope conflict serialization, 240s idle-stream watchdog, transient network auto-retry, and 1-click partial-stream rescue (`accept_step_partial`).
 
 ### Quick Start (English)
@@ -87,14 +89,16 @@
    - **🧱 多轨搭积木工坊（`custom_dag`）**：自由增删第 `1..N` 阶段与同阶段并行工位，支持插入独立审查关卡（最多 2 轮自动退回修复，超限交人工裁决）。
    - **⚡ 专家一对一专办（`single_member`）**：直连单名专家快速分析或改码。
 
-2. **Agent 实时共享群聊与 `@队友` 提问互助**
-   - 全员共享实时群聊上下文（`chat_room`），任意成员中途可通过 `team_consult` 自动唤醒队友协助核查细节并回传结果继续定稿；
-   - 底部常驻 **`🎙️ 现场插话 / 点名`** 栏，负责人可随时向全体或 `@指定成员` 插话指导。
+2. **OpenScience 级科研推理闭环与反迎合多智能体通信**
+   - **🔬 第 1 轮真盲评隔离（Blind Round 1）**：并行参会成员首轮严密隔离彼此草稿，彻底消除先完成模型造成的早期锚定与群体思维；
+   - **🧠 按模型族自适应调优（Model-Family Dialect）**：借鉴 `synthetic-sciences/openscience` 提示词工程，分别为 **Claude**（XML 批判审稿 + `BLOCKING`/`OBSERVATION`）、**Gemini 旗舰**（广域综合 + 5 类创新算子 + M-MAD 仲裁矩阵）、**Gemini Flash**（极速证据索引）与 **Codex / GPT**（工具先行 + 机械验收脚本）注入专属方言；
+   - **⚖️ 三层认知标定（防幻觉 × 合理深度外推）**：事实层零编造（`[实证观察]`），逻辑推演给置信度与边界（`[统计/逻辑推断]`），同时鼓励机理阐释与创新外推（`[机制假说/深度外推 · 最小判别实验]`），拒绝怯懦回避解读；
+   - **🤝 携带人设的结构化 `@队友` 核验与跨引擎独立纠错**：中途 `team_consult` 支持 `claim_to_verify` / `evidence_needed`，以被询专家完整专长返回 `Verdict (CONFIRMED/REFUTED/PARTIAL/UNVERIFIABLE) + Evidence + Correction`；支持一键异构跨引擎事实核查与修订终稿、11 个 OpenScience + 工程专家模板及一键实测校准全员模型。
 
-3. **中英双语切换、提问自动弹窗与真实文件链接打开**
-   - **🌐 一键中英双语切换（`English / 中文`）**：右上角随时切换全界面中英文显示，不丢失任何输入草稿与任务状态。
-   - **🔔 AI 提问自动弹窗确认**：成员提出选项问题时自动弹出居中确认窗（支持右上角开关、暂收起看上下文及随时重弹）。
-   - **📎 回答内链接真实打开**：点击回答中的 `.docx` Word 稿件、`.csv` 数据表、`#L29-L35` 行号锚点、PDF、图片或外部网页链接，可直接在页内预览真实正文/表格/高亮代码行，或一键调起本机 Word / Excel / 资源管理器定位。
+3. **极简双主题（深色 / 纸感浅色）、中英双语与真实文件预览**
+   - **✨ 专注阅读体验**：单行粘滞顶栏、深浅色一键切换、`Ctrl+K` 专家快切面板、5 套一键阵容预设（含 **OpenScience 科研发现闭环** 与 3 阶段科研流水线）；
+   - **🔔 AI 提问自动弹窗确认**：成员提出选项问题时自动弹出居中确认窗（支持右上角开关、暂收起看上下文及随时重弹）；
+   - **📎 回答内链接真实打开**：点击回答中的 `.docx` Word 稿件、`.csv` 数据表、`#L29-L35` 行号锚点、PDF、图片或外部网页链接，可直接在页内预览真实正文/表格/高亮代码行，或一键调起本机软件 / Win32 原生文件夹精确定位（完美支持含空格路径）。
 
 ### 快速启动（中文）
 
@@ -120,7 +124,7 @@ agy-roundtable/
 │   ├── project_discovery.py      # Cross-platform workspace & folder browser
 │   ├── team_cli.py               # CLI client & background daemon launcher
 │   ├── codex_team_mcp.py         # MCP server ('codex-team') for IDE native integration
-│   └── test_runtime_mechanisms.py# 10 automated lifecycle, concurrency & resilience unit tests
+│   └── test_runtime_mechanisms.py# 13 automated lifecycle, Blind-R1, OpenScience & resilience unit tests
 ├── docs/
 │   └── USER_GUIDE.md             # Detailed Bilingual (EN/ZH) User Guide
 ├── Start-Roundtable.cmd          # Windows 1-click launcher
