@@ -42,7 +42,8 @@
    - **🔬 Blind Round 1 Isolation + 7 Modular OpenScience Playbooks (`openscience_playbooks.py`)**: Roundtable Round 1 drafts & disk transcripts are strictly sealed from sibling peers until Round 1 finishes; 7 composable OpenScience core protocols (`Statistical Rigor & Power`, `Experimental Design & DOE`, `Execution Hygiene & Submitted Code`, `Publication Figures & Schematics`, `Atomic Sources & Citation Audit`, `Autoresearch & Experiment Loop`, `Peer Review & Manuscript Craft`) can be auto-matched or toggled directly in the Composer.
    - **📊 Pure-Stdlib Publication Figure QA & Plotting Runtime Probe (`figure_qa.py`)**: Live detection of Python (`matplotlib`/`seaborn`/`scipy`/`statsmodels`) and R (`ggplot2`/`patchwork`/`ComplexHeatmap`/`svglite`/`ragg`) plotting runtimes; pure-stdlib binary TIFF IFD dual-axis DPI + physical-mm anti-spoofing verification, PNG/SVG/PDF structural checks, and panel-level source-data CSV/TSV semantic consistency checks (catching swapped group labels & raw-P vs adjusted-P misuse).
    - **🔒 Lock-Free Hash-Locked Mechanical Acceptance & Content-Addressed Provenance DAG (`research_verifier.py`, `provenance_store.py`)**: Executes SHA-256 hash-locked acceptance scripts (`shell=False`) and `readonly_inputs` tamper checks strictly outside state locks; records content-addressed `source → run → artifact → claim` lineage and `experiment_run` baseline-vs-delta tables in sidecar JSONL/JSON ledgers without bloating `team_state.json`.
-   - **🧠 Latest-Generation Model-Family Dialects & Role-Preserving Quota Backup (`spawn_quota_backup_member`)**: Calibrated for `Gemini 4 Neon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Claude Opus 5.5` / `Sonnet 5.5`, `GPT-6.2-Astra` (`gpt-astra.txt` action-first dialect), and `GPT-6.2-Sol`. When any model nears or hits quota/429 limits, automatically (or via 1-click **Quota Backup** modal) spawns a backup specialist inheriting 100% of the same role, specialty, grounding mode, and persona SOP on a different same-engine or cross-engine flagship model (while strictly respecting `requires_shell` routing).
+   - **🧠 Latest-Generation Model-Family Dialects, Live Seat Hot-Swap & 2-Hop Quota Backup**: Calibrated for `Gemini 4 Neon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Claude Opus 5.5` / `Sonnet 5.5`, `GPT-6.2-Astra` (`gpt-astra.txt` action-first dialect), and `GPT-6.2-Sol`. Click any seated specialist chip to **hot-swap specialists mid-process** (abort & hand off now, or apply next round) or at any time, **add extra seats** (`+ Add Seat`), or **persistently/auto-bind quota-exhaustion backups** (`bind_quota_backup`, `auto_bind_all_quota_backups`) with **2-hop cascading failover** (strictly respecting `requires_shell` routing).
+   - **🎛️ Fully Customizable Specialist Count & High Concurrency (`1–12`)**: Pick any number of experts (`2` to all `N` roster members via quick count chips or custom input), customize Chief Dispatch recruit caps (`1–12`), stack up to `10` DAG stages × `10` parallel workstations, and adjust live parallel concurrency (`1–12`) directly from the Composer or Settings popover.
    - **🛡️ Fail-Closed Review Gate & Hard Sandbox Trust Root**: Malformed/non-JSON review output routes safely to `needs_ruling` (never silently falling back to `ACCEPT`); hard `read-only` / `workspace-write` sandbox ceiling (`danger-full-access` rejected), path-escape guard, loopback CSRF `Origin`/`Content-Type` validation, and `/api/fs/raw_file` root allowlist.
 
 3. **Minimalist Dual-Theme UI (Dark / Paper Light), Artifacts & Figures Gallery, Bilingual (`EN / 中文`)**
@@ -92,7 +93,8 @@
    - **🔬 第 1 轮真盲评隔离 + 7 大模块化 OpenScience 协议（`openscience_playbooks.py`）**：首轮草稿与磁盘纪要双端严密隔离；内置 7 套可组合核心科研规约（统计规范与效能、实验设计与防伪重复、科研代码洁净与隐性评分器验收、顶刊绘图与示意图、原子声明与文献溯源、自动科研实验循环、顶刊审稿与论文撰写），支持自动匹配或一键点选注入；
    - **📊 纯标准库顶刊科研图 QA 与 Python/R 环境探测（`figure_qa.py`）**：实时检测本机 Python（`matplotlib`/`seaborn`/`scipy`/`statsmodels`）与 R（`ggplot2`/`patchwork`/`ComplexHeatmap`/`svglite`/`ragg`）绘图栈；零第三方依赖解析二进制 TIFF 双轴 DPI 与物理毫米像素联动（识破伪造 600 DPI）、SVG 栅格陷阱与字号下限，以及面板级 Source CSV/TSV 图数一致性核验（拦截组别标签互换与原始 P 值冒充校正 `p_adj`）；
    - **🔒 无锁哈希锁定机械验收与内容寻址溯源谱系（`research_verifier.py`、`provenance_store.py`）**：在状态锁外执行 SHA-256 锁定验收脚本（`shell=False`）与只读原始数据篡改守卫；旁路 JSONL/JSON 账本自动记录 `source → run → artifact → claim` 溯源 DAG 与 `experiment_run` 基线 Delta 对比榜；
-   - **🔄 模型额度预警与自动同角色跨模型替补（`spawn_quota_backup_member`）**：全面校准最新一代旗舰阵容（`Gemini 4 Neon` / `Gemini 4 Carbon` / `Gemini 4 Hydrogen` / `Claude Opus 5.5` / `GPT-6.2-Astra` / `GPT-6.2-Sol`）；当某模型额度快用尽或触发 429/限流时，支持自动或一键补充完全继承相同职责、专长与防幻觉 SOP 但改用不同同端/跨端模型的替补专家并无缝接力（严格遵守 `requires_shell` 路由约束）；
+   - **🔄 现场热换人、快捷/自动绑定额度替补与 2 跳级联接力**：全面校准最新一代旗舰阵容（`Gemini 4 Neon` / `Gemini 4 Carbon` / `Gemini 4 Hydrogen` / `Claude Opus 5.5` / `GPT-6.2-Astra` / `GPT-6.2-Sol`）；点击任务席位条上任意专家胶囊即可在**进程中**（立即中止接力或下轮生效）或**任意时间**一键换人、增补席位或绑定额度耗尽默认替补，触发 429/限流时优先切至绑定替补并支持最多 **2 跳无重试级联**（严格遵守 `requires_shell` 路由约束）；
+   - **🎛️ 自定义专家人数与高并行上限（`1–12`）**：圆桌发起栏内置「自定义人数」快捷栏（`2/3/4/5/6/全选` + 数字框）与直调「并行上限（`1–12`）」；主帅点将支持自定义最多点将人数（`1–12`）；多轨流水线支持最多 `10` 阶段 × `10` 并行工位；花名册总专家数无上限，可随时从 15 位模板招募或克隆。
    - **🛡️ Fail-Closed 审查门禁与安全信任根**：审查输出缺少合法 JSON `verdict` 时自动拦截进入 `needs_ruling`（绝不默认放行）；强制限制 `read-only`/`workspace-write` 沙箱上限、目录越界防逃逸、本机 POST CSRF 校验与 `/api/fs/raw_file` 根目录白名单。
 
 3. **极简双主题（深色 / 纸感浅色）、产物与科研图画廊、中英双语与真实文件预览**
@@ -115,9 +117,9 @@
 ```text
 agy-roundtable/
 ├── prototype/
-│   ├── serve_sidebar.py          # Loopback HTTP server, CSRF/root guard & Artifacts/Preview REST API (rev 11)
-│   ├── sidebar_panel.html        # Bilingual (EN/ZH) Studio UI + Pure-White Figure Gallery + Quota Backup modal
-│   ├── team_runtime.py           # v5 Orchestrator (Roundtable, Chief, DAG, @Consult, Auto Quota Failover)
+│   ├── serve_sidebar.py          # Loopback HTTP server, CSRF/root guard & Hot-Swap/Artifacts REST API (rev 13)
+│   ├── sidebar_panel.html        # Bilingual (EN/ZH) Studio UI + Pure-White Figure Gallery + Live Seat Hot-Swap
+│   ├── team_runtime.py           # v5 Orchestrator (Roundtable, Chief, DAG, Hot-Swap, 2-Hop Quota Failover)
 │   ├── team_state_manager.py     # Atomic state persistence, 15 specialist templates & orphan-PID recovery
 │   ├── figure_qa.py              # Pure-stdlib Python/R runtime probe, TIFF/PNG/SVG/PDF & Source-CSV QA
 │   ├── research_verifier.py      # Lock-free SHA-256 hash-locked acceptance verifier & readonly_inputs guard
@@ -128,7 +130,7 @@ agy-roundtable/
 │   ├── project_discovery.py      # Cross-platform workspace & folder browser
 │   ├── team_cli.py               # CLI client & background daemon launcher
 │   ├── codex_team_mcp.py         # MCP server ('codex-team') for IDE native integration
-│   └── test_runtime_mechanisms.py# 19 automated lifecycle, P0 security, Figure QA, Quota Backup & OpenScience tests
+│   └── test_runtime_mechanisms.py# 21 automated lifecycle, P0 security, Figure QA, Hot-Swap & OpenScience tests
 ├── docs/
 │   └── USER_GUIDE.md             # Detailed Bilingual (EN/ZH) User Guide
 ├── Start-Roundtable.cmd          # Windows 1-click launcher

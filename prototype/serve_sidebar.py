@@ -473,7 +473,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 11})
+                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 13})
             elif route == "/api/state":
                 self._send_json(200, ORCHESTRATOR.store.snapshot())
             elif route == "/api/models":
@@ -661,7 +661,26 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     task_id=body.get("task_id") or None,
                     step_index=body.get("step_index") if body.get("step_index") is not None else None,
                     auto_reassign=bool(body.get("auto_reassign", False)),
+                    bind_as_default=bool(body.get("bind_as_default", True)),
                     reason=body.get("reason", "模型额度预警，补充同角色跨模型替补"),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/members/bind_backup":
+                res = ORCHESTRATOR.bind_quota_backup(
+                    source_member_id=body["source_member_id"],
+                    backup_member_id=body.get("backup_member_id") or None,
+                    backup_client=body.get("client") or None,
+                    backup_model=body.get("model") or None,
+                    backup_effort=body.get("reasoning_effort") or None,
+                    prefer_cross_engine=bool(body.get("prefer_cross_engine", False)),
+                    clear=bool(body.get("clear", False)),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/members/auto_bind_backups":
+                res = ORCHESTRATOR.auto_bind_all_quota_backups(
+                    prefer_cross_engine=bool(body.get("prefer_cross_engine", False)),
+                    member_ids=body.get("member_ids") or None,
+                    overwrite=bool(body.get("overwrite", False)),
                 )
                 self._send_json(200, {"ok": True, **res})
             elif route == "/api/specialists/optimize_roster":
@@ -695,6 +714,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     research_spec=body.get("research_spec"),
                     openscience_playbooks=body.get("openscience_playbooks"),
                     squad_preset=str(body.get("squad_preset") or ""),
+                    chief_max_members=body.get("chief_max_members"),
                 )
                 self._send_json(200, {"ok": True, "task": res})
             elif route == "/api/tasks/verify_figure":
@@ -795,6 +815,28 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     reason=body.get("reason", "界面改派成员接手"),
                 )
                 self._send_json(200, {"ok": True, "task": res})
+            elif route == "/api/tasks/swap_seat":
+                res = ORCHESTRATOR.swap_task_seat(
+                    task_id=body["task_id"],
+                    old_member_id=body["old_member_id"],
+                    new_member_id=body.get("new_member_id") or None,
+                    spawn_backup_client=body.get("spawn_backup_client") or None,
+                    spawn_backup_model=body.get("spawn_backup_model") or None,
+                    spawn_backup_effort=body.get("spawn_backup_effort") or None,
+                    abort_running=bool(body.get("abort_running", True)),
+                    trigger_fresh_turn=bool(body.get("trigger_fresh_turn", False)),
+                    bind_as_quota_backup=bool(body.get("bind_as_quota_backup", False)),
+                    reason=body.get("reason", "现场快速换人"),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/tasks/add_seat":
+                res = ORCHESTRATOR.add_task_seat(
+                    task_id=body["task_id"],
+                    member_id=body["member_id"],
+                    trigger_turn=bool(body.get("trigger_turn", True)),
+                    instruction=body.get("instruction", ""),
+                )
+                self._send_json(200, {"ok": True, **res})
             elif route == "/api/tasks/abort":
                 res = ORCHESTRATOR.abort_attempt(
                     task_id=body.get("task_id"),

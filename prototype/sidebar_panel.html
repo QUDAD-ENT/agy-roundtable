@@ -1322,6 +1322,45 @@
       color: var(--text);
       word-break: break-all;
     }
+
+    /* Interactive Seat Hot-Swap Pills & Quota Backup Badges */
+    .seat-swap-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 27px;
+      padding: 0 9px 0 4px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.14s ease, background 0.14s ease;
+    }
+    .seat-swap-pill:hover {
+      border-color: var(--accent-border);
+      background: var(--accent-soft);
+    }
+    .seat-swap-pill .swap-ic {
+      opacity: 0.45;
+      display: inline-flex;
+      transition: opacity 0.14s ease;
+    }
+    .seat-swap-pill:hover .swap-ic {
+      opacity: 1;
+      color: var(--accent);
+    }
+    .seat-bk-hint {
+      font-size: 10.5px;
+      color: var(--ok);
+      background: var(--ok-soft);
+      border: 1px solid var(--ok-border);
+      padding: 0 5px;
+      border-radius: 999px;
+      line-height: 16px;
+    }
   </style>
 </head>
 <body>
@@ -1469,6 +1508,7 @@
           <div style="font-size:12px; color:var(--text-2);" id="lbl-members-sub"></div>
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sec btn-sm" id="btn-auto-bind-all" onclick="autoBindAllBackupsAction()"></button>
           <button class="btn btn-sm" id="btn-optimize-roster" onclick="optimizeRosterAction()"></button>
           <button class="btn btn-sec btn-sm" id="btn-refresh-models" onclick="loadCapabilities(true)"></button>
         </div>
@@ -1533,7 +1573,7 @@
             <button class="btn btn-sec btn-sm" id="btn-save-role" onclick="saveRole()"></button>
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-size:12px; color:var(--text-2);" id="lbl-max-conc"></span>
-              <input type="number" id="cfg-conc" min="1" max="6" value="3" style="width:62px; height:28px;">
+              <input type="number" id="cfg-conc" min="1" max="12" value="3" style="width:62px; height:28px;">
               <button class="btn btn-sec btn-sm" id="btn-save-conc" onclick="saveConcurrency()"></button>
             </div>
           </div>
@@ -1893,7 +1933,35 @@
         osPlaybooksLbl: 'OpenScience 协议',
         osAutoChip: '自动匹配',
         artProvenanceTitle: 'OpenScience 内容寻址溯源谱系 (Provenance DAG)',
-        artExperimentsTitle: 'OpenScience 实验基线对比榜 (Experiments Delta)'
+        artExperimentsTitle: 'OpenScience 实验基线对比榜 (Experiments Delta)',
+        swapSeatBtn: '换人',
+        swapSeatTip: '点击快速换人或绑定额度耗尽替补',
+        addSeatBtn: '增补席位',
+        bindBackupsBtn: '绑定替补',
+        autoBindAllBtn: '一键全员绑定额度替补',
+        boundBackupLbl: '额度替补',
+        unboundBackupLbl: '未绑替补',
+        swapModalTitle: '现场快速换人 · 额度替补绑定',
+        swapModeExisting: '换成现有专家',
+        swapModeSameRole: '同角色跨模型替补上岗',
+        swapAbortNow: '立即中止当前发言并换人接力（保留已流式内容）',
+        swapNextRound: '等当前轮说完后，从下一轮起换人',
+        swapTriggerFresh: '换人后立即让新专家补充发言 / 复核当前结论',
+        swapAlsoBind: '同时将该选择绑定为原专家的额度耗尽默认替补',
+        swapBindOnlyBtn: '仅绑定为额度替补（暂不换下）',
+        swapConfirmBtn: '确认快速换人',
+        swapDoneToast: '已完成换人：{oldName} → {newName}',
+        bindDoneToast: '已为 {name} 绑定额度替补：{bk}',
+        autoBindDoneToast: '已自动为 {n} 位专家绑定最优跨模型额度替补',
+        addSeatModalTitle: '现场增补圆桌专家',
+        addSeatTrigger: '加入后立即请该专家补充发言',
+        addSeatDoneToast: '已增补专家入席：{name}',
+        rtQuickCount: '自定义人数',
+        rtAllCount: '全选 ({n})',
+        maxConcInline: '并行上限',
+        chiefMaxLbl: '最多点将',
+        chiefMaxAuto: '自动 (1~6)',
+        concUpdatedToast: '最大同时并行专家数已调整为 {n} 位'
       },
       en: {
         navStudio: 'Studio',
@@ -2170,7 +2238,35 @@
         osPlaybooksLbl: 'OpenScience',
         osAutoChip: 'Auto',
         artProvenanceTitle: 'OpenScience Provenance DAG (Content-Addressed Lineage)',
-        artExperimentsTitle: 'OpenScience Experiment Runs (Baseline vs Delta)'
+        artExperimentsTitle: 'OpenScience Experiment Runs (Baseline vs Delta)',
+        swapSeatBtn: 'Swap',
+        swapSeatTip: 'Click to hot-swap specialist or bind quota backup',
+        addSeatBtn: 'Add Seat',
+        bindBackupsBtn: 'Quota Backups',
+        autoBindAllBtn: 'Auto-Bind All Quota Backups',
+        boundBackupLbl: 'Backup',
+        unboundBackupLbl: 'Auto',
+        swapModalTitle: 'Hot-Swap Specialist · Quota Backup Binding',
+        swapModeExisting: 'Swap to Existing Specialist',
+        swapModeSameRole: 'Same-Role Cross-Model Backup',
+        swapAbortNow: 'Abort active turn now & hand off immediately (preserves partial output)',
+        swapNextRound: 'Finish current turn, swap starting next round',
+        swapTriggerFresh: 'Immediately invite new specialist to weigh in / review deliverable',
+        swapAlsoBind: 'Also bind as default quota-exhaustion backup for original specialist',
+        swapBindOnlyBtn: 'Bind Backup Only (Keep Current)',
+        swapConfirmBtn: 'Confirm Swap',
+        swapDoneToast: 'Swapped seat: {oldName} → {newName}',
+        bindDoneToast: 'Bound quota backup for {name}: {bk}',
+        autoBindDoneToast: 'Auto-bound quota backups for {n} specialist(s)',
+        addSeatModalTitle: 'Add Specialist to Active Session',
+        addSeatTrigger: 'Invite specialist to speak immediately',
+        addSeatDoneToast: 'Added specialist to session: {name}',
+        rtQuickCount: 'Count',
+        rtAllCount: 'All ({n})',
+        maxConcInline: 'Max Parallel',
+        chiefMaxLbl: 'Max Recruit',
+        chiefMaxAuto: 'Auto (1-6)',
+        concUpdatedToast: 'Max parallel specialists updated to {n}'
       }
     };
 
@@ -2213,6 +2309,7 @@
       rtRounds: 2,
       rtHostOpening: false,
       chiefId: '',
+      chiefMaxMembers: null,
       soloId: '',
       dagStages: [],
       playbooks: [], // empty = Auto
@@ -2429,6 +2526,8 @@
       document.getElementById('lbl-members-sub').textContent = t('membersSub');
       const optBtn = document.getElementById('btn-optimize-roster');
       if (optBtn) optBtn.innerHTML = `${svgIcon('sliders', 13)} ${esc(t('optimizeRoster'))}`;
+      const abBtn = document.getElementById('btn-auto-bind-all');
+      if (abBtn) abBtn.innerHTML = `${svgIcon('shield', 13)} ${esc(t('autoBindAllBtn'))}`;
       document.getElementById('btn-refresh-models').innerHTML = `${svgIcon('refresh', 13)} ${esc(t('refreshModels'))}`;
       document.getElementById('lbl-tpl-gallery').textContent = t('tplGalleryTitle');
       document.getElementById('lbl-add-member').textContent = t('addMember');
@@ -2556,6 +2655,12 @@
             <span>${esc(t('autoQuotaBackup'))}</span>
             <span class="tag ${STATE?.settings?.auto_spawn_quota_backup !== false ? 'tag-ok' : ''}">${esc(STATE?.settings?.auto_spawn_quota_backup !== false ? t('on') : t('off'))}</span>
           </button>
+          <div class="pop-row" style="padding-top:6px;">
+            <span style="font-size:12px; color:var(--text-2);">${esc(t('maxConc'))}</span>
+            <select style="width:68px; height:24px; padding:0 6px; font-size:11.5px;" onchange="setQuickConcurrency(this.value)">
+              ${[1,2,3,4,5,6,8,10,12].map(n => `<option value="${n}" ${(STATE?.max_concurrency || 3) === n ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </div>
         </div>
       `;
     }
@@ -2783,6 +2888,54 @@
       renderComposerStudio();
     }
 
+    function setRtParticipantCount(rawCount) {
+      if (!STATE) return;
+      const ids = getRunnableIds(STATE);
+      if (ids.length < 2) return;
+      const n = Math.max(2, Math.min(ids.length, parseInt(rawCount, 10) || 2));
+      const ms = STATE.members || {};
+      const agyPool = ids.filter(id => ms[id].client === 'antigravity');
+      const codexPool = ids.filter(id => ms[id].client === 'codex');
+
+      // Keep current host first, then interleave AGY & Codex for cross-engine diversity!
+      const picked = [];
+      const add = (id) => { if (id && !picked.includes(id)) picked.push(id); };
+      if (CMP.rtHost && ids.includes(CMP.rtHost)) add(CMP.rtHost);
+      // Preserve currently selected specialists up to n when shrinking, or expand with balanced interleaving
+      if (n <= CMP.rtParticipants.length) {
+        for (const id of CMP.rtParticipants) {
+          if (picked.length >= n) break;
+          add(id);
+        }
+      } else {
+        for (const id of CMP.rtParticipants) add(id);
+        let ai = 0, ci = 0;
+        while (picked.length < n && (ai < agyPool.length || ci < codexPool.length)) {
+          if (ai < agyPool.length) add(agyPool[ai++]);
+          if (picked.length >= n) break;
+          if (ci < codexPool.length) add(codexPool[ci++]);
+        }
+      }
+      for (const id of ids) {
+        if (picked.length >= n) break;
+        add(id);
+      }
+      CMP.rtParticipants = picked.slice(0, n);
+      if (!CMP.rtParticipants.includes(CMP.rtHost)) CMP.rtHost = CMP.rtParticipants[0];
+      renderComposerStudio();
+    }
+
+    async function setQuickConcurrency(rawVal) {
+      const n = Math.max(1, Math.min(12, parseInt(rawVal, 10) || 3));
+      try {
+        await api('POST', '/api/binding', { max_concurrency: n });
+        toast(t('concUpdatedToast', { n }));
+        await refreshState(true);
+        renderComposerStudio();
+        if (UTILS_OPEN) renderUtilsPopover();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
     function applyDagPreset(presetName, showMsg = true) {
       const ids = getRunnableIds();
       const pick = (pref, idx = 0) => ids.includes(pref) ? pref : (ids[idx % Math.max(1, ids.length)] || 'codex_author');
@@ -2884,7 +3037,7 @@
 
     function addDagStage() {
       const ids = getRunnableIds();
-      if (CMP.dagStages.length >= 6) return;
+      if (CMP.dagStages.length >= 10) return;
       CMP.dagStages.push([{ member_id: ids[0] || 'codex_author', step_type: 'execution', prompt: '' }]);
       renderComposerStudio();
     }
@@ -2896,7 +3049,7 @@
     function addDagParallelNode(sIdx) {
       const ids = getRunnableIds();
       const stg = CMP.dagStages[sIdx];
-      if (!stg || stg.length >= 4) return;
+      if (!stg || stg.length >= 10) return;
       const used = stg.map(x => x.member_id);
       stg.push({ member_id: ids.find(x => !used.includes(x)) || ids[0], step_type: 'discussion', prompt: '' });
       renderComposerStudio();
@@ -2965,6 +3118,21 @@
           ? (CMP.rtHostOpening ? 'flowOpenMulti' : 'flowFastMulti')
           : (CMP.rtHostOpening ? 'flowOpenOne' : 'flowFastOne');
 
+        const curConc = STATE.max_concurrency || 3;
+        const quickCounts = [2, 3, 4, 5, 6].filter(n => n < ids.length);
+        const countChipsHtml = `
+          <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-bottom:8px;">
+            <span style="font-size:11.5px; color:var(--text-3);">${esc(t('rtQuickCount'))}:</span>
+            ${quickCounts.map(n => `
+              <button class="qt-chip ${CMP.rtParticipants.length === n ? 'active' : ''}" onclick="setRtParticipantCount(${n})">${n}${LANG === 'en' ? '' : '人'}</button>
+            `).join('')}
+            <button class="qt-chip ${CMP.rtParticipants.length === ids.length ? 'active' : ''}" onclick="setRtParticipantCount(${ids.length})">${esc(t('rtAllCount', { n: ids.length }))}</button>
+            <input type="number" min="2" max="${ids.length}" value="${CMP.rtParticipants.length}"
+              style="width:52px; height:24px; padding:0 6px; font-size:11.5px;"
+              onchange="setRtParticipantCount(this.value)" title="${esc(t('rtQuickCount'))}">
+          </div>
+        `;
+
         box.innerHTML = `
           <div class="setup-strip">
             ${presetsHtml ? `<div class="preset-strip">${presetsHtml}</div>` : ''}
@@ -2986,12 +3154,19 @@
                     <option value="3" ${CMP.rtRounds === 3 ? 'selected' : ''}>${esc(t('round3'))}</option>
                   </select>
                 </span>
+                <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-2);" title="${esc(t('maxConc'))}">
+                  ${esc(t('maxConcInline'))}
+                  <select onchange="setQuickConcurrency(this.value)" style="width:58px;">
+                    ${[1,2,3,4,5,6,8,10,12].map(n => `<option value="${n}" ${curConc === n ? 'selected' : ''}>${n}</option>`).join('')}
+                  </select>
+                </span>
                 <label style="display:inline-flex; align-items:center; gap:5px; margin:0; cursor:pointer; font-size:12px; color:var(--text-2);">
                   <input type="checkbox" style="width:auto;" ${!CMP.rtHostOpening ? 'checked' : ''} onchange="CMP.rtHostOpening=!this.checked; renderComposerStudio();">
                   <span>${esc(t('rtFastR1'))}</span>
                 </label>
               </div>
             </div>
+            ${countChipsHtml}
             <div class="seat-picks">${chips}</div>
             <div class="flow-note">
               <span>${esc(t(flowKey, { n: CMP.rtParticipants.length, r: CMP.rtRounds }))}</span>
@@ -3003,13 +3178,23 @@
           const m = ms[id];
           return `<span class="tag">${esc(m.name || id)}</span>`;
         }).join('');
+        const chiefCapOpts = [
+          `<option value="" ${!CMP.chiefMaxMembers ? 'selected' : ''}>${esc(t('chiefMaxAuto'))}</option>`,
+          ...[2,3,4,5,6,8,10,12].map(n => `<option value="${n}" ${CMP.chiefMaxMembers === n ? 'selected' : ''}>${n}${LANG === 'en' ? '' : ' 人'}</option>`)
+        ].join('');
         box.innerHTML = `
           <div class="setup-strip">
             <div class="setup-controls" style="margin-bottom:8px;">
-              <span style="display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:600;">
-                ${esc(t('chiefCommander'))}
-                <select onchange="CMP.chiefId=this.value; renderComposerStudio();">${memberOptions(CMP.chiefId)}</select>
-              </span>
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span style="display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:600;">
+                  ${esc(t('chiefCommander'))}
+                  <select onchange="CMP.chiefId=this.value; renderComposerStudio();">${memberOptions(CMP.chiefId)}</select>
+                </span>
+                <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-2);">
+                  ${esc(t('chiefMaxLbl'))}
+                  <select style="width:auto;" onchange="CMP.chiefMaxMembers=this.value ? parseInt(this.value,10) : null;">${chiefCapOpts}</select>
+                </span>
+              </div>
               <span style="font-size:12px; color:var(--text-2);">${esc(t('chiefFlow', { n: Math.max(0, ids.length - 1) }))}</span>
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:6px;">${standby}</div>
@@ -3427,8 +3612,9 @@
       const parts = meta.participants || [...new Set(steps.map(s => s.member_id))];
       const ordered = (hostId && parts.includes(hostId)) ? parts : (hostId ? [hostId, ...parts.filter(x => x !== hostId)] : parts);
       const consultTotal = steps.reduce((a, s) => a + (s.consult_count || 0), 0);
+      const boundCount = ordered.filter(mid => Boolean(ms[mid]?.quota_backup)).length;
 
-      // Completed: show a calm 1-line summary + quiet specialist chips
+      // Completed: calm summary + clickable hot-swap specialist pills + quick backup binding & add-seat controls
       if (task.status === 'succeeded') {
         const sumTxt = mode === 'roundtable'
           ? t('consensusDone', { n: ordered.length, r: meta.discussion_rounds || 2, c: consultTotal })
@@ -3436,19 +3622,42 @@
         const chips = ordered.map(mid => {
           const m = ms[mid] || { name: mid };
           const isHost = mid === hostId && (mode === 'roundtable' || mode === 'chief_dispatch');
-          return `<span class="tag">${avatarHtml(mid, m, { sm: true })}<span>${esc(m.name || mid)}</span>${isHost ? svgIcon('crown', 11) : ''}</span>`;
+          const qb = m.quota_backup;
+          const bkShort = qb ? (qb.model || qb.display_name || '') : '';
+          const tip = qb
+            ? `${t('swapSeatTip')} · ${t('boundBackupLbl')}: ${qb.display_name || qb.model}`
+            : t('swapSeatTip');
+          return `
+            <button class="seat-swap-pill" onclick="openSeatSwapModal('${esc(task.id)}', '${esc(mid)}')" title="${esc(tip)}">
+              ${avatarHtml(mid, m, { sm: true })}
+              <span>${esc(m.name || mid)}</span>
+              ${isHost ? svgIcon('crown', 11) : ''}
+              ${bkShort ? `<span class="seat-bk-hint" title="${esc(t('boundBackupLbl') + ': ' + bkShort)}">↳ ${esc(bkShort)}</span>` : ''}
+              <span class="swap-ic">${svgIcon('repeat', 11)}</span>
+            </button>
+          `;
         }).join('');
         return `
-          <div class="live-roster-strip" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:10px 22px;">
-            <span style="font-size:12px; color:var(--text-2); display:inline-flex; align-items:center; gap:7px;">
-              <span class="dot dot-ok"></span>${esc(sumTxt)}
-            </span>
+          <div class="live-roster-strip" style="padding:10px 22px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+              <span style="font-size:12px; color:var(--text-2); display:inline-flex; align-items:center; gap:7px;">
+                <span class="dot dot-ok"></span>${esc(sumTxt)}
+              </span>
+              <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+                <button class="btn btn-ghost btn-sm" style="height:24px; padding:0 8px; font-size:11.5px;" onclick='openSeatBackupsOverviewModal("${esc(task.id)}", ${JSON.stringify(ordered)})'>
+                  ${svgIcon('shield', 11)} ${esc(t('bindBackupsBtn'))} <span class="tabular" style="opacity:0.75;">${boundCount}/${ordered.length}</span>
+                </button>
+                <button class="btn btn-ghost btn-sm" style="height:24px; padding:0 8px; font-size:11.5px;" onclick="openAddSeatModal('${esc(task.id)}')">
+                  ${svgIcon('plus', 11)} ${esc(t('addSeatBtn'))}
+                </button>
+              </div>
+            </div>
             <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">${chips}</div>
           </div>
         `;
       }
 
-      // Running / Active: clean horizontal live cards showing who is speaking right now
+      // Running / Active: live horizontal seat cards with mid-process hot-swap + quota backup binding!
       const curStep = steps.find(s => s.status === 'running') || steps[task.current_step_index || 0] || steps[steps.length - 1];
       const latestByMember = {};
       steps.forEach(s => {
@@ -3467,6 +3676,7 @@
         const runAtt = runStep?.attempts?.[runStep.attempts.length - 1];
         const isSpeaking = Boolean(runStep) || (m.status === 'working' && m.current_task_id === task.id);
         const snip = latestByMember[mid] || '';
+        const qb = m.quota_backup;
         return `
           <div class="seat-card ${isSpeaking ? 'speaking' : ''}">
             ${avatarHtml(mid, m, { speaking: isSpeaking })}
@@ -3475,9 +3685,19 @@
                 <span style="font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                   ${isHost ? svgIcon('crown', 12) : ''}${esc(m.name || mid)}
                 </span>
-                ${isSpeaking ? liveTimerBadge(runAtt?.started_at) : `<span style="font-size:11px; color:var(--text-3);">${esc(snip ? t('spoke') : t('listening'))}</span>`}
+                <div style="display:inline-flex; align-items:center; gap:4px; flex-shrink:0;">
+                  ${isSpeaking ? liveTimerBadge(runAtt?.started_at) : `<span style="font-size:11px; color:var(--text-3);">${esc(snip ? t('spoke') : t('listening'))}</span>`}
+                  <button class="btn btn-ghost btn-sm" style="height:21px; padding:0 6px; font-size:11px;" onclick="openSeatSwapModal('${esc(task.id)}', '${esc(mid)}')" title="${esc(t('swapSeatTip'))}">
+                    ${svgIcon('repeat', 10)} ${esc(t('swapSeatBtn'))}
+                  </button>
+                </div>
               </div>
-              <div style="font-size:11px; color:var(--text-3); margin-top:1px;">${esc(m.model || '-')}</div>
+              <div style="font-size:11px; color:var(--text-3); margin-top:2px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>${esc(m.model || '-')}</span>
+                ${qb
+                  ? `<span class="seat-bk-hint" style="cursor:pointer;" onclick="openSeatSwapModal('${esc(task.id)}', '${esc(mid)}')" title="${esc(t('boundBackupLbl'))}">↳ ${esc(qb.model || qb.display_name || '')}</span>`
+                  : `<span style="cursor:pointer; text-decoration:underline dotted; opacity:0.75;" onclick="openSeatSwapModal('${esc(task.id)}', '${esc(mid)}')">${esc(t('unboundBackupLbl'))}</span>`}
+              </div>
               ${snip ? `<div class="seat-snippet">${esc(snip.slice(0, 96))}</div>` : ''}
             </div>
           </div>
@@ -3491,7 +3711,15 @@
               <span class="dot dot-run"></span>
               ${esc(t('liveAgenda', { phase: curStep?.round_label || curStep?.title || '-' }))}
             </span>
-            <span class="tabular" style="color:var(--text-3);">${esc(t('msgsUnit', { n: (task.chat_room || []).length }))}</span>
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <button class="btn btn-ghost btn-sm" style="height:23px; padding:0 7px; font-size:11px;" onclick='openSeatBackupsOverviewModal("${esc(task.id)}", ${JSON.stringify(ordered)})'>
+                ${svgIcon('shield', 11)} ${esc(t('bindBackupsBtn'))} ${boundCount}/${ordered.length}
+              </button>
+              <button class="btn btn-ghost btn-sm" style="height:23px; padding:0 7px; font-size:11px;" onclick="openAddSeatModal('${esc(task.id)}')">
+                ${svgIcon('plus', 11)} ${esc(t('addSeatBtn'))}
+              </button>
+              <span class="tabular" style="color:var(--text-3);">${esc(t('msgsUnit', { n: (task.chat_room || []).length }))}</span>
+            </div>
           </div>
           <div class="seat-grid">${cards}</div>
         </div>
@@ -4026,7 +4254,7 @@
       const seated = (focused?.mode_meta?.participants || [...new Set((focused?.steps || []).map(s => s.member_id))])
         .filter(id => ms[id] && ['codex', 'antigravity'].includes(ms[id].client));
       const allIds = getRunnableIds(STATE);
-      const chipIds = [...new Set([...seated, ...(cur && allIds.includes(cur) ? [cur] : [])])].slice(0, 5);
+      const chipIds = [...new Set([...seated, ...(cur && allIds.includes(cur) ? [cur] : [])])].slice(0, 12);
 
       bar.innerHTML = `
         <button class="qt-chip ${!cur ? 'active' : ''}" onclick="setInterjectTarget('')">@${esc(t('quickAll'))}</button>
@@ -4415,7 +4643,10 @@
                     ${m.backup_of ? `<span class="tag tag-accent" style="height:20px; font-size:10.5px;">${esc(t('backupTag'))} · ${esc(m.backup_of)}</span>` : ''}
                   </div>
                   <div style="font-size:11.5px; color:var(--text-2); margin-top:2px;">${esc(m.specialty || roleName)}</div>
-                  <div style="font-size:11px; color:var(--text-3); margin-top:1px;"><code>${esc(id)}</code> · ${esc(roleName)}</div>
+                  <div style="font-size:11px; color:var(--text-3); margin-top:1px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <span><code>${esc(id)}</code> · ${esc(roleName)}</span>
+                    ${m.quota_backup ? `<span class="seat-bk-hint">${esc(t('boundBackupLbl'))}: ${esc(m.quota_backup.display_name || m.quota_backup.model)}</span>` : ''}
+                  </div>
                 </div>
               </div>
               ${statusTag(m.status)}
@@ -4474,6 +4705,7 @@
         payload.enable_host_opening = Boolean(CMP.rtHostOpening);
       } else if (mode === 'chief_dispatch') {
         payload.chief_member_id = CMP.chiefId;
+        if (CMP.chiefMaxMembers) payload.chief_max_members = CMP.chiefMaxMembers;
       } else if (mode === 'custom_dag') {
         payload.stages = CMP.dagStages;
       } else {
@@ -4640,7 +4872,8 @@
           reasoning_effort: chosen.reasoning_effort,
           task_id: ctx.taskId || null,
           step_index: ctx.stepIndex,
-          auto_reassign: autoReassign
+          auto_reassign: autoReassign,
+          bind_as_default: true
         });
         closeModal();
         const bkId = res.member?.id;
@@ -4650,6 +4883,325 @@
         toast(t(res.reused ? 'backupReused' : 'backupCreated', { name: res.member?.name || bkId }));
         await refreshState(true);
         if (joinRt) renderComposerStudio();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    // ==================== ANYTIME / MID-PROCESS SEAT HOT-SWAP & QUOTA BACKUP BINDING ====================
+    async function openSeatSwapModal(taskId, oldMemberId) {
+      const task = (STATE?.tasks || []).find(x => x.id === taskId);
+      const oldM = STATE?.members?.[oldMemberId];
+      if (!task || !oldM) return;
+
+      const steps = task.steps || [];
+      const isRunningNow = steps.some(s => s.member_id === oldMemberId && s.status === 'running');
+      const hasUnfinished = steps.some(s => s.member_id === oldMemberId && s.status !== 'succeeded');
+      const reqShell = steps.some(s => s.member_id === oldMemberId && s.status !== 'succeeded' && s.requires_shell);
+
+      let cands = [];
+      try {
+        const cRes = await api('GET', `/api/members/backup_candidates?member_id=${encodeURIComponent(oldMemberId)}&require_same_client=${reqShell ? 1 : 0}`);
+        cands = cRes.candidates || [];
+      } catch (e) { cands = []; }
+
+      const ms = STATE.members || {};
+      const existingOthers = getRunnableIds(STATE).filter(id => id !== oldMemberId && (!reqShell || ms[id].client === 'codex'));
+      const qb = oldM.quota_backup || null;
+
+      window._SEAT_SWAP = {
+        taskId,
+        oldMemberId,
+        isRunningNow,
+        hasUnfinished,
+        reqShell,
+        tab: existingOthers.length ? 'existing' : 'same_role',
+        selectedMemberId: (qb?.mode === 'member' && existingOthers.includes(qb.member_id)) ? qb.member_id : (existingOthers[0] || ''),
+        cands,
+        selectedCandIdx: Math.max(0, cands.findIndex(c => qb && c.client === qb.client && c.model === qb.model)),
+        abortRunning: true,
+        triggerFresh: !hasUnfinished
+      };
+      renderSeatSwapModal();
+    }
+
+    function renderSeatSwapModal() {
+      const ctx = window._SEAT_SWAP;
+      if (!ctx || !STATE) return;
+      const ms = STATE.members || {};
+      const oldM = ms[ctx.oldMemberId] || { name: ctx.oldMemberId };
+      const qb = oldM.quota_backup;
+      const existingOthers = getRunnableIds(STATE).filter(id => id !== ctx.oldMemberId && (!ctx.reqShell || ms[id].client === 'codex'));
+
+      const existingHtml = existingOthers.map(id => {
+        const m = ms[id];
+        const sel = ctx.tab === 'existing' && ctx.selectedMemberId === id;
+        const isBound = qb?.mode === 'member' && qb.member_id === id;
+        return `
+          <div class="seat-pill ${sel ? 'selected' : ''}" onclick="selectSeatSwapExisting('${esc(id)}')" title="${esc(m.specialty || m.model)}">
+            ${avatarHtml(id, m, { sm: true })}
+            <span style="font-weight:${sel ? '600' : '500'};">${esc(m.name || id)}</span>
+            <span style="font-size:10.5px; color:var(--text-3);">${esc(m.model)}</span>
+            ${isBound ? `<span class="seat-bk-hint">${esc(t('boundBackupLbl'))}</span>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      const sameCands = ctx.cands.map((c, i) => ({ ...c, _i: i })).filter(c => c.same_engine);
+      const crossCands = ctx.cands.map((c, i) => ({ ...c, _i: i })).filter(c => !c.same_engine);
+      const renderModelPills = (arr) => arr.map(c => {
+        const sel = ctx.tab === 'same_role' && ctx.selectedCandIdx === c._i;
+        const isBound = qb && qb.client === c.client && qb.model === c.model;
+        return `
+          <div class="seat-pill ${sel ? 'selected' : ''}" onclick="selectSeatSwapModel(${c._i})">
+            <span class="tag" style="height:18px; padding:0 5px; font-size:10px;">${c.client === 'antigravity' ? 'AGY' : 'Codex'}</span>
+            <span style="font-weight:${sel ? '600' : '500'};">${esc(c.display_name || c.model)}</span>
+            <span style="font-size:10.5px; color:var(--text-3);">${esc(c.reasoning_effort)}</span>
+            ${isBound ? `<span class="seat-bk-hint">${esc(t('boundBackupLbl'))}</span>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      const timingHtml = ctx.isRunningNow ? `
+        <div style="background:var(--warn-soft); border:1px solid var(--warn-border); border-radius:8px; padding:9px 12px; margin-bottom:12px; font-size:12px;">
+          <div style="font-weight:600; margin-bottom:6px;">${LANG === 'en' ? 'Specialist is actively running right now:' : '该专家正在进程中发言，请选择切换时机：'}</div>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin-bottom:4px; color:var(--text);">
+            <input type="radio" name="swap-timing" style="width:auto;" ${ctx.abortRunning ? 'checked' : ''} onchange="window._SEAT_SWAP.abortRunning=true;">
+            <span>${esc(t('swapAbortNow'))}</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text);">
+            <input type="radio" name="swap-timing" style="width:auto;" ${!ctx.abortRunning ? 'checked' : ''} onchange="window._SEAT_SWAP.abortRunning=false;">
+            <span>${esc(t('swapNextRound'))}</span>
+          </label>
+        </div>
+      ` : (!ctx.hasUnfinished ? `
+        <label style="display:flex; align-items:center; gap:6px; margin-bottom:10px; cursor:pointer; font-size:12.5px; color:var(--text);">
+          <input type="checkbox" id="swap-trigger-fresh" style="width:auto;" ${ctx.triggerFresh ? 'checked' : ''} onchange="window._SEAT_SWAP.triggerFresh=this.checked;">
+          <span>${esc(t('swapTriggerFresh'))}</span>
+        </label>
+      ` : '');
+
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <strong style="font-size:15px; display:inline-flex; align-items:center; gap:7px;">${svgIcon('repeat', 15)} ${esc(t('swapModalTitle'))}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div style="background:var(--surface-subtle); border:1px solid var(--border); border-radius:8px; padding:9px 12px; margin-bottom:12px; font-size:12px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <div>
+            <strong>${esc(oldM.name || ctx.oldMemberId)}</strong>
+            <span style="color:var(--text-3); margin-left:6px;"><code>${esc(oldM.client)}/${esc(oldM.model)}</code></span>
+          </div>
+          ${qb
+            ? `<span class="seat-bk-hint">${esc(t('boundBackupLbl'))}: ${esc(qb.display_name || qb.model)}</span>`
+            : `<span class="tag">${esc(t('unboundBackupLbl'))}</span>`}
+        </div>
+        ${timingHtml}
+        <div class="seg" style="margin-bottom:10px;">
+          <button class="seg-btn ${ctx.tab === 'existing' ? 'active' : ''}" onclick="window._SEAT_SWAP.tab='existing'; renderSeatSwapModal();">${esc(t('swapModeExisting'))}</button>
+          <button class="seg-btn ${ctx.tab === 'same_role' ? 'active' : ''}" onclick="window._SEAT_SWAP.tab='same_role'; renderSeatSwapModal();">${esc(t('swapModeSameRole'))}</button>
+        </div>
+        ${ctx.tab === 'existing' ? `
+          <div class="seat-picks" style="margin-bottom:12px;">${existingHtml || '<span style="color:var(--text-3); font-size:12px;">-</span>'}</div>
+        ` : `
+          <div style="margin-bottom:12px;">
+            ${sameCands.length ? `<div style="font-size:11px; color:var(--text-3); margin:4px 0;">${esc(t('backupSameEngine'))}</div><div class="seat-picks" style="margin-bottom:8px;">${renderModelPills(sameCands)}</div>` : ''}
+            ${crossCands.length ? `<div style="font-size:11px; color:var(--text-3); margin:4px 0;">${esc(t('backupCrossEngine'))}</div><div class="seat-picks">${renderModelPills(crossCands)}</div>` : ''}
+          </div>
+        `}
+        <label style="display:flex; align-items:center; gap:6px; margin-bottom:10px; cursor:pointer; font-size:12px; color:var(--text-2);">
+          <input type="checkbox" id="swap-also-bind" checked style="width:auto;">
+          <span>${esc(t('swapAlsoBind'))}</span>
+        </label>
+        <div style="margin-bottom:12px;">
+          <input type="text" id="swap-reason" placeholder="${LANG === 'en' ? 'Optional swap note (e.g. model quota low)...' : '可选：换人说明（例如：该模型额度即将用尽）...'}" value="">
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <button class="btn btn-sec btn-sm" onclick="bindSelectedAsBackupOnly()">${svgIcon('shield', 12)} ${esc(t('swapBindOnlyBtn'))}</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
+            <button class="btn btn-sm" onclick="confirmSeatSwap()">${svgIcon('repeat', 12)} ${esc(t('swapConfirmBtn'))}</button>
+          </div>
+        </div>
+      `, true);
+    }
+
+    function selectSeatSwapExisting(mid) {
+      if (!window._SEAT_SWAP) return;
+      window._SEAT_SWAP.tab = 'existing';
+      window._SEAT_SWAP.selectedMemberId = mid;
+      renderSeatSwapModal();
+    }
+
+    function selectSeatSwapModel(idx) {
+      if (!window._SEAT_SWAP) return;
+      window._SEAT_SWAP.tab = 'same_role';
+      window._SEAT_SWAP.selectedCandIdx = idx;
+      renderSeatSwapModal();
+    }
+
+    async function bindSelectedAsBackupOnly() {
+      const ctx = window._SEAT_SWAP;
+      if (!ctx) return;
+      const oldName = STATE?.members?.[ctx.oldMemberId]?.name || ctx.oldMemberId;
+      try {
+        let payload = { source_member_id: ctx.oldMemberId };
+        if (ctx.tab === 'existing' && ctx.selectedMemberId) {
+          payload.backup_member_id = ctx.selectedMemberId;
+        } else if (ctx.cands?.[ctx.selectedCandIdx]) {
+          const c = ctx.cands[ctx.selectedCandIdx];
+          payload.client = c.client;
+          payload.model = c.model;
+          payload.reasoning_effort = c.reasoning_effort;
+        }
+        const r = await api('POST', '/api/members/bind_backup', payload);
+        closeModal();
+        toast(t('bindDoneToast', { name: oldName, bk: r.quota_backup?.display_name || r.quota_backup?.model || 'Auto' }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function confirmSeatSwap() {
+      const ctx = window._SEAT_SWAP;
+      if (!ctx) return;
+      const oldName = STATE?.members?.[ctx.oldMemberId]?.name || ctx.oldMemberId;
+      const alsoBind = Boolean(document.getElementById('swap-also-bind')?.checked);
+      const reason = (document.getElementById('swap-reason')?.value || '').trim() || (LANG === 'en' ? 'Live hot-swap' : '现场快速换人');
+      const payload = {
+        task_id: ctx.taskId,
+        old_member_id: ctx.oldMemberId,
+        abort_running: Boolean(ctx.abortRunning),
+        trigger_fresh_turn: Boolean(ctx.triggerFresh),
+        bind_as_quota_backup: alsoBind,
+        reason
+      };
+      if (ctx.tab === 'existing') {
+        if (!ctx.selectedMemberId) return;
+        payload.new_member_id = ctx.selectedMemberId;
+      } else {
+        const c = ctx.cands?.[ctx.selectedCandIdx];
+        if (!c) return;
+        payload.spawn_backup_client = c.client;
+        payload.spawn_backup_model = c.model;
+        payload.spawn_backup_effort = c.reasoning_effort;
+      }
+      try {
+        const r = await api('POST', '/api/tasks/swap_seat', payload);
+        closeModal();
+        await refreshState(true);
+        const newName = STATE?.members?.[r.new_member_id]?.name || r.new_member_id;
+        toast(t('swapDoneToast', { oldName, newName }));
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    function openAddSeatModal(taskId) {
+      const task = (STATE?.tasks || []).find(x => x.id === taskId);
+      if (!task) return;
+      const ms = STATE.members || {};
+      const seated = new Set(task.mode_meta?.participants || (task.steps || []).map(s => s.member_id));
+      const candidates = getRunnableIds(STATE).filter(id => !seated.has(id));
+      const list = candidates.length ? candidates : getRunnableIds(STATE);
+      window._ADD_SEAT = { taskId, memberId: list[0] || '' };
+      const pills = list.map(id => {
+        const m = ms[id];
+        return `
+          <div class="seat-pill ${id === window._ADD_SEAT.memberId ? 'selected' : ''}" data-add-seat="${esc(id)}" onclick="selectAddSeatPill('${esc(id)}')">
+            ${avatarHtml(id, m, { sm: true })}
+            <span style="font-weight:600;">${esc(m.name || id)}</span>
+            <span style="font-size:10.5px; color:var(--text-3);">${esc(m.model)}</span>
+          </div>
+        `;
+      }).join('');
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <strong style="font-size:15px; display:inline-flex; align-items:center; gap:7px;">${svgIcon('userPlus', 15)} ${esc(t('addSeatModalTitle'))}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div class="seat-picks" id="add-seat-pills" style="margin-bottom:12px;">${pills}</div>
+        <div style="margin-bottom:10px;">
+          <input type="text" id="add-seat-inst" placeholder="${LANG === 'en' ? 'Optional focus note for the invited specialist...' : '可选：给新加入专家的重点关注方向...'}">
+        </div>
+        <label style="display:flex; align-items:center; gap:6px; margin-bottom:12px; cursor:pointer; font-size:12.5px; color:var(--text);">
+          <input type="checkbox" id="add-seat-trigger" checked style="width:auto;">
+          <span>${esc(t('addSeatTrigger'))}</span>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
+          <button class="btn btn-sm" onclick="confirmAddSeat()">${svgIcon('plus', 12)} ${esc(t('confirm'))}</button>
+        </div>
+      `);
+    }
+
+    function selectAddSeatPill(mid) {
+      if (!window._ADD_SEAT) return;
+      window._ADD_SEAT.memberId = mid;
+      document.querySelectorAll('#add-seat-pills .seat-pill').forEach(el => {
+        el.classList.toggle('selected', el.getAttribute('data-add-seat') === mid);
+      });
+    }
+
+    async function confirmAddSeat() {
+      const ctx = window._ADD_SEAT;
+      if (!ctx || !ctx.memberId) return;
+      try {
+        await api('POST', '/api/tasks/add_seat', {
+          task_id: ctx.taskId,
+          member_id: ctx.memberId,
+          trigger_turn: Boolean(document.getElementById('add-seat-trigger')?.checked),
+          instruction: document.getElementById('add-seat-inst')?.value || ''
+        });
+        closeModal();
+        toast(t('addSeatDoneToast', { name: STATE?.members?.[ctx.memberId]?.name || ctx.memberId }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    function openSeatBackupsOverviewModal(taskId, seatIds) {
+      const ms = STATE?.members || {};
+      const rows = (seatIds || []).map(mid => {
+        const m = ms[mid] || { name: mid };
+        const qb = m.quota_backup;
+        return `
+          <div class="list-row">
+            <div style="min-width:0;">
+              <div style="font-weight:600; font-size:13px;">${esc(m.name || mid)}</div>
+              <div style="font-size:11.5px; color:var(--text-3);"><code>${esc(m.client)}/${esc(m.model)}</code></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              ${qb ? `<span class="seat-bk-hint">↳ ${esc(qb.display_name || qb.model)}</span>` : `<span class="tag">${esc(t('unboundBackupLbl'))}</span>`}
+              <button class="btn btn-sec btn-sm" onclick="openSeatSwapModal('${esc(taskId)}', '${esc(mid)}')">${esc(t('swapSeatBtn'))} / ${esc(t('boundBackupLbl'))}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <strong style="font-size:15px; display:inline-flex; align-items:center; gap:7px;">${svgIcon('shield', 15)} ${esc(t('bindBackupsBtn'))}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div style="font-size:12px; color:var(--text-2); margin-bottom:12px;">
+          ${LANG === 'en' ? 'When any seated model runs out of quota / hits 429, the orchestrator automatically fails over to its bound backup specialist/model.' : '当本场任意专家模型额度耗尽或触发 429 限流时，编排器将优先自动切换至其绑定的同角色跨模型替补并无缝接力剩余轮次：'}
+        </div>
+        <div class="list-box" style="margin-bottom:12px;">${rows}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick='autoBindAllBackupsAction(${JSON.stringify(seatIds)}, false, true)'>${svgIcon('shield', 12)} ${LANG === 'en' ? 'Auto-Bind Same Engine' : '一键自动绑定（优先同端换模型）'}</button>
+            <button class="btn btn-sec btn-sm" onclick='autoBindAllBackupsAction(${JSON.stringify(seatIds)}, true, true)'>${LANG === 'en' ? 'Auto-Bind Cross Engine' : '一键自动绑定（优先跨端换引擎）'}</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="closeModal()">${esc(t('close'))}</button>
+        </div>
+      `, true);
+    }
+
+    async function autoBindAllBackupsAction(memberIds = null, preferCrossEngine = false, overwrite = false) {
+      try {
+        const r = await api('POST', '/api/members/auto_bind_backups', {
+          member_ids: memberIds || null,
+          prefer_cross_engine: Boolean(preferCrossEngine),
+          overwrite: Boolean(overwrite)
+        });
+        toast(t('autoBindDoneToast', { n: r.count || 0 }));
+        await refreshState(true);
+        if (document.getElementById('modal-backdrop').style.display === 'flex' && memberIds && FOCUSED_TASK_ID) {
+          openSeatBackupsOverviewModal(FOCUSED_TASK_ID, memberIds);
+        }
       } catch (e) { toast(t('toastFail', { err: e.message }), true); }
     }
     async function abortTask(tid) { await api('POST', '/api/tasks/abort', { task_id: tid }); await refreshState(true); }

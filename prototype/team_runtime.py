@@ -531,7 +531,7 @@ class TeamOrchestrator:
             if remote_control_url is not None:
                 b["remote_control_url"] = remote_control_url.strip()
             if max_concurrency is not None:
-                mc = max(1, min(8, int(max_concurrency)))
+                mc = max(1, min(12, int(max_concurrency)))
                 st["max_concurrency"] = mc
                 st.setdefault("settings", {})["max_concurrency"] = mc
             if default_max_auto_repairs is not None:
@@ -1079,6 +1079,119 @@ class TeamOrchestrator:
             "recommended": candidates[0] if candidates else None,
         }
 
+    def bind_quota_backup(
+        self,
+        source_member_id: str,
+        backup_member_id: Optional[str] = None,
+        backup_client: Optional[str] = None,
+        backup_model: Optional[str] = None,
+        backup_effort: Optional[str] = None,
+        prefer_cross_engine: bool = False,
+        clear: bool = False,
+    ) -> Dict[str, Any]:
+        """Persistently bind (or clear / auto-pick) a quota-exhaustion backup specialist or model for a member."""
+        snap = self.store.snapshot()
+        src_mem = snap.get("members", {}).get(source_member_id)
+        if not src_mem:
+            raise ValueError(f"原专家不存在: {source_member_id}")
+
+        binding_obj: Optional[Dict[str, Any]] = None
+        if not clear:
+            if backup_member_id:
+                if backup_member_id == source_member_id:
+                    raise ValueError("不能将专家自身绑定为自己的额度替补")
+                bm = snap.get("members", {}).get(backup_member_id)
+                if not bm:
+                    raise ValueError(f"替补成员不存在: {backup_member_id}")
+                binding_obj = {
+                    "mode": "member",
+                    "member_id": backup_member_id,
+                    "client": bm.get("client", "codex"),
+                    "model": bm.get("model", ""),
+                    "reasoning_effort": bm.get("reasoning_effort", "high"),
+                    "display_name": bm.get("name") or backup_member_id,
+                    "updated_at": time.time(),
+                }
+            else:
+                cands_info = self.list_backup_candidates(source_member_id, prefer_cross_engine=prefer_cross_engine)
+                cands = cands_info.get("candidates") or []
+                if backup_model:
+                    ch_cl = (backup_client or src_mem.get("client", "codex")).strip().lower()
+                    if ch_cl not in SUPPORTED_CLIENTS:
+                        raise ValueError(f"不支持的替补引擎: {ch_cl}")
+                    if ch_cl == src_mem.get("client") and backup_model.strip().lower() == str(src_mem.get("model", "")).lower():
+                        raise ValueError("绑定的替补模型必须与原模型不同")
+                    matched = next((c for c in cands if c["client"] == ch_cl and c["model"] == backup_model.strip()), None)
+                    ch_md = backup_model.strip()
+                    ch_ef = backup_effort or (matched["reasoning_effort"] if matched else (src_mem.get("reasoning_effort") or "high"))
+                    ch_disp = matched["display_name"] if matched else ch_md
+                    self._validate_client_model_effort(ch_cl, ch_md, ch_ef)
+                else:
+                    if not cands:
+                        raise ValueError("当前没有可用的不同旗舰模型可绑定为额度替补")
+                    rec = cands[0]
+                    ch_cl, ch_md, ch_ef, ch_disp = rec["client"], rec["model"], rec["reasoning_effort"], rec["display_name"]
+                binding_obj = {
+                    "mode": "model",
+                    "member_id": None,
+                    "client": ch_cl,
+                    "model": ch_md,
+                    "reasoning_effort": ch_ef,
+                    "display_name": ch_disp,
+                    "updated_at": time.time(),
+                }
+
+        def _bind(st: Dict[str, Any]) -> Dict[str, Any]:
+            m = st["members"].get(source_member_id)
+            if not m:
+                raise ValueError(f"原专家不存在: {source_member_id}")
+            m["quota_backup"] = binding_obj
+            return {"member_id": source_member_id, "quota_backup": binding_obj, "member": m}
+
+        return self.store.mutate(_bind)
+
+    def auto_bind_all_quota_backups(
+        self,
+        prefer_cross_engine: bool = False,
+        member_ids: Optional[List[str]] = None,
+        overwrite: bool = False,
+    ) -> Dict[str, Any]:
+        """Auto-bind optimal different-model quota backups for all (or specified) roster members in 1 click."""
+        snap = self.store.snapshot()
+        target_ids = list(member_ids) if member_ids else [
+            mid for mid, m in snap.get("members", {}).items()
+            if m.get("client") in SUPPORTED_CLIENTS and not m.get("backup_of")
+        ]
+        plan: Dict[str, Dict[str, Any]] = {}
+        for mid in target_ids:
+            m = snap.get("members", {}).get(mid)
+            if not m or m.get("client") not in SUPPORTED_CLIENTS:
+                continue
+            if m.get("quota_backup") and not overwrite:
+                continue
+            cinfo = self.list_backup_candidates(mid, prefer_cross_engine=prefer_cross_engine)
+            rec = cinfo.get("recommended")
+            if rec:
+                plan[mid] = {
+                    "mode": "model",
+                    "member_id": None,
+                    "client": rec["client"],
+                    "model": rec["model"],
+                    "reasoning_effort": rec["reasoning_effort"],
+                    "display_name": rec["display_name"],
+                    "updated_at": time.time(),
+                }
+
+        def _apply(st: Dict[str, Any]) -> Dict[str, Any]:
+            bound_list = []
+            for mid, bobj in plan.items():
+                if mid in st["members"]:
+                    st["members"][mid]["quota_backup"] = bobj
+                    bound_list.append({"member_id": mid, "name": st["members"][mid].get("name"), "quota_backup": bobj})
+            return {"bound": bound_list, "count": len(bound_list)}
+
+        return self.store.mutate(_apply)
+
     def spawn_quota_backup_member(
         self,
         source_member_id: str,
@@ -1089,6 +1202,7 @@ class TeamOrchestrator:
         task_id: Optional[str] = None,
         step_index: Optional[int] = None,
         auto_reassign: bool = False,
+        bind_as_default: bool = True,
         reason: str = "模型额度预警，补充同角色跨模型替补",
     ) -> Dict[str, Any]:
         """Spawn (or reuse idle) backup specialist inheriting 100% of source role/persona/grounding on a different model."""
@@ -1155,6 +1269,16 @@ class TeamOrchestrator:
                     ex_m["tags"] = list(src.get("tags") or [])
                     ex_m["reasoning_effort"] = chosen_effort
                     ex_m["backup_reason"] = reason
+                    if bind_as_default:
+                        src["quota_backup"] = {
+                            "mode": "member",
+                            "member_id": ex_id,
+                            "client": chosen_client,
+                            "model": chosen_model,
+                            "reasoning_effort": chosen_effort,
+                            "display_name": ex_m.get("name") or chosen_disp,
+                            "updated_at": time.time(),
+                        }
                     return {"member": ex_m, "reused": True}
 
             base_token = _short_model_id_token(chosen_model)
@@ -1201,6 +1325,16 @@ class TeamOrchestrator:
             }
             enrich_member_metadata(new_mem)
             st["members"][cand_id] = new_mem
+            if bind_as_default:
+                src["quota_backup"] = {
+                    "mode": "member",
+                    "member_id": cand_id,
+                    "client": chosen_client,
+                    "model": chosen_model,
+                    "reasoning_effort": chosen_effort,
+                    "display_name": bk_name,
+                    "updated_at": time.time(),
+                }
             return {"member": new_mem, "reused": False}
 
         out = self.store.mutate(_spawn)
@@ -1654,6 +1788,7 @@ class TeamOrchestrator:
         research_spec: Optional[Dict[str, Any]] = None,
         openscience_playbooks: Optional[List[str]] = None,
         squad_preset: str = "",
+        chief_max_members: Optional[int] = None,
     ) -> Dict[str, Any]:
         if project_path:
             self.switch_project(project_path)
@@ -1831,7 +1966,8 @@ class TeamOrchestrator:
                 # 2. Chief Dynamic Roster Selection & DAG Dispatch
                 runnable = [k for k, v in st["members"].items() if v.get("client") in SUPPORTED_CLIENTS]
                 chief_id = chief_member_id if (chief_member_id and chief_member_id in st["members"]) else (runnable[0] if runnable else "codex_author")
-                mode_meta = {"chief_member_id": chief_id, "recruited_members": []}
+                chief_cap = max(1, min(12, int(chief_max_members))) if chief_max_members is not None else min(6, max(1, len(runnable)))
+                mode_meta = {"chief_member_id": chief_id, "chief_max_members": chief_cap, "recruited_members": []}
 
                 roster_lines = [
                     f'- id="{k}" | 姓名="{st["members"][k]["name"]}" | 职责="{st["roles"].get(st["members"][k]["role"], {}).get("name", "")}" | 引擎={st["members"][k]["client"]}/{st["members"][k]["model"]}'
@@ -1846,7 +1982,7 @@ class TeamOrchestrator:
                         round_label="主帅点将",
                         member_id=chief_id,
                         prompt=(
-                            "你是本次任务的主帅总管。请先快速查看当前项目目录概况，再从以下真实团队花名册中按需点选最合适的 1~5 名成员，编排串行/并行协作与审查步骤（无需所有人都上场）：\n"
+                            f"你是本次任务的主帅总管。请先快速查看当前项目目录概况，再从以下真实团队花名册中按需点选最合适的 1~{chief_cap} 名成员，编排串行/并行协作与审查步骤（无需所有人都上场）：\n"
                             + "\n".join(roster_lines)
                             + f"\n\n【用户任务目标】{goal}\n"
                             + f"【用户授予的文件权限】sandbox={sandbox}（若为 read-only 则所有步骤 read_only 必须为 true；若为 workspace-write 则实施写文件步骤可设 read_only=false）\n\n"
@@ -2895,6 +3031,289 @@ class TeamOrchestrator:
         self._wakeup.set()
         return res
 
+    def swap_task_seat(
+        self,
+        task_id: str,
+        old_member_id: str,
+        new_member_id: Optional[str] = None,
+        spawn_backup_client: Optional[str] = None,
+        spawn_backup_model: Optional[str] = None,
+        spawn_backup_effort: Optional[str] = None,
+        abort_running: bool = True,
+        trigger_fresh_turn: bool = False,
+        bind_as_quota_backup: bool = False,
+        reason: str = "现场快速换人",
+    ) -> Dict[str, Any]:
+        """Hot-swap a seated specialist in a task at ANY time (mid-run, waiting, failed, or completed)."""
+        snap = self.store.snapshot()
+        task_snap = self._find_task(snap, task_id)
+        if old_member_id not in snap["members"]:
+            raise ValueError(f"原席位专家不存在: {old_member_id}")
+
+        # 1. Resolve or spawn target replacement specialist
+        spawned_info: Optional[Dict[str, Any]] = None
+        if spawn_backup_model:
+            spawned_info = self.spawn_quota_backup_member(
+                source_member_id=old_member_id,
+                new_client=spawn_backup_client,
+                new_model=spawn_backup_model,
+                new_effort=spawn_backup_effort,
+                bind_as_default=bind_as_quota_backup,
+                reason=f"{reason}（同角色跨模型替补）",
+            )
+            target_mid = spawned_info["member"]["id"]
+        else:
+            if not new_member_id:
+                raise ValueError("请指定要替换上场的专家或跨模型替补")
+            target_mid = new_member_id.strip()
+            if target_mid == old_member_id:
+                raise ValueError("新旧专家不能相同")
+            if target_mid not in snap["members"]:
+                raise ValueError(f"目标专家不存在: {target_mid}")
+            if bind_as_quota_backup:
+                self.bind_quota_backup(old_member_id, backup_member_id=target_mid)
+
+        # Validate requires_shell capability before aborting anything!
+        snap2 = self.store.snapshot()
+        target_mem = snap2["members"][target_mid]
+        task_now = self._find_task(snap2, task_id)
+        for s in task_now.get("steps", []):
+            if s["member_id"] == old_member_id and s["status"] != "succeeded":
+                if s.get("requires_shell") and target_mem.get("client") == "antigravity":
+                    raise ValueError(
+                        f"能力路由拦截：步骤 #{s['step_index']} 需要 Shell 执行权限，不可切换为无头 Antigravity 专家 {target_mid}"
+                    )
+
+        # 2. If old_member_id is actively running right now and abort_running=True, cleanly abort & wait briefly!
+        aborted_step_indices: List[int] = []
+        running_steps = [s for s in task_now.get("steps", []) if s["member_id"] == old_member_id and s["status"] == "running"]
+        if running_steps and abort_running:
+            for rs in running_steps:
+                aborted_step_indices.append(rs["step_index"])
+                self.abort_attempt(task_id=task_id, step_index=rs["step_index"], reason=f"现场换人中止原席位: {reason}")
+            deadline = time.time() + 3.5
+            while time.time() < deadline:
+                cur_t = self._find_task(self.store.snapshot(), task_id)
+                still_run = any(
+                    cur_t["steps"][idx]["status"] == "running"
+                    for idx in aborted_step_indices
+                    if idx < len(cur_t["steps"])
+                )
+                if not still_run:
+                    break
+                time.sleep(0.08)
+
+        # 3. Atomically swap roster seat + pending/aborted/failed steps (+ optional fresh turn if task was already done!)
+        def _do_swap(st: Dict[str, Any]) -> Dict[str, Any]:
+            t = self._find_task(st, task_id)
+            old_m = st["members"][old_member_id]
+            new_m = st["members"][target_mid]
+            now = time.time()
+
+            # Update mode_meta participants / host / chief / specialist cleanly
+            meta = t.setdefault("mode_meta", {})
+            if isinstance(meta.get("participants"), list):
+                new_parts: List[str] = []
+                replaced = False
+                for p in meta["participants"]:
+                    if p == old_member_id:
+                        if target_mid not in new_parts:
+                            new_parts.append(target_mid)
+                        replaced = True
+                    else:
+                        if p not in new_parts:
+                            new_parts.append(p)
+                if not replaced and target_mid not in new_parts:
+                    new_parts.append(target_mid)
+                meta["participants"] = new_parts
+            if meta.get("host_member_id") == old_member_id:
+                meta["host_member_id"] = target_mid
+            if meta.get("chief_member_id") == old_member_id:
+                meta["chief_member_id"] = target_mid
+            if meta.get("specialist_id") == old_member_id:
+                meta["specialist_id"] = target_mid
+
+            swapped_steps: List[int] = []
+            still_running_skipped: List[int] = []
+            restarted_any = False
+
+            for s in t.get("steps", []):
+                if s["member_id"] != old_member_id:
+                    continue
+                st_val = s["status"]
+                if st_val == "succeeded":
+                    continue
+                if st_val == "running":
+                    still_running_skipped.append(s["step_index"])
+                    continue
+                if s.get("requires_shell") and new_m.get("client") == "antigravity":
+                    continue
+                s["member_id"] = target_mid
+                s["worker_session_id"] = None
+                if st_val in ("aborted", "failed", "blocked", "needs_ruling", "needs_verification", "awaiting_user"):
+                    s["handoff_context"] = {
+                        "reassigned_from": f"{old_m.get('name')} ({old_m.get('model')})",
+                        "reassigned_to": f"{new_m.get('name')} ({new_m.get('model')})",
+                        "reason": reason,
+                        "completed_steps": [x["step_index"] for x in t["steps"] if x["status"] == "succeeded"],
+                        "prior_outputs": [
+                            (a.get("result_text") or a.get("partial_text") or "")[:600]
+                            for a in s.get("attempts", [])[-1:]
+                            if (a.get("result_text") or a.get("partial_text"))
+                        ],
+                        "open_issues_and_evidence": [s.get("blocking_reason") or reason],
+                    }
+                    s["status"] = "pending"
+                    s["blocking_reason"] = None
+                    s["pending_questions"] = None
+                    restarted_any = True
+                swapped_steps.append(s["step_index"])
+
+            # If task had no unfinished steps for old_member_id and user requested a fresh turn from new specialist
+            fresh_step_idx: Optional[int] = None
+            if trigger_fresh_turn and not restarted_any and not still_running_skipped:
+                new_idx = len(t["steps"])
+                fresh_step_idx = new_idx
+                ro = t.get("sandbox", "read-only") == "read-only"
+                sc = t.get("workspace_scope", ".")
+                t["steps"].append(
+                    self._make_step(
+                        step_index=new_idx,
+                        title=f"新席位补充研判 ({new_m['name']})",
+                        step_type="synthesis" if meta.get("host_member_id") == target_mid else "discussion",
+                        stage_index=new_idx,
+                        round_label="现场换人接力",
+                        member_id=target_mid,
+                        prompt=(
+                            f"项目负责人已将原席位 [{old_m['name']}] 切换由你 ({new_m['name']}) 接替。\n"
+                            f"换人说明：{reason}\n"
+                            f"任务总目标：{t['goal']}\n\n"
+                            "请审阅上方已有讨论与交付物，结合你的专长与模型优势给出独立复核、纠偏或增量深化方案。"
+                        ),
+                        depends_on=[],
+                        review_of=None,
+                        read_only=ro,
+                        write_scope=[] if ro else [sc],
+                        workspace_scope=sc,
+                        sandbox=t.get("sandbox", "read-only"),
+                    )
+                )
+                restarted_any = True
+                swapped_steps.append(new_idx)
+
+            if restarted_any:
+                t["archived"] = False
+                st["active_task_id"] = t["id"]
+                t["status"] = "queued" if st.get("paused") else "running"
+                t["blocking_reason"] = None
+                if swapped_steps:
+                    t["current_step_index"] = swapped_steps[0]
+
+            note_parts = [f"现场换人：将 **{old_m['name']}** 切换为 **{new_m['name']}** ({new_m['client']}/{new_m['model']})"]
+            if aborted_step_indices:
+                note_parts.append(f"已中止并交接运行中步骤 #{aborted_step_indices}")
+            elif still_running_skipped:
+                note_parts.append(f"当前运行中步骤 #{still_running_skipped} 说完后生效，后续步骤已切换")
+            elif fresh_step_idx is not None:
+                note_parts.append("已触发新席位补充研判")
+            if bind_as_quota_backup:
+                note_parts.append("并已绑定为额度耗尽默认替补")
+            summary_msg = " · ".join(note_parts)
+
+            self._append_room_chat(
+                st,
+                t,
+                sender_id="user",
+                kind="handoff",
+                content=summary_msg,
+                to_member_id=target_mid,
+                round_label="现场换人",
+            )
+            t["recent_events"].append({"ts": now, "type": "seat.swapped", "summary": summary_msg})
+            t["recent_events"] = t["recent_events"][-40:]
+            t["updated_at"] = now
+            return {
+                "task": t,
+                "old_member_id": old_member_id,
+                "new_member_id": target_mid,
+                "swapped_steps": swapped_steps,
+                "still_running_skipped": still_running_skipped,
+                "applied": "next_round" if (still_running_skipped and not aborted_step_indices) else "immediate",
+                "spawned_backup": spawned_info["member"] if spawned_info else None,
+            }
+
+        res = self.store.mutate(_do_swap)
+        self._wakeup.set()
+        return res
+
+    def add_task_seat(
+        self,
+        task_id: str,
+        member_id: str,
+        trigger_turn: bool = True,
+        instruction: str = "",
+    ) -> Dict[str, Any]:
+        """Add an extra specialist seat into an active or completed task at any time."""
+        def _add(st: Dict[str, Any]) -> Dict[str, Any]:
+            t = self._find_task(st, task_id)
+            if member_id not in st["members"]:
+                raise ValueError(f"专家不存在: {member_id}")
+            mem = st["members"][member_id]
+            meta = t.setdefault("mode_meta", {})
+            parts = list(meta.get("participants") or [s["member_id"] for s in t.get("steps", [])])
+            dedup_parts: List[str] = []
+            for p in parts:
+                if p not in dedup_parts:
+                    dedup_parts.append(p)
+            if member_id not in dedup_parts:
+                dedup_parts.append(member_id)
+            meta["participants"] = dedup_parts
+
+            now = time.time()
+            added_step_idx: Optional[int] = None
+            if trigger_turn:
+                added_step_idx = len(t["steps"])
+                ro = t.get("sandbox", "read-only") == "read-only"
+                sc = t.get("workspace_scope", ".")
+                extra = f"\n补充指示：{instruction.strip()}" if instruction.strip() else ""
+                t["steps"].append(
+                    self._make_step(
+                        step_index=added_step_idx,
+                        title=f"增补席位发言 ({mem['name']})",
+                        step_type="discussion",
+                        stage_index=added_step_idx,
+                        round_label="增补专家",
+                        member_id=member_id,
+                        prompt=(
+                            f"项目负责人新邀请你 ({mem['name']}) 加入本次协作讨论。\n"
+                            f"总目标：{t['goal']}{extra}\n\n"
+                            "请审阅上方已有发言与项目文件，从你的专业视角提供独立洞察、盲区核查或关键补充建议。"
+                        ),
+                        depends_on=[],
+                        review_of=None,
+                        read_only=ro,
+                        write_scope=[] if ro else [sc],
+                        workspace_scope=sc,
+                        sandbox=t.get("sandbox", "read-only"),
+                    )
+                )
+                t["archived"] = False
+                st["active_task_id"] = t["id"]
+                t["current_step_index"] = added_step_idx
+                t["status"] = "queued" if st.get("paused") else "running"
+                t["blocking_reason"] = None
+
+            msg = f"现场增补专家 **{mem['name']}** ({mem['client']}/{mem['model']}) 加入讨论席位"
+            self._append_room_chat(st, t, sender_id="user", kind="handoff", content=msg, to_member_id=member_id, round_label="增补专家")
+            t["recent_events"].append({"ts": now, "type": "seat.added", "summary": msg})
+            t["recent_events"] = t["recent_events"][-40:]
+            t["updated_at"] = now
+            return {"task": t, "member_id": member_id, "step_index": added_step_idx}
+
+        res = self.store.mutate(_add)
+        self._wakeup.set()
+        return res
+
     def set_pause(self, paused: bool) -> Dict[str, Any]:
         def _p(st: Dict[str, Any]) -> Dict[str, Any]:
             st["paused"] = bool(paused)
@@ -3860,7 +4279,9 @@ class TeamOrchestrator:
 
         recruited: List[str] = []
         offset = len(task["steps"])  # 1 (since chief_plan is step 0)
-        for local_i, rs in enumerate(raw_steps[:6]):
+        chief_cap = int((task.get("mode_meta") or {}).get("chief_max_members") or 6)
+        max_expand = max(6, min(14, chief_cap + 2))
+        for local_i, rs in enumerate(raw_steps[:max_expand]):
             mid = str(rs.get("member_id") or "").strip()
             if mid not in st["members"]:
                 mid = valid_members[local_i % len(valid_members)]
@@ -3939,6 +4360,7 @@ class TeamOrchestrator:
         verif_report: Optional[Dict[str, Any]] = None,
     ) -> None:
         # Pre-compute quota-exhaustion backup candidate OUTSIDE TeamStateManager._lock!
+        # Supports up to 2 cascading hops while never retrying a model that already hit 429 on this step!
         quota_failover_candidate: Optional[Dict[str, Any]] = None
         if res.final_status not in ("succeeded", "aborted", "blocked") and _is_quota_or_rate_limit_error(res.error, res.stderr_lines):
             try:
@@ -3946,13 +4368,45 @@ class TeamOrchestrator:
                 if pre_snap.get("settings", {}).get("auto_spawn_quota_backup", True):
                     pre_task = self._find_task(pre_snap, task_id)
                     pre_step = pre_task["steps"][step_index]
-                    if int(pre_step.get("quota_failover_count", 0)) < 1:
-                        cinfo = self.list_backup_candidates(
-                            pre_step["member_id"],
-                            require_same_client=bool(pre_step.get("requires_shell", False)),
-                        )
-                        if cinfo.get("recommended"):
-                            quota_failover_candidate = cinfo["recommended"]
+                    if int(pre_step.get("quota_failover_count", 0)) < 2:
+                        req_sh = bool(pre_step.get("requires_shell", False))
+                        pre_src = pre_snap.get("members", {}).get(pre_step["member_id"], {})
+                        exhausted = set(pre_step.get("exhausted_quota_models") or [])
+                        if pre_src.get("model"):
+                            exhausted.add(f"{pre_src.get('client')}:{pre_src.get('model')}".lower())
+                        qb = pre_src.get("quota_backup") if isinstance(pre_src.get("quota_backup"), dict) else None
+                        if qb:
+                            b_mid = qb.get("member_id")
+                            if qb.get("mode") == "member" and b_mid and b_mid in pre_snap.get("members", {}):
+                                bm = pre_snap["members"][b_mid]
+                                bkey = f"{bm.get('client')}:{bm.get('model')}".lower()
+                                if bkey not in exhausted and (not req_sh or bm.get("client") == "codex"):
+                                    quota_failover_candidate = {
+                                        "bound_member_id": b_mid,
+                                        "client": bm.get("client", "codex"),
+                                        "model": bm.get("model", ""),
+                                        "reasoning_effort": bm.get("reasoning_effort", "high"),
+                                        "display_name": bm.get("name") or b_mid,
+                                    }
+                            elif qb.get("client") and qb.get("model"):
+                                bkey = f"{qb['client']}:{qb['model']}".lower()
+                                if bkey not in exhausted and (not req_sh or qb.get("client") == "codex"):
+                                    quota_failover_candidate = {
+                                        "client": qb["client"],
+                                        "model": qb["model"],
+                                        "reasoning_effort": qb.get("reasoning_effort") or "high",
+                                        "display_name": qb.get("display_name") or qb["model"],
+                                    }
+                        if not quota_failover_candidate:
+                            cinfo = self.list_backup_candidates(
+                                pre_step["member_id"],
+                                require_same_client=req_sh,
+                            )
+                            for cand in cinfo.get("candidates") or []:
+                                ckey = f"{cand['client']}:{cand['model']}".lower()
+                                if ckey not in exhausted:
+                                    quota_failover_candidate = cand
+                                    break
             except Exception:
                 quota_failover_candidate = None
 
@@ -4032,24 +4486,34 @@ class TeamOrchestrator:
                 return
 
             if res.final_status != "succeeded":
-                if quota_failover_candidate and int(step.get("quota_failover_count", 0)) < 1:
-                    # Auto-spawn (or reuse idle) same-role different-model backup specialist & hand off seamlessly!
+                if quota_failover_candidate and int(step.get("quota_failover_count", 0)) < 2:
+                    # Auto-spawn (or reuse idle / bound) same-role different-model backup specialist & hand off seamlessly!
                     src_id = step["member_id"]
                     src_m = st["members"][src_id]
+                    root_orig_id = src_m.get("backup_of") or src_id
+                    ex_list = list(step.get("exhausted_quota_models") or [])
+                    cur_key = f"{src_m.get('client')}:{src_m.get('model')}".lower()
+                    if cur_key not in ex_list:
+                        ex_list.append(cur_key)
+                    step["exhausted_quota_models"] = ex_list
                     ch_cl = quota_failover_candidate["client"]
                     ch_md = quota_failover_candidate["model"]
                     ch_ef = quota_failover_candidate["reasoning_effort"]
                     ch_disp = quota_failover_candidate.get("display_name") or ch_md
                     bk_id = None
-                    for ex_id, ex_m in st["members"].items():
-                        if (
-                            ex_m.get("backup_of") == src_id
-                            and ex_m.get("client") == ch_cl
-                            and ex_m.get("model") == ch_md
-                            and ex_m.get("status") != "working"
-                        ):
-                            bk_id = ex_id
-                            break
+                    bound_mid = quota_failover_candidate.get("bound_member_id")
+                    if bound_mid and bound_mid in st["members"]:
+                        bk_id = bound_mid
+                    if not bk_id:
+                        for ex_id, ex_m in st["members"].items():
+                            if (
+                                ex_m.get("backup_of") == src_id
+                                and ex_m.get("client") == ch_cl
+                                and ex_m.get("model") == ch_md
+                                and ex_m.get("status") != "working"
+                            ):
+                                bk_id = ex_id
+                                break
                     if not bk_id:
                         tok = _short_model_id_token(ch_md)
                         root_id = src_m.get("backup_of") or src_id
@@ -4074,7 +4538,7 @@ class TeamOrchestrator:
                             "tags": list(src_m.get("tags") or []),
                             "workspace_scope": src_m.get("workspace_scope", "."),
                             "sandbox": eff_sb,
-                            "backup_of": src_id,
+                            "backup_of": root_orig_id,
                             "backup_reason": f"原模型 {src_m.get('model')} 触发额度/限流，自动补充同角色替补",
                             "session_id": None,
                             "session_history": [],
@@ -4092,6 +4556,17 @@ class TeamOrchestrator:
                     step["member_id"] = bk_id
                     step["worker_session_id"] = None
                     step["quota_failover_count"] = int(step.get("quota_failover_count", 0)) + 1
+                    # Also carry remaining pending steps & seat roster of this exhausted member over to backup!
+                    for fut_s in task.get("steps", []):
+                        if fut_s["step_index"] != step_index and fut_s["member_id"] == src_id and fut_s["status"] == "pending":
+                            if not (fut_s.get("requires_shell") and ch_cl == "antigravity"):
+                                fut_s["member_id"] = bk_id
+                                fut_s["worker_session_id"] = None
+                    meta_f = task.get("mode_meta") or {}
+                    if isinstance(meta_f.get("participants"), list):
+                        meta_f["participants"] = [bk_id if p == src_id else p for p in meta_f["participants"]]
+                    if meta_f.get("host_member_id") == src_id:
+                        meta_f["host_member_id"] = bk_id
                     step["handoff_context"] = {
                         "reassigned_from": f"{src_m.get('name')} ({src_m.get('model')})",
                         "reassigned_to": f"{bk_name} ({ch_cl}/{ch_md})",

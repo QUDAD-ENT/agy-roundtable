@@ -1518,10 +1518,10 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
         th.start()
         base = f"http://127.0.0.1:{port}"
         try:
-            # 1. Health check server_rev == 11
+            # 1. Health check server_rev >= 12
             with urllib.request.urlopen(f"{base}/api/health", timeout=5) as resp:
                 h = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(h["server_rev"], 11)
+                self.assertGreaterEqual(h["server_rev"], 12)
 
             # 2. Foreign Origin POST -> 403 CSRF blocked!
             req_csrf = urllib.request.Request(
@@ -1785,6 +1785,192 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
             self.assertEqual(len(exps), 2)
             self.assertTrue(exps[0]["is_baseline"])
             self.assertAlmostEqual(exps[1]["delta_vs_baseline"], 0.044, places=4)
+        finally:
+            orch.stop_scheduler()
+
+    def test_20_live_seat_hot_swap_and_bound_quota_backup_failover(self) -> None:
+        import threading
+
+        r1_started = threading.Event()
+        release_r1 = threading.Event()
+        seen_turns = []
+
+        def swap_runner(prompt, session_id, **kwargs):
+            cfg = kwargs["requested_config"]
+            mdl = cfg.get("model") or ""
+            seen_turns.append((mdl, prompt[:40]))
+            if "SIMULATE_BOUND_QUOTA" in prompt and mdl == "gemini-4-neon":
+                return CodexExecutionResult(
+                    session_id=None,
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    error="HTTP 429 quota exceeded",
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if "WAIT_MID_PROCESS" in prompt and mdl == "gemini-4-neon":
+                r1_started.set()
+                release_r1.wait(timeout=3.0)
+                return CodexExecutionResult(
+                    session_id="slow-r1",
+                    response_text="第1轮完成（原席位）",
+                    partial_text="第1轮完成（原席位）",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id=f"sw-{mdl}-{time.time_ns()}",
+                response_text=f"由 {mdl} 完成交付",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=cfg,
+                accepted_config=kwargs["accepted_config"],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=swap_runner),
+            agy_adapter=AgyAdapter(runner_override=swap_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            # 1. Explicit quota backup binding takes Priority #1 on 429 AND migrates future pending steps!
+            b_res = orch.bind_quota_backup("agy_gemini", backup_client="codex", backup_model="gpt-6.2-astra", backup_effort="high")
+            self.assertEqual(b_res["quota_backup"]["model"], "gpt-6.2-astra")
+
+            t_qb = orch.create_task(
+                title="绑定替补优先接力",
+                goal="SIMULATE_BOUND_QUOTA",
+                execution_mode="custom_dag",
+                steps=[
+                    {"title": "S0", "member_id": "agy_gemini", "prompt": "SIMULATE_BOUND_QUOTA step0", "depends_on": []},
+                    {"title": "S1", "member_id": "agy_gemini", "prompt": "follow step1", "depends_on": [0]},
+                ],
+            )
+            deadline = time.time() + 12.0
+            cur_qb = None
+            while time.time() < deadline:
+                cur_qb = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_qb["id"])
+                if cur_qb["status"] in ("succeeded", "failed"):
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur_qb["status"], "succeeded")
+            # Both S0 and S1 must have migrated to the bound gpt-6.2-astra backup!
+            m0 = orch.store.snapshot()["members"][cur_qb["steps"][0]["member_id"]]
+            m1 = orch.store.snapshot()["members"][cur_qb["steps"][1]["member_id"]]
+            self.assertEqual(m0["model"], "gpt-6.2-astra")
+            self.assertEqual(m1["model"], "gpt-6.2-astra")
+
+            # 2. One-click auto-bind all roster members (zero terra!)
+            ab = orch.auto_bind_all_quota_backups(prefer_cross_engine=False, overwrite=False)
+            self.assertGreaterEqual(ab["count"], 4)
+            for item in ab["bound"]:
+                self.assertNotIn("terra", item["quota_backup"]["model"].lower())
+
+            # 3. Mid-process hot-swap (next_round while step 0 is running!)
+            t_mid = orch.create_task(
+                title="进程中热换人",
+                goal="WAIT_MID_PROCESS",
+                execution_mode="roundtable",
+                host_member_id="agy_gemini",
+                participants=["agy_gemini", "codex_author"],
+                discussion_rounds=2,
+            )
+            self.assertTrue(r1_started.wait(timeout=5.0), "Round 1 must start running")
+            sw_mid = orch.swap_task_seat(
+                task_id=t_mid["id"],
+                old_member_id="agy_gemini",
+                new_member_id="agy_carbon_plotter",
+                abort_running=False,
+                bind_as_quota_backup=True,
+                reason="进程中提前换上 Gemini 4 Carbon",
+            )
+            self.assertEqual(sw_mid["applied"], "next_round")
+            self.assertIn("agy_carbon_plotter", sw_mid["task"]["mode_meta"]["participants"])
+            self.assertEqual(sw_mid["task"]["mode_meta"]["host_member_id"], "agy_carbon_plotter")
+            release_r1.set()
+
+            deadline = time.time() + 15.0
+            cur_mid = None
+            while time.time() < deadline:
+                cur_mid = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_mid["id"])
+                if cur_mid["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur_mid["status"], "succeeded")
+            # Round 2 + Synthesis steps must have been executed by agy_carbon_plotter!
+            self.assertEqual(cur_mid["steps"][-1]["member_id"], "agy_carbon_plotter")
+
+            # 4. Completed-task anytime swap (with same-role cross-model backup + fresh turn) & add_task_seat!
+            sw_done = orch.swap_task_seat(
+                task_id=t_mid["id"],
+                old_member_id="codex_author",
+                spawn_backup_client="antigravity",
+                spawn_backup_model="claude-opus-5-5",
+                trigger_fresh_turn=True,
+                bind_as_quota_backup=True,
+                reason="完成后同角色换 Claude Opus 5.5 复核",
+            )
+            self.assertIsNotNone(sw_done["spawned_backup"])
+            self.assertEqual(sw_done["spawned_backup"]["model"], "claude-opus-5-5")
+            deadline = time.time() + 10.0
+            while time.time() < deadline:
+                cur_after = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_mid["id"])
+                if cur_after["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur_after["status"], "succeeded")
+
+            add_res = orch.add_task_seat(t_mid["id"], "agy_claude_reviewer", trigger_turn=False)
+            self.assertIn("agy_claude_reviewer", add_res["task"]["mode_meta"]["participants"])
+        finally:
+            release_r1.set()
+            orch.stop_scheduler()
+
+    def test_21_custom_specialist_count_and_high_concurrency_up_to_12(self) -> None:
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=lambda *a, **k: None),
+            agy_adapter=AgyAdapter(runner_override=lambda *a, **k: None),
+            auto_start_scheduler=False,
+        )
+        try:
+            # 1. Parallel concurrency cap supports 1..12 cleanly
+            orch.update_binding(max_concurrency=10)
+            self.assertEqual(orch.store.snapshot()["max_concurrency"], 10)
+            orch.update_binding(max_concurrency=99)
+            self.assertEqual(orch.store.snapshot()["max_concurrency"], 12)
+
+            # 2. Roundtable supports arbitrary custom participant count (e.g. all 6 default seats!)
+            all_ids = list(orch.store.snapshot()["members"].keys())
+            self.assertGreaterEqual(len(all_ids), 6)
+            t_rt = orch.create_task(
+                title="6人圆桌自定义人数",
+                goal="全员协作评审",
+                execution_mode="roundtable",
+                participants=all_ids,
+                host_member_id=all_ids[0],
+                discussion_rounds=1,
+            )
+            self.assertEqual(len(t_rt["mode_meta"]["participants"]), len(all_ids))
+            # 6 blind R1 discussion steps + 1 final synthesis step = 7 steps
+            self.assertEqual(len(t_rt["steps"]), len(all_ids) + 1)
+
+            # 3. Chief Dispatch respects custom chief_max_members=10 in prompt & plan expansion
+            t_ch = orch.create_task(
+                title="主帅自定义点将人数",
+                goal="多方向联合调研",
+                execution_mode="chief_dispatch",
+                chief_member_id="agy_gemini",
+                chief_max_members=10,
+            )
+            self.assertEqual(t_ch["mode_meta"]["chief_max_members"], 10)
+            self.assertIn("1~10 名成员", t_ch["steps"][0]["prompt"])
         finally:
             orch.stop_scheduler()
 
