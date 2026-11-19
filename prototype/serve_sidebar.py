@@ -386,12 +386,14 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 8})
+                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 9})
             elif route == "/api/state":
                 self._send_json(200, ORCHESTRATOR.store.snapshot())
             elif route == "/api/models":
                 refresh = qs.get("refresh", ["0"])[0] == "1"
                 self._send_json(200, ORCHESTRATOR.get_capabilities(refresh_cli=refresh))
+            elif route == "/api/specialists/catalog":
+                self._send_json(200, ORCHESTRATOR.get_specialist_catalog())
             elif route == "/api/projects":
                 self._send_json(200, ORCHESTRATOR.list_projects())
             elif route == "/api/fs/browse":
@@ -491,6 +493,10 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     reasoning_effort=body.get("reasoning_effort", "medium"),
                     workspace_scope=body.get("workspace_scope", "."),
                     sandbox=body.get("sandbox", "read-only"),
+                    specialty=body.get("specialty"),
+                    persona_prompt=body.get("persona_prompt"),
+                    grounding_mode=body.get("grounding_mode"),
+                    tags=body.get("tags"),
                 )
                 self._send_json(200, {"ok": True, "member": res})
             elif route == "/api/members/delete":
@@ -506,6 +512,10 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     reasoning_effort=body.get("reasoning_effort"),
                     workspace_scope=body.get("workspace_scope"),
                     sandbox=body.get("sandbox"),
+                    specialty=body.get("specialty"),
+                    persona_prompt=body.get("persona_prompt"),
+                    grounding_mode=body.get("grounding_mode"),
+                    tags=body.get("tags"),
                     mode=body.get("mode", "next_round"),
                     reason=body.get("reason", "界面编辑成员名称/配置"),
                 )
@@ -540,6 +550,31 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     content=body["content"],
                     target_member_id=body.get("target_member_id") or None,
                     trigger_reply=bool(body.get("trigger_reply", True)),
+                )
+                self._send_json(200, {"ok": True, "task": res})
+            elif route == "/api/tasks/fact_check":
+                res = ORCHESTRATOR.fact_check_task(
+                    task_id=body["task_id"],
+                    checker_member_id=body.get("checker_member_id") or None,
+                    target_chat_id=body.get("target_chat_id") or None,
+                    focus_note=body.get("focus_note", ""),
+                    auto_revise=bool(body.get("auto_revise", False)),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/tasks/revise_from_audit":
+                res = ORCHESTRATOR.revise_from_fact_check(
+                    task_id=body["task_id"],
+                    editor_member_id=body.get("editor_member_id") or None,
+                    extra_note=body.get("extra_note", ""),
+                )
+                self._send_json(200, {"ok": True, "task": res})
+            elif route == "/api/tasks/reanswer":
+                res = ORCHESTRATOR.reanswer_with_specialist(
+                    task_id=body["task_id"],
+                    new_member_id=body["new_member_id"],
+                    target_chat_id=body.get("target_chat_id") or None,
+                    instruction=body.get("instruction", ""),
+                    as_deliverable=bool(body.get("as_deliverable", True)),
                 )
                 self._send_json(200, {"ok": True, "task": res})
             elif route == "/api/tasks/focus":

@@ -54,7 +54,7 @@ class TeamRuntimeClient:
             req = urllib.request.Request(f"{self.base_url}/api/health", method="GET")
             with urllib.request.urlopen(req, timeout=1.5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                return bool(data.get("ok")) and int(data.get("schema_version", 0)) >= 4 and int(data.get("server_rev", 0)) >= 8, data
+                return bool(data.get("ok")) and int(data.get("schema_version", 0)) >= 4 and int(data.get("server_rev", 0)) >= 9, data
         except Exception:
             return False, None
 

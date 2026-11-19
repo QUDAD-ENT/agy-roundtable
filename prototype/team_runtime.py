@@ -20,7 +20,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from agy_adapter import AgyAdapter
 from codex_adapter import CodexAdapter, CodexExecutionResult, get_runtime_dirs
 from project_discovery import browse_directory, discover_projects, pick_folder_native_dialog
-from team_state_manager import STATE_FILE_PATH, TeamStateManager, normalize_win_path
+from team_state_manager import (
+    SPECIALIST_TEMPLATES,
+    STATE_FILE_PATH,
+    TeamStateManager,
+    enrich_member_metadata,
+    normalize_win_path,
+)
 
 
 SUPPORTED_CLIENTS = ("codex", "antigravity")
@@ -405,6 +411,61 @@ class TeamOrchestrator:
 
         return self.store.mutate(_del)
 
+    def get_specialist_catalog(self) -> Dict[str, Any]:
+        return {
+            "templates": SPECIALIST_TEMPLATES,
+            "squad_presets": [
+                {
+                    "id": "dual_redteam",
+                    "name_zh": "双引擎红队核查",
+                    "name_en": "Dual-Engine Red-Team",
+                    "desc_zh": "Antigravity + Codex 异构交叉验证，强制包含独立审查与事实核查视角",
+                    "desc_en": "Cross-engine Antigravity + Codex debate with dedicated verification",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "read-only",
+                    "preferred_tags": ["implementation", "review", "fact_check"],
+                    "target_count": 3,
+                },
+                {
+                    "id": "research_submission",
+                    "name_zh": "科研投稿与统计核查",
+                    "name_en": "Research & Stats Panel",
+                    "desc_zh": "方法学审稿 + 数据表复算 + 稿件统筹，严禁编造数据与期刊指标",
+                    "desc_en": "Methodologist + data audit + synthesis strategist with strict citation grounding",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "read-only",
+                    "preferred_tags": ["research", "review", "writing"],
+                    "target_count": 3,
+                },
+                {
+                    "id": "code_arch_audit",
+                    "name_zh": "代码架构与安全审计",
+                    "name_en": "Arch & Security Audit",
+                    "desc_zh": "系统架构统筹 + 工程实施 + 独立安全与边界审计",
+                    "desc_en": "System architect + implementation + edge-case security audit",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "read-only",
+                    "preferred_tags": ["engineering", "implementation", "review"],
+                    "target_count": 3,
+                },
+                {
+                    "id": "fast_cross_check",
+                    "name_zh": "极速双核对照",
+                    "name_en": "Fast Dual Cross-Check",
+                    "desc_zh": "1 位 Antigravity + 1 位 Codex 单轮并行直出对照结论，省时防单模盲区",
+                    "desc_en": "1 Antigravity + 1 Codex fast 1-round cross-check",
+                    "mode": "roundtable",
+                    "rounds": 1,
+                    "sandbox": "read-only",
+                    "preferred_tags": ["implementation", "review"],
+                    "target_count": 2,
+                },
+            ],
+        }
+
     def upsert_member(
         self,
         member_id: str,
@@ -415,6 +476,10 @@ class TeamOrchestrator:
         reasoning_effort: Optional[str] = "low",
         workspace_scope: str = ".",
         sandbox: str = "read-only",
+        specialty: Optional[str] = None,
+        persona_prompt: Optional[str] = None,
+        grounding_mode: Optional[str] = None,
+        tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         member_id = member_id.strip()
         if not member_id:
@@ -431,13 +496,21 @@ class TeamOrchestrator:
             existing = st["members"].get(member_id)
             if existing and existing.get("status") == "working":
                 raise ValueError("成员正在运行中，请使用安全配置切换接口")
-            st["members"][member_id] = {
+            gm = (grounding_mode or (existing.get("grounding_mode") if existing else "strict") or "strict").strip().lower()
+            if gm not in ("strict", "balanced"):
+                gm = "strict"
+            clean_tags = [str(x).strip() for x in (tags if tags is not None else (existing.get("tags") if existing else [])) if str(x).strip()]
+            new_mem = {
                 "id": member_id,
                 "name": (name or (existing.get("name") if existing else member_id)).strip(),
                 "role": role_id,
                 "client": client,
                 "model": use_model,
                 "reasoning_effort": reasoning_effort or "medium",
+                "specialty": (specialty if specialty is not None else (existing.get("specialty", "") if existing else "")).strip(),
+                "persona_prompt": (persona_prompt if persona_prompt is not None else (existing.get("persona_prompt", "") if existing else "")).strip(),
+                "grounding_mode": gm,
+                "tags": clean_tags,
                 "workspace_scope": workspace_scope.strip() or ".",
                 "sandbox": sandbox if sandbox in ("read-only", "workspace-write") else "read-only",
                 "session_id": existing.get("session_id") if existing and existing.get("client") == client else None,
@@ -449,6 +522,8 @@ class TeamOrchestrator:
                 "current_task_id": None,
                 "current_attempt_id": None,
             }
+            enrich_member_metadata(new_mem)
+            st["members"][member_id] = new_mem
             return st["members"][member_id]
 
         return self.store.mutate(_upd)
@@ -474,6 +549,10 @@ class TeamOrchestrator:
         reasoning_effort: Optional[str] = None,
         workspace_scope: Optional[str] = None,
         sandbox: Optional[str] = None,
+        specialty: Optional[str] = None,
+        persona_prompt: Optional[str] = None,
+        grounding_mode: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         mode: str = "next_round",
         reason: str = "用户调整成员配置",
     ) -> Dict[str, Any]:
@@ -490,6 +569,13 @@ class TeamOrchestrator:
         e_check = None if target_effort in ("client_default", "client_current_setting") else target_effort
         self._validate_client_model_effort(target_client, m_check, e_check)
 
+        clean_gm = (grounding_mode or m.get("grounding_mode", "strict")).strip().lower()
+        if clean_gm not in ("strict", "balanced"):
+            clean_gm = "strict"
+        clean_spec = specialty.strip() if specialty is not None else m.get("specialty", "")
+        clean_persona = persona_prompt.strip() if persona_prompt is not None else m.get("persona_prompt", "")
+        clean_tags = [str(x).strip() for x in tags if str(x).strip()] if tags is not None else list(m.get("tags") or [])
+
         new_cfg = {
             "name": clean_name,
             "client": target_client,
@@ -498,6 +584,10 @@ class TeamOrchestrator:
             "reasoning_effort": target_effort,
             "workspace_scope": workspace_scope if workspace_scope is not None else m.get("workspace_scope", "."),
             "sandbox": sandbox if sandbox is not None else m.get("sandbox", "read-only"),
+            "specialty": clean_spec,
+            "persona_prompt": clean_persona,
+            "grounding_mode": clean_gm,
+            "tags": clean_tags,
             "reason": reason,
             "requested_at": time.time(),
         }
@@ -517,6 +607,10 @@ class TeamOrchestrator:
                 def _set_pending(st: Dict[str, Any]) -> Dict[str, Any]:
                     mem = st["members"][member_id]
                     mem["name"] = clean_name
+                    mem["specialty"] = clean_spec
+                    mem["persona_prompt"] = clean_persona
+                    mem["grounding_mode"] = clean_gm
+                    mem["tags"] = clean_tags
                     exec_changed = any(
                         new_cfg[k] != mem.get(k)
                         for k in ("client", "role", "model", "reasoning_effort", "workspace_scope", "sandbox")
@@ -557,6 +651,10 @@ class TeamOrchestrator:
             mem["reasoning_effort"] = new_cfg["reasoning_effort"]
             mem["workspace_scope"] = new_cfg["workspace_scope"]
             mem["sandbox"] = new_cfg["sandbox"]
+            mem["specialty"] = clean_spec
+            mem["persona_prompt"] = clean_persona
+            mem["grounding_mode"] = clean_gm
+            mem["tags"] = clean_tags
             mem["pending_config"] = None
             return {"applied": "immediate", "member": mem}
 
@@ -726,12 +824,13 @@ class TeamOrchestrator:
                                 f"如果有需要其他本场参会队友核实的地方，可在发言中直接点名（或用 team_consult 向本场参会队友提问）。\n总目标：{goal}"
                             )
                         else:
-                            r_title = f"第{r_num}轮交叉质询与补充 ({m_name})"
+                            r_title = f"第{r_num}轮交叉质询与事实核验 ({m_name})"
                             r_label = f"第 {r_num} 轮 · 交叉互评"
                             r_prompt = (
-                                "请仔细阅读共享群聊中其他参会队友上一轮的全部发言：\n"
-                                "1. 明确指出你认同哪位队友的观点、反驳或修正哪位队友的遗漏（请直接用 @名字 点名回应）；\n"
-                                "2. 给出收敛后的最终落地建议。"
+                                "请仔细阅读共享群聊中其他参会队友上一轮的全部发言，并执行严格交叉核验：\n"
+                                "1. 严禁盲目附和或重复队友观点；必须至少亲自核对 2 处队友引用的关键数字、文件路径或前提假设；\n"
+                                "2. 若发现队友存在数字偏差、文件未读先猜、过度外推或遗漏反例，请直接用 @名字 点名纠错并附真实证据锚点；\n"
+                                "3. 给出修正并收敛后的最终落地建议。"
                             )
                         built_steps.append(
                             self._make_step(
@@ -1144,6 +1243,301 @@ class TeamOrchestrator:
             return task
 
         res = self.store.mutate(_interj)
+        self._wakeup.set()
+        return res
+
+    def _pick_cross_engine_checker(
+        self,
+        st: Dict[str, Any],
+        author_id: Optional[str],
+        author_client: Optional[str],
+    ) -> str:
+        runnable = [k for k, v in st["members"].items() if v.get("client") in SUPPORTED_CLIENTS]
+        if not runnable:
+            raise ValueError("当前没有可用的执行成员")
+
+        def _score(mid: str) -> Tuple[int, int, int, int]:
+            m = st["members"][mid]
+            opp_engine = 1 if (author_client and m.get("client") != author_client) else 0
+            diff_member = 1 if mid != author_id else 0
+            tags = set(m.get("tags") or [])
+            is_fc = 1 if ("fact_check" in tags or m.get("role") == "review") else 0
+            is_idle = 1 if m.get("status") == "idle" else 0
+            return (opp_engine, is_fc, diff_member, is_idle)
+
+        return sorted(runnable, key=_score, reverse=True)[0]
+
+    def fact_check_task(
+        self,
+        task_id: str,
+        checker_member_id: Optional[str] = None,
+        target_chat_id: Optional[str] = None,
+        focus_note: str = "",
+        auto_revise: bool = False,
+    ) -> Dict[str, Any]:
+        """Dispatch an independent, clean-session (preferentially cross-engine) anti-hallucination fact-check audit."""
+        focus_note = (focus_note or "").strip()
+
+        def _fc(st: Dict[str, Any]) -> Dict[str, Any]:
+            task = self._find_task(st, task_id)
+            target_text = ""
+            target_label = "当前终稿交付"
+            author_id: Optional[str] = None
+            author_client: Optional[str] = None
+
+            if target_chat_id:
+                cm = next((c for c in task.get("chat_room", []) if c.get("id") == target_chat_id), None)
+                if cm:
+                    target_text = cm.get("content", "")
+                    author_id = cm.get("sender_id")
+                    author_client = cm.get("sender_client")
+                    target_label = f"{cm.get('sender_name', author_id)} 的发言 ({cm.get('round_label') or cm.get('kind')})"
+
+            if not target_text:
+                target_text = task.get("summary") or ""
+                if not target_text:
+                    non_fc = [s for s in task.get("steps", []) if s.get("step_type") != "fact_check" and s.get("latest_result_text")]
+                    if non_fc:
+                        target_text = non_fc[-1]["latest_result_text"]
+                        author_id = non_fc[-1]["member_id"]
+                if not author_id:
+                    synth = [s for s in task.get("steps", []) if s.get("step_type") == "synthesis"]
+                    if synth:
+                        author_id = synth[-1]["member_id"]
+                    elif task.get("steps"):
+                        author_id = task["steps"][-1]["member_id"]
+                if author_id and author_id in st["members"]:
+                    author_client = st["members"][author_id].get("client")
+
+            if not target_text.strip():
+                raise ValueError("当前任务尚无可核查的输出文本")
+
+            if checker_member_id:
+                if checker_member_id not in st["members"]:
+                    raise ValueError(f"指定的核查专家不存在: {checker_member_id}")
+                chosen_checker = checker_member_id
+            else:
+                chosen_checker = self._pick_cross_engine_checker(st, author_id, author_client)
+
+            checker_mem = st["members"][chosen_checker]
+            cross_engine = bool(author_client and checker_mem.get("client") != author_client)
+            prev_done = [s["step_index"] for s in task.get("steps", []) if s["status"] == "succeeded"]
+            check_idx = len(task["steps"])
+            sc = task.get("workspace_scope", ".")
+
+            focus_block = f"\n【负责人重点怀疑/要求核查点】\n{focus_note}\n" if focus_note else ""
+            audit_prompt = (
+                f"你现在以独立事实核查官身份（{'异构跨引擎交叉校验' if cross_engine else '独立会话复核'}），对【{target_label}】执行严格的反幻觉与事实核查审计。\n"
+                f"【原始总目标】{task['goal']}{focus_block}\n"
+                f"【待核查文本（已截取关键内容）】\n{_smart_clip(target_text, 9000)}\n\n"
+                "【严格核查执行要求】\n"
+                "1. 亲自读取文本中引用到的工作区真实文件、CSV/统计结果表或源码，逐项核对文件名、样本量、数字、代码符号与逻辑推导；\n"
+                "2. 请严格按以下三段结构输出《事实核查与纠错审计报告》：\n"
+                "   - **一、核查结论摘要**：给出核查项总数、已证实项数、发现硬错误/幻觉项数、推断待核实项数，以及是否建议立即修订终稿；\n"
+                "   - **二、逐项证据对照表**（Markdown 表格）：列包含 `声明/数据` | `核查分级 (已核实 / 错误或幻觉 / 推断待核实)` | `真实文件证据链接 [文件名](路径)` | `纠错修订建议`；\n"
+                "   - **三、必改错误与去幻觉清单**：按优先级列出必须删除、修正或降级为 `[推断/待外部核实]` 的条目（若全部准确请明确说明“未发现事实性错误”）。"
+            )
+
+            fc_step = self._make_step(
+                step_index=check_idx,
+                title=f"独立事实核查与纠错 ({checker_mem['name']})",
+                step_type="fact_check",
+                stage_index=check_idx,
+                round_label="事实核查与纠错",
+                member_id=chosen_checker,
+                prompt=audit_prompt,
+                depends_on=prev_done[-2:] if prev_done else [],
+                review_of=None,
+                read_only=True,
+                write_scope=[],
+                workspace_scope=sc,
+                sandbox="read-only",
+                initial_session_id=None,  # Clean unbiased session!
+            )
+            fc_step["audit_target_author_id"] = author_id
+            fc_step["audit_cross_engine"] = cross_engine
+            task["steps"].append(fc_step)
+
+            if auto_revise:
+                editor_id = (
+                    (task.get("mode_meta") or {}).get("host_member_id")
+                    or (author_id if author_id in st["members"] else None)
+                    or chosen_checker
+                )
+                rev_idx = len(task["steps"])
+                ro = task.get("sandbox", "read-only") == "read-only"
+                task["steps"].append(
+                    self._make_step(
+                        step_index=rev_idx,
+                        title=f"依据纠错审计修订终稿 ({st['members'][editor_id]['name']})",
+                        step_type="synthesis",
+                        stage_index=rev_idx,
+                        round_label="依据核查修订终稿",
+                        member_id=editor_id,
+                        prompt=(
+                            "请严格对照刚刚完成的《事实核查与纠错审计报告》，输出修正后的完整终稿：\n"
+                            "1. 逐条修复审计指出的全部数字误差、路径错误或逻辑漏洞；\n"
+                            "2. 对审计标记为「推断待核实」的外部声明，要么删除要么显式标注 `[推断/待外部核实]`；\n"
+                            "3. 完整保留所有已核实的表格与 `[文件名](路径)` 证据链接，并在文首简要列出本次修订变更点。"
+                        ),
+                        depends_on=[check_idx],
+                        review_of=None,
+                        read_only=ro,
+                        write_scope=[] if ro else [sc],
+                        workspace_scope=sc,
+                        sandbox=task.get("sandbox", "read-only"),
+                        initial_session_id=None,
+                    )
+                )
+
+            task["current_step_index"] = check_idx
+            task["archived"] = False
+            st["active_task_id"] = task["id"]
+            task["status"] = "queued" if st.get("paused") else "running"
+            task["blocking_reason"] = None
+            task["updated_at"] = time.time()
+            task["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "task.fact_check_dispatched",
+                    "summary": f"已派发独立事实核查：{checker_mem['name']} ({'异构跨引擎' if cross_engine else '独立会话'})",
+                }
+            )
+            return {"task": task, "checker_member_id": chosen_checker, "cross_engine": cross_engine, "step_index": check_idx}
+
+        res = self.store.mutate(_fc)
+        self._wakeup.set()
+        return res
+
+    def revise_from_fact_check(
+        self,
+        task_id: str,
+        editor_member_id: Optional[str] = None,
+        extra_note: str = "",
+    ) -> Dict[str, Any]:
+        """Generate a clean revised deliverable addressing every issue in the latest fact-check audit."""
+        extra_note = (extra_note or "").strip()
+
+        def _rev(st: Dict[str, Any]) -> Dict[str, Any]:
+            task = self._find_task(st, task_id)
+            fc = task.get("latest_fact_check")
+            if not fc or not (fc.get("content") or "").strip():
+                raise ValueError("当前任务尚无已完成的事实核查报告")
+
+            chosen_editor = editor_member_id if (editor_member_id and editor_member_id in st["members"]) else (
+                (task.get("mode_meta") or {}).get("host_member_id")
+                or fc.get("target_author_id")
+                or fc.get("checker_id")
+            )
+            if not chosen_editor or chosen_editor not in st["members"]:
+                chosen_editor = next(k for k, v in st["members"].items() if v.get("client") in SUPPORTED_CLIENTS)
+
+            rev_idx = len(task["steps"])
+            ro = task.get("sandbox", "read-only") == "read-only"
+            sc = task.get("workspace_scope", ".")
+            extra_block = f"\n【负责人补充修订指示】\n{extra_note}\n" if extra_note else ""
+            task["steps"].append(
+                self._make_step(
+                    step_index=rev_idx,
+                    title=f"按纠错清单修订终稿 ({st['members'][chosen_editor]['name']})",
+                    step_type="synthesis",
+                    stage_index=rev_idx,
+                    round_label="依据核查修订终稿",
+                    member_id=chosen_editor,
+                    prompt=(
+                        f"请严格依据独立事实核查官（{fc.get('checker_name')}）的《事实核查与纠错审计报告》修订终稿：{extra_block}\n"
+                        f"【核查纠错报告全文】\n{_smart_clip(fc['content'], 8000)}\n\n"
+                        f"【原终稿基准】\n{_smart_clip(task.get('summary') or '', 7000)}\n\n"
+                        "要求：\n"
+                        "1. 文首列出【本轮纠错修订摘要】（逐条回应审计发现的错误/幻觉如何修正）；\n"
+                        "2. 输出完整、干净、可直接使用的修订后终稿，保留所有已核实的表格与 `[文件名](路径)` 真实证据链接；\n"
+                        "3. 凡外部经验推断统一保留 `[推断/待外部核实]` 标注，严禁再次引入未核实数字。"
+                    ),
+                    depends_on=[fc["step_index"]] if isinstance(fc.get("step_index"), int) else [],
+                    review_of=None,
+                    read_only=ro,
+                    write_scope=[] if ro else [sc],
+                    workspace_scope=sc,
+                    sandbox=task.get("sandbox", "read-only"),
+                    initial_session_id=None,
+                )
+            )
+            task["current_step_index"] = rev_idx
+            task["archived"] = False
+            st["active_task_id"] = task["id"]
+            task["status"] = "queued" if st.get("paused") else "running"
+            task["blocking_reason"] = None
+            task["updated_at"] = time.time()
+            return task
+
+        res = self.store.mutate(_rev)
+        self._wakeup.set()
+        return res
+
+    def reanswer_with_specialist(
+        self,
+        task_id: str,
+        new_member_id: str,
+        target_chat_id: Optional[str] = None,
+        instruction: str = "",
+        as_deliverable: bool = True,
+    ) -> Dict[str, Any]:
+        """One-click switch specialist on a deliverable or chat entry to produce an independent answer/revision."""
+        instruction = (instruction or "").strip()
+
+        def _reans(st: Dict[str, Any]) -> Dict[str, Any]:
+            task = self._find_task(st, task_id)
+            if new_member_id not in st["members"]:
+                raise ValueError(f"目标专家不存在: {new_member_id}")
+            mem = st["members"][new_member_id]
+            ref_block = ""
+            if target_chat_id:
+                cm = next((c for c in task.get("chat_room", []) if c.get("id") == target_chat_id), None)
+                if cm:
+                    ref_block = f"\n【负责人指定的参考前序发言（来自 {cm.get('sender_name')}）】\n{_smart_clip(cm.get('content', ''), 5000)}\n"
+
+            extra_inst = f"\n【负责人补充要求】\n{instruction}\n" if instruction else ""
+            new_idx = len(task["steps"])
+            ro = task.get("sandbox", "read-only") == "read-only"
+            sc = task.get("workspace_scope", ".")
+            task["steps"].append(
+                self._make_step(
+                    step_index=new_idx,
+                    title=f"切换专家独立作答 ({mem['name']})",
+                    step_type="synthesis" if as_deliverable else "discussion",
+                    stage_index=new_idx,
+                    round_label=f"切换专家 · {mem['name']}",
+                    member_id=new_member_id,
+                    prompt=(
+                        f"项目负责人已切换指定由你（{mem['name']}）结合自身专长独立重新研判并回答本任务：\n"
+                        f"【总目标】{task['goal']}{ref_block}{extra_inst}\n"
+                        "请亲自核对工作区真实文件，给出比前序更严谨、证据更扎实、无幻觉的独立结论与完整方案。"
+                    ),
+                    depends_on=[],
+                    review_of=None,
+                    read_only=ro,
+                    write_scope=[] if ro else [sc],
+                    workspace_scope=sc,
+                    sandbox=task.get("sandbox", "read-only"),
+                    initial_session_id=None,
+                )
+            )
+            task["current_step_index"] = new_idx
+            task["archived"] = False
+            st["active_task_id"] = task["id"]
+            task["status"] = "queued" if st.get("paused") else "running"
+            task["blocking_reason"] = None
+            task["updated_at"] = time.time()
+            task["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "task.specialist_switched",
+                    "summary": f"已切换专家由 {mem['name']} ({mem['client']}/{mem['model']}) 独立作答",
+                }
+            )
+            return task
+
+        res = self.store.mutate(_reans)
         self._wakeup.set()
         return res
 
@@ -1866,10 +2260,37 @@ class TeamOrchestrator:
 
         mem = st["members"][step["member_id"]]
         role_obj = st["roles"].get(mem["role"], {})
+        specialty = (mem.get("specialty") or "").strip()
+        persona_prompt = (mem.get("persona_prompt") or "").strip()
+        grounding_mode = (mem.get("grounding_mode") or "strict").strip().lower()
+
+        id_line = f"【你的身份】{mem.get('name')} (ID: {step['member_id']}) · 职责：{role_obj.get('name', '成员')}"
+        if specialty:
+            id_line += f" · 专长：{specialty}"
+        if role_obj.get("description"):
+            id_line += f" — {role_obj.get('description', '')}"
+
         parts: List[str] = [
             f"【当前项目工作目录】{work_dir}",
-            f"【你的身份】{mem.get('name')} (ID: {step['member_id']}) · 职责：{role_obj.get('name', '成员')} — {role_obj.get('description', '')}",
+            id_line,
         ]
+        if persona_prompt:
+            parts.append(f"【专家专属视角与核查清单】\n{persona_prompt}")
+
+        if grounding_mode == "strict":
+            parts.append(
+                "【证据核证与反幻觉硬规约 (Strict Grounding)】\n"
+                "1. 禁止编造：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、最新期刊影响因子、文献作者或 DOI；\n"
+                "2. 先读后引：引用项目内任何数字、表格结论或代码实现时，必须先读取真实文件，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出证据锚点；\n"
+                "3. 不确定性显式标注：无法从工作区或工具直接证实的外部经验推断，必须显式标注 `[推断/待外部核实]`；\n"
+                "4. 反回音室：阅读其他队友发言时不得盲目附和；发现无依据数字或矛盾结论必须直接 `@队友` 纠错；\n"
+                "5. 末尾请附简短【证据与不确定性台账】（列出本条回答直接核验过的真实文件，以及仍需外部核实的推断项）。"
+            )
+        else:
+            parts.append(
+                "【证据规范 (Balanced Grounding)】\n"
+                "引用项目文件与数据时请优先读取真实文件并用 `[文件名](路径)` 标注来源；未验证的外部推断请注明 `[推断/待核实]`，切勿编造具体数据或文献。"
+            )
         if step.get("read_only", True):
             parts.append("【权限边界】当前为只读模式 (read-only)：可读取检查项目内文件，不得修改或删除文件。")
 
@@ -2331,6 +2752,14 @@ class TeamOrchestrator:
                 mem["reasoning_effort"] = pc["reasoning_effort"]
                 mem["workspace_scope"] = pc["workspace_scope"]
                 mem["sandbox"] = pc["sandbox"]
+                if "specialty" in pc:
+                    mem["specialty"] = pc["specialty"]
+                if "persona_prompt" in pc:
+                    mem["persona_prompt"] = pc["persona_prompt"]
+                if "grounding_mode" in pc:
+                    mem["grounding_mode"] = pc["grounding_mode"]
+                if "tags" in pc:
+                    mem["tags"] = pc["tags"]
                 mem["pending_config"] = None
 
             step["pending_repair_brief"] = None
@@ -2493,7 +2922,22 @@ class TeamOrchestrator:
                 step["pending_questions"] = None
                 step["blocking_reason"] = None
                 task["pending_questions"] = None
-                chat_kind = "deliverable" if step.get("step_type") in ("synthesis", "execution") else "speech"
+                stype_done = step.get("step_type")
+                if stype_done == "fact_check":
+                    chat_kind = "fact_check"
+                    task["latest_fact_check"] = {
+                        "step_index": step_index,
+                        "checker_id": step["member_id"],
+                        "checker_name": mem.get("name") or step["member_id"],
+                        "checker_client": mem.get("client"),
+                        "checker_model": mem.get("model"),
+                        "target_author_id": step.get("audit_target_author_id"),
+                        "cross_engine": bool(step.get("audit_cross_engine")),
+                        "content": res.response_text,
+                        "ts": now,
+                    }
+                else:
+                    chat_kind = "deliverable" if stype_done in ("synthesis", "execution") else "speech"
                 self._append_room_chat(
                     st, task, sender_id=step["member_id"], kind=chat_kind,
                     content=res.response_text, step_index=step_index, round_label=step.get("round_label") or step["title"]
@@ -2523,7 +2967,10 @@ class TeamOrchestrator:
             task["status"] = "succeeded"
             task["blocking_reason"] = None
             synth = [s for s in steps if s.get("step_type") == "synthesis" and s.get("latest_result_text")]
-            exec_steps = [s for s in steps if s.get("review_of") is None and s.get("latest_result_text")]
+            exec_steps = [
+                s for s in steps
+                if s.get("review_of") is None and s.get("step_type") != "fact_check" and s.get("latest_result_text")
+            ]
             chosen = synth[-1] if synth else (exec_steps[-1] if exec_steps else steps[-1])
             task["summary"] = chosen.get("latest_result_text", "")
             task["recent_events"].append(

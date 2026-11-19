@@ -1047,6 +1047,194 @@
       box-shadow: var(--shadow-pop);
     }
     .toast.is-err { border-color: var(--err); color: var(--err); }
+
+    /* ==================== COMMAND PALETTE (Ctrl+K), @MENTION & AUDIT PANEL ==================== */
+    .kbd-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 11.5px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.14s ease, color 0.14s ease;
+    }
+    .kbd-pill:hover { border-color: var(--border-strong); color: var(--text); }
+    .kbd-pill kbd {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 10.5px;
+      color: var(--text-3);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0 4px;
+    }
+
+    .cmdk-dialog {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 560px;
+      box-shadow: var(--shadow-pop);
+      overflow: hidden;
+      align-self: flex-start;
+      margin-top: 9vh;
+    }
+    .cmdk-input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .cmdk-input-row input {
+      border: none;
+      background: transparent;
+      padding: 2px 0;
+      font-size: 13.5px;
+    }
+    .cmdk-input-row input:focus { outline: none; }
+    .cmdk-list { max-height: 380px; overflow-y: auto; padding: 6px; }
+    .cmdk-group {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 8px 8px 4px;
+    }
+    .cmdk-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 12.5px;
+      color: var(--text);
+    }
+    .cmdk-item:hover, .cmdk-item.active { background: var(--surface-2); }
+    .cmdk-item-sub { font-size: 11.5px; color: var(--text-3); }
+
+    .preset-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .preset-chip {
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 11.5px;
+      font-family: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+    }
+    .preset-chip:hover { border-color: var(--accent-border); color: var(--text); background: var(--accent-soft); }
+
+    .pill-edit-btn {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: var(--text-3);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .pill-edit-btn:hover { background: var(--surface); color: var(--text); }
+
+    .audit-panel {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 13px 15px;
+      margin-bottom: 18px;
+    }
+    .audit-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .interject-wrap {
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      margin-top: -1px;
+      background: var(--surface-subtle);
+      position: relative;
+    }
+    .quick-target-bar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      padding: 9px 22px 0;
+    }
+    .qt-chip {
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 11.5px;
+      font-family: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.12s ease;
+    }
+    .qt-chip:hover { border-color: var(--border-strong); color: var(--text); }
+    .qt-chip.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text); font-weight: 600; }
+
+    .mention-popup {
+      position: absolute;
+      left: 22px;
+      bottom: 58px;
+      width: 340px;
+      max-width: calc(100% - 44px);
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      box-shadow: var(--shadow-pop);
+      padding: 5px;
+      z-index: 60;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .tpl-card {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 11px 13px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+    }
   </style>
 </head>
 <body>
@@ -1083,6 +1271,7 @@
 
     <div class="topbar-right">
       <span id="paused-pill" class="tag tag-warn hidden"></span>
+      <button class="kbd-pill" id="btn-cmd-k" onclick="openCmdK()" title="Quick Switch Specialist & Actions (Ctrl+K)"></button>
       <button class="btn btn-sm" id="btn-new-task" onclick="toggleComposerOpen()"></button>
       <button class="btn btn-ghost btn-icon" id="btn-theme-toggle" onclick="toggleTheme()" title="Toggle Theme"></button>
       <button class="btn btn-ghost btn-sm" id="btn-lang-toggle" onclick="toggleLanguage()" style="font-weight:600;"></button>
@@ -1151,14 +1340,20 @@
       <!-- Main Stage Surface + Persistent Interject Dock -->
       <div id="active-stage-container">
         <div id="active-stage-dynamic"></div>
-        <div id="active-stage-interject" class="interject-dock hidden" style="border:1px solid var(--border); border-top:none; border-radius:0 0 12px 12px; margin-top:-1px;">
-          <select id="interject-target"></select>
-          <input type="text" id="interject-input" onkeydown="if(event.key==='Enter'){event.preventDefault(); sendInterjection();}">
-          <label style="display:inline-flex; align-items:center; gap:5px; margin:0; cursor:pointer; color:var(--text-2); white-space:nowrap;">
-            <input type="checkbox" id="interject-wake" checked style="width:auto;">
-            <span id="lbl-interject-wake"></span>
-          </label>
-          <button class="btn btn-sm" id="btn-interject-send" onclick="sendInterjection()"></button>
+        <div id="active-stage-interject" class="interject-wrap hidden">
+          <div id="mention-popup" class="mention-popup hidden"></div>
+          <div id="quick-target-bar" class="quick-target-bar"></div>
+          <div class="interject-dock" style="border:none; padding-top:8px;">
+            <select id="interject-target" class="hidden"></select>
+            <input type="text" id="interject-input"
+              oninput="onInterjectInput(this)"
+              onkeydown="onInterjectKeydown(event)">
+            <label style="display:inline-flex; align-items:center; gap:5px; margin:0; cursor:pointer; color:var(--text-2); white-space:nowrap;">
+              <input type="checkbox" id="interject-wake" checked style="width:auto;">
+              <span id="lbl-interject-wake"></span>
+            </label>
+            <button class="btn btn-sm" id="btn-interject-send" onclick="sendInterjection()"></button>
+          </div>
         </div>
       </div>
     </section>
@@ -1191,6 +1386,13 @@
       <div id="members-grid" class="grid-2" style="margin-bottom:14px;"></div>
 
       <div class="composer-panel" style="margin-bottom:12px; padding:14px 16px;">
+        <details data-persist-id="tpl-gallery-drawer" open>
+          <summary id="lbl-tpl-gallery"></summary>
+          <div id="tpl-gallery-grid" class="grid-2" style="margin-top:12px;"></div>
+        </details>
+      </div>
+
+      <div class="composer-panel" style="margin-bottom:12px; padding:14px 16px;">
         <details data-persist-id="add-member-drawer">
           <summary id="lbl-add-member"></summary>
           <div class="grid-3" style="margin-top:12px;">
@@ -1206,6 +1408,20 @@
             </div>
             <div><label id="lbl-m-model"></label><select id="add-m-model" onchange="syncClientEfforts('add-m-client', 'add-m-model', 'add-m-effort')"></select></div>
             <div><label id="lbl-m-effort"></label><select id="add-m-effort"></select></div>
+          </div>
+          <div class="grid-2" style="margin-top:10px;">
+            <div><label id="lbl-m-spec"></label><input type="text" id="add-m-spec"></div>
+            <div>
+              <label id="lbl-m-grounding"></label>
+              <select id="add-m-grounding">
+                <option value="strict">Strict (Anti-Hallucination)</option>
+                <option value="balanced">Balanced</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:10px;">
+            <label id="lbl-m-persona"></label>
+            <textarea id="add-m-persona" style="min-height:66px;"></textarea>
           </div>
           <div style="margin-top:12px;">
             <button class="btn btn-sm" id="btn-save-member" onclick="createMember()"></button>
@@ -1250,6 +1466,18 @@
     <div class="modal-dialog" id="modal-body"></div>
   </div>
 
+  <!-- Quick Command & Specialist Switcher Palette (Ctrl+K) -->
+  <div id="cmdk-backdrop" class="modal-backdrop" onclick="if(event.target===this) closeCmdK()">
+    <div class="cmdk-dialog">
+      <div class="cmdk-input-row">
+        <span id="cmdk-search-ic" style="color:var(--text-3);"></span>
+        <input type="text" id="cmdk-input" autocomplete="off" oninput="renderCmdKList()" onkeydown="onCmdKKeydown(event)">
+        <kbd style="font-size:10.5px; color:var(--text-3); border:1px solid var(--border); border-radius:4px; padding:1px 5px;">ESC</kbd>
+      </div>
+      <div id="cmdk-list" class="cmdk-list"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <script>
@@ -1281,7 +1509,11 @@
       repeat: '<path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
       stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
       sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
-      arrowUp: '<path d="M12 19V5M5 12l7-7 7 7"/>'
+      arrowUp: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+      shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>',
+      search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>',
+      clone: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+      users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'
     };
 
     function svgIcon(name, size = 14) {
@@ -1481,7 +1713,49 @@
         archivedMany: '已归档 {n} 条已完成任务',
         reviewVerdict: '独立审查（{v} · 第 {r} 轮）',
         charsUnit: '{n} 字',
-        msgsUnit: '{n} 条讨论'
+        msgsUnit: '{n} 条讨论',
+        cmdKLabel: '快切专家',
+        cmdKPlaceholder: '搜索专家、专长、阵容预设或快捷操作（↑↓ 选择，Enter 执行）...',
+        cmdKGroupSpecialists: '快速切换 / 编辑专家',
+        cmdKGroupActions: '核查纠错与快捷操作',
+        cmdKGroupPresets: '一键套用专家阵容',
+        factCheckBtn: '核查纠错',
+        factCheckTitle: '独立事实核查与反幻觉审计',
+        factCheckDesc: '默认优先指派异构引擎专家在干净会话中逐项核对真实文件、数字与引用，避免同源模型幻觉。',
+        factCheckChecker: '核查专家（推荐异构引擎）',
+        factCheckFocus: '重点怀疑或要求核查的声明（可选）',
+        factCheckFocusPh: '例如：核对表 2 样本量与原文是否一致、检查转投期刊论据是否过度外推...',
+        factCheckAutoRevise: '核查完成后自动按纠错清单修订终稿',
+        factCheckRun: '启动事实核查',
+        factCheckStarted: '已派发独立事实核查：{name}',
+        auditPanelTitle: '独立事实核查审计报告',
+        auditCrossEngine: '异构跨引擎校验',
+        auditApplyBtn: '按纠错清单修订终稿',
+        auditRevising: '已启动终稿纠错修订',
+        switchSpecBtn: '换专家重答',
+        switchSpecTitle: '切换专家独立重新作答',
+        switchSpecTarget: '选择接手专家',
+        switchSpecInst: '补充要求或纠偏方向（可选）',
+        switchSpecInstPh: '例如：请从生物统计与审稿人视角重新审视并剔除所有无依据推测...',
+        switchSpecAsDeliv: '将其输出更新为最新终稿',
+        switchSpecStarted: '已切换由 {name} 独立重新作答',
+        checkThisMsg: '核查此条',
+        reanswerMsg: '换专家回应',
+        squadHealthOk: '双引擎交叉 · 严格防幻觉',
+        squadHealthWarn: '单引擎阵容 · 建议混编 AGY+Codex',
+        presetApplied: '已套用阵容：{name}',
+        tplGalleryTitle: '内置科研 + 工程专家模板库（一键招募）',
+        recruitBtn: '一键招募',
+        cloneBtn: '克隆',
+        mSpecialty: '专长标签',
+        mGrounding: '抗幻觉核证级别',
+        mPersona: '专属视角与防幻觉 SOP 指令',
+        groundStrict: '严格核证 (Strict · 强制证据锚点与防编造)',
+        groundBalanced: '常规平衡 (Balanced)',
+        applyTplLbl: '套用模板人设（可选）',
+        recruitedToast: '已招募专家：{name}',
+        quickAll: '全体',
+        quickMore: '切换...'
       },
       en: {
         navStudio: 'Studio',
@@ -1673,13 +1947,62 @@
         archivedMany: 'Archived {n} completed task(s)',
         reviewVerdict: 'Independent Review ({v} · Round {r})',
         charsUnit: '{n} chars',
-        msgsUnit: '{n} messages'
+        msgsUnit: '{n} messages',
+        cmdKLabel: 'Switch',
+        cmdKPlaceholder: 'Search specialists, specialties, squad presets, or actions (↑↓ Enter)...',
+        cmdKGroupSpecialists: 'Switch / Edit Specialist',
+        cmdKGroupActions: 'Fact-Check & Quick Actions',
+        cmdKGroupPresets: 'Squad Presets',
+        factCheckBtn: 'Fact-Check',
+        factCheckTitle: 'Independent Anti-Hallucination Fact-Check',
+        factCheckDesc: 'Prefers an opposite-engine specialist in a clean session to verify numbers, file paths, and claims against real workspace files.',
+        factCheckChecker: 'Auditor (Cross-engine recommended)',
+        factCheckFocus: 'Specific claim or doubt to focus on (optional)',
+        factCheckFocusPh: 'e.g. Verify sample sizes against CSV, check for unverified external claims...',
+        factCheckAutoRevise: 'Automatically revise deliverable after audit completes',
+        factCheckRun: 'Run Fact-Check',
+        factCheckStarted: 'Dispatched fact-check to {name}',
+        auditPanelTitle: 'Independent Fact-Check Audit',
+        auditCrossEngine: 'Cross-Engine Verified',
+        auditApplyBtn: 'Apply Audit Fixes to Deliverable',
+        auditRevising: 'Started deliverable revision from audit',
+        switchSpecBtn: 'Switch Specialist',
+        switchSpecTitle: 'Switch Specialist & Re-answer',
+        switchSpecTarget: 'Select Specialist',
+        switchSpecInst: 'Guidance or focus angle (optional)',
+        switchSpecInstPh: 'e.g. Re-evaluate from a strict statistical reviewer perspective...',
+        switchSpecAsDeliv: 'Set output as updated primary deliverable',
+        switchSpecStarted: 'Switched to {name} for fresh answer',
+        checkThisMsg: 'Fact-check',
+        reanswerMsg: 'Ask peer',
+        squadHealthOk: 'Cross-Engine · Strict Grounding',
+        squadHealthWarn: 'Single Engine · Mix AGY+Codex recommended',
+        presetApplied: 'Applied squad preset: {name}',
+        tplGalleryTitle: 'Curated Research + Engineering Specialist Templates (1-Click Recruit)',
+        recruitBtn: 'Recruit',
+        cloneBtn: 'Clone',
+        mSpecialty: 'Specialty',
+        mGrounding: 'Anti-Hallucination Grounding',
+        mPersona: 'Specialist Persona & Verification SOP',
+        groundStrict: 'Strict (Mandatory evidence anchors & zero fabrication)',
+        groundBalanced: 'Balanced',
+        applyTplLbl: 'Fill from Template (optional)',
+        recruitedToast: 'Recruited specialist: {name}',
+        quickAll: 'All',
+        quickMore: 'Switch...'
       }
     };
 
     let STATE = null;
     let CAPS = { clients: { codex: { models: [] }, antigravity: { models: [] } } };
+    let CATALOG = { templates: [], squad_presets: [] };
     let PROJECTS = { groups: [], drives: [] };
+    let CMDK_OPEN = false;
+    let CMDK_INDEX = 0;
+    let CMDK_ITEMS = [];
+    let MENTION_OPEN = false;
+    let MENTION_INDEX = 0;
+    let MENTION_LIST = [];
     let CURRENT_VIEW = 'workspace';
     let HISTORY_SCOPE = 'current';
     let LAST_HASH = '';
@@ -1864,6 +2187,9 @@
       document.getElementById('btn-open-folder').title = t('openFolder');
       document.getElementById('btn-utils-menu').innerHTML = svgIcon('more', 16);
       document.getElementById('btn-utils-menu').title = t('settingsTitle');
+      document.getElementById('btn-cmd-k').innerHTML = `${svgIcon('search', 13)}<span>${esc(t('cmdKLabel'))}</span><kbd>Ctrl K</kbd>`;
+      document.getElementById('cmdk-search-ic').innerHTML = svgIcon('search', 15);
+      document.getElementById('cmdk-input').placeholder = t('cmdKPlaceholder');
       document.getElementById('btn-close-composer').innerHTML = svgIcon('x', 15);
       document.getElementById('btn-lang-toggle').textContent = LANG === 'en' ? '中文' : 'EN';
       document.getElementById('nav-workspace-lbl').textContent = t('navStudio');
@@ -1915,6 +2241,7 @@
       document.getElementById('lbl-members-heading').textContent = t('membersHeading');
       document.getElementById('lbl-members-sub').textContent = t('membersSub');
       document.getElementById('btn-refresh-models').innerHTML = `${svgIcon('refresh', 13)} ${esc(t('refreshModels'))}`;
+      document.getElementById('lbl-tpl-gallery').textContent = t('tplGalleryTitle');
       document.getElementById('lbl-add-member').textContent = t('addMember');
       document.getElementById('lbl-roles-drawer').textContent = t('rolesDrawer');
       document.getElementById('lbl-m-id').textContent = t('mId');
@@ -1923,6 +2250,15 @@
       document.getElementById('lbl-m-client').textContent = t('mClient');
       document.getElementById('lbl-m-model').textContent = t('mModel');
       document.getElementById('lbl-m-effort').textContent = t('mEffort');
+      document.getElementById('lbl-m-spec').textContent = t('mSpecialty');
+      document.getElementById('lbl-m-grounding').textContent = t('mGrounding');
+      document.getElementById('lbl-m-persona').textContent = t('mPersona');
+      const addGm = document.getElementById('add-m-grounding');
+      if (addGm) {
+        const curGm = addGm.value || 'strict';
+        addGm.innerHTML = `<option value="strict">${esc(t('groundStrict'))}</option><option value="balanced">${esc(t('groundBalanced'))}</option>`;
+        addGm.value = curGm;
+      }
       document.getElementById('btn-save-member').textContent = t('saveMember');
       document.getElementById('lbl-r-id').textContent = t('rId');
       document.getElementById('lbl-r-name').textContent = t('rName');
@@ -2324,17 +2660,31 @@
       }).join('');
 
       if (CMP.mode === 'roundtable') {
+        const presetsHtml = (CATALOG.squad_presets || []).map(p => `
+          <button class="preset-chip" onclick="applySquadPreset('${esc(p.id)}')" title="${esc(LANG === 'en' ? p.desc_en : p.desc_zh)}">
+            ${svgIcon('users', 12)}<span>${esc(LANG === 'en' ? p.name_en : p.name_zh)}</span>
+          </button>
+        `).join('');
+
+        const selEngines = new Set(CMP.rtParticipants.map(id => ms[id]?.client).filter(Boolean));
+        const hasCrossEngine = selEngines.size >= 2;
+        const healthTag = hasCrossEngine
+          ? `<span class="tag tag-ok"><span class="dot dot-ok"></span>${esc(t('squadHealthOk'))}</span>`
+          : `<span class="tag tag-warn"><span class="dot dot-warn"></span>${esc(t('squadHealthWarn'))}</span>`;
+
         const chips = ids.map(id => {
           const m = ms[id];
           const sel = CMP.rtParticipants.includes(id);
           const isHost = id === CMP.rtHost;
+          const spec = m.specialty || '';
           return `
-            <div class="seat-pill ${sel ? 'selected' : ''}" onclick="toggleRtParticipant('${esc(id)}')">
+            <div class="seat-pill ${sel ? 'selected' : ''}" onclick="toggleRtParticipant('${esc(id)}')" title="${esc(spec ? `${m.name} — ${spec}` : m.name)}">
               ${avatarHtml(id, m, { sm: true })}
               <span style="font-weight:${sel ? '600' : '500'};">${esc(m.name || id)}</span>
-              <span style="font-size:10.5px; color:var(--text-3);">${esc(m.model)}</span>
+              <span style="font-size:10.5px; color:var(--text-3);">${esc(spec ? spec.split('·')[0].trim() : m.model)}</span>
               ${sel && isHost ? `<span class="host-badge">${svgIcon('crown', 11)}${esc(t('hostTag'))}</span>` : ''}
               ${sel && !isHost ? `<span class="host-set-btn" onclick="event.stopPropagation(); setRtHost('${esc(id)}')">${esc(t('setHost'))}</span>` : ''}
+              <button class="pill-edit-btn" onclick="event.stopPropagation(); openSwitchMemberModal('${esc(id)}')" title="${esc(t('editMember'))}">${svgIcon('edit', 11)}</button>
             </div>
           `;
         }).join('');
@@ -2345,8 +2695,12 @@
 
         box.innerHTML = `
           <div class="setup-strip">
+            ${presetsHtml ? `<div class="preset-strip">${presetsHtml}</div>` : ''}
             <div class="setup-controls">
-              <span style="font-size:12px; font-weight:600; color:var(--text);">${esc(t('rtParticipants', { n: CMP.rtParticipants.length }))}</span>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span style="font-size:12px; font-weight:600; color:var(--text);">${esc(t('rtParticipants', { n: CMP.rtParticipants.length }))}</span>
+                ${healthTag}
+              </div>
               <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--text-2);">
                   ${esc(t('rtHost'))}
@@ -2434,13 +2788,82 @@
           </div>
         `;
       } else {
+        const soloPills = ids.map(id => {
+          const m = ms[id];
+          const sel = id === CMP.soloId;
+          const spec = m.specialty || m.model;
+          return `
+            <div class="seat-pill ${sel ? 'selected' : ''}" onclick="CMP.soloId='${esc(id)}'; renderComposerStudio();" title="${esc(m.specialty || m.model)}">
+              ${avatarHtml(id, m, { sm: true })}
+              <span style="font-weight:${sel ? '600' : '500'};">${esc(m.name || id)}</span>
+              <span style="font-size:10.5px; color:var(--text-3);">${esc(spec.split('·')[0].trim())}</span>
+              <button class="pill-edit-btn" onclick="event.stopPropagation(); openSwitchMemberModal('${esc(id)}')" title="${esc(t('editMember'))}">${svgIcon('edit', 11)}</button>
+            </div>
+          `;
+        }).join('');
         box.innerHTML = `
-          <div class="setup-strip" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <span style="font-size:12px; font-weight:600; color:var(--text);">${esc(t('soloSelect'))}</span>
-            <select style="width:auto; min-width:280px; height:30px; font-size:12.5px;" onchange="CMP.soloId=this.value; renderComposerStudio();">${memberOptions(CMP.soloId)}</select>
+          <div class="setup-strip">
+            <div style="font-size:12px; font-weight:600; color:var(--text); margin-bottom:8px;">${esc(t('soloSelect'))}</div>
+            <div class="seat-picks">${soloPills}</div>
           </div>
         `;
       }
+    }
+
+    function applySquadPreset(presetId) {
+      const p = (CATALOG.squad_presets || []).find(x => x.id === presetId);
+      if (!p || !STATE) return;
+      const ms = STATE.members || {};
+      const ids = getRunnableIds(STATE);
+      if (ids.length < 2) return;
+
+      const agyIds = ids.filter(id => ms[id].client === 'antigravity');
+      const codexIds = ids.filter(id => ms[id].client === 'codex');
+      const picked = [];
+      const addUniq = (id) => { if (id && !picked.includes(id)) picked.push(id); };
+
+      // Prefer heterogeneous cross-engine pairing + tag matching!
+      const findBest = (pool, tagPref) => pool.find(id => !picked.includes(id) && (ms[id].tags || []).includes(tagPref))
+        || pool.find(id => !picked.includes(id) && ms[id].role === tagPref)
+        || pool.find(id => !picked.includes(id));
+
+      if (p.id === 'fast_cross_check') {
+        addUniq(findBest(agyIds, 'implementation') || agyIds[0]);
+        addUniq(findBest(codexIds, 'review') || findBest(codexIds, 'implementation') || codexIds[0]);
+      } else if (p.id === 'research_submission') {
+        addUniq(findBest(agyIds, 'research') || agyIds[0]);
+        addUniq(findBest(agyIds, 'review') || findBest(codexIds, 'review'));
+        addUniq(findBest(codexIds, 'fact_check') || findBest(codexIds, 'writing') || codexIds[0]);
+      } else if (p.id === 'code_arch_audit') {
+        addUniq(findBest(agyIds, 'engineering') || agyIds[0]);
+        addUniq(findBest(codexIds, 'implementation') || codexIds[0]);
+        addUniq(findBest(codexIds, 'review') || findBest(agyIds, 'review'));
+      } else {
+        // dual_redteam
+        addUniq(findBest(agyIds, 'implementation') || agyIds[0]);
+        addUniq(findBest(codexIds, 'fact_check') || findBest(codexIds, 'review') || codexIds[0]);
+        addUniq(findBest(agyIds, 'review') || findBest(codexIds, 'implementation'));
+      }
+      for (const id of ids) {
+        if (picked.length >= Math.min(p.target_count || 3, ids.length)) break;
+        addUniq(id);
+      }
+
+      CMP.mode = p.mode || 'roundtable';
+      CMP.rtParticipants = picked.slice(0, p.target_count || 3);
+      CMP.rtHost = CMP.rtParticipants[0];
+      CMP.rtRounds = p.rounds || 2;
+      CMP.rtHostOpening = false;
+      selectComposerMode(CMP.mode);
+      toast(t('presetApplied', { name: LANG === 'en' ? p.name_en : p.name_zh }));
+    }
+
+    async function loadCatalog() {
+      try {
+        CATALOG = await api('GET', '/api/specialists/catalog');
+        renderComposerStudio();
+        renderTemplateGallery();
+      } catch (e) { console.error(e); }
     }
 
     // ==================== CAPABILITIES & PROJECTS ====================
@@ -2771,6 +3194,7 @@
         if (cm.kind === 'mention_ask') kindTag = `<span class="tag tag-warn">@${esc(cm.to_member_name || cm.to_member_id)}</span>`;
         else if (cm.kind === 'mention_reply') kindTag = `<span class="tag tag-accent">↳ @${esc(cm.to_member_name || cm.to_member_id)}</span>`;
         else if (cm.kind === 'review') kindTag = `<span class="tag">${LANG === 'en' ? 'Review' : '审查意见'}</span>`;
+        else if (cm.kind === 'fact_check') kindTag = `<span class="tag tag-accent">${svgIcon('shield', 11)}${LANG === 'en' ? 'Fact-Check' : '事实核查'}</span>`;
         else if (cm.kind === 'deliverable') kindTag = `<span class="tag tag-ok">${LANG === 'en' ? 'Synthesis' : '终稿交付'}</span>`;
 
         const rawC = cm.content || '';
@@ -2789,7 +3213,13 @@
                 <span class="tabular">${fmtTime(cm.ts)}</span>
               </div>
               <div class="doc-reading" style="margin:0; max-width:none; font-size:13.5px;">${renderLiteMarkdown(shown)}</div>
-              ${isLong ? `<div style="margin-top:8px;"><button class="btn btn-sec btn-sm" onclick="toggleExpandMsg('${esc(cm.id)}')">${esc(expanded ? t('collapseText') : t('expandFull', { n: rawC.length }))}</button></div>` : ''}
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px;">
+                ${isLong ? `<button class="btn btn-sec btn-sm" onclick="toggleExpandMsg('${esc(cm.id)}')">${esc(expanded ? t('collapseText') : t('expandFull', { n: rawC.length }))}</button>` : ''}
+                ${!isUser && task.status !== 'running' ? `
+                  <button class="btn btn-ghost btn-sm" onclick="openFactCheckModal('${esc(task.id)}', '${esc(cm.id)}')">${svgIcon('shield', 12)} ${esc(t('checkThisMsg'))}</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openReanswerModal('${esc(task.id)}', '${esc(cm.id)}')">${svgIcon('repeat', 12)} ${esc(t('reanswerMsg'))}</button>
+                ` : ''}
+              </div>
             </div>
           </article>
         `);
@@ -2865,10 +3295,111 @@
       `;
     }
 
+    function setInterjectTarget(mid) {
+      const sel = document.getElementById('interject-target');
+      if (sel) sel.value = mid || '';
+      renderQuickTargetChips();
+      document.getElementById('interject-input')?.focus();
+    }
+
+    function renderQuickTargetChips() {
+      const bar = document.getElementById('quick-target-bar');
+      const sel = document.getElementById('interject-target');
+      if (!bar || !sel || !STATE) return;
+      const cur = sel.value || '';
+      const ms = STATE.members || {};
+      const focused = (STATE.tasks || []).find(x => x.id === FOCUSED_TASK_ID);
+      const seated = (focused?.mode_meta?.participants || [...new Set((focused?.steps || []).map(s => s.member_id))])
+        .filter(id => ms[id] && ['codex', 'antigravity'].includes(ms[id].client));
+      const allIds = getRunnableIds(STATE);
+      const chipIds = [...new Set([...seated, ...(cur && allIds.includes(cur) ? [cur] : [])])].slice(0, 5);
+
+      bar.innerHTML = `
+        <button class="qt-chip ${!cur ? 'active' : ''}" onclick="setInterjectTarget('')">@${esc(t('quickAll'))}</button>
+        ${chipIds.map(id => `
+          <button class="qt-chip ${cur === id ? 'active' : ''}" onclick="setInterjectTarget('${esc(id)}')" title="${esc(ms[id].specialty || ms[id].model)}">
+            ${avatarHtml(id, ms[id], { sm: true })}<span>${esc(ms[id].name || id)}</span>
+          </button>
+        `).join('')}
+        <button class="qt-chip" onclick="openCmdK()">${svgIcon('search', 11)}<span>${esc(t('quickMore'))}</span></button>
+      `;
+    }
+
+    function hideMentionPopup() {
+      MENTION_OPEN = false;
+      document.getElementById('mention-popup')?.classList.add('hidden');
+    }
+
+    function onInterjectInput(inp) {
+      if (!STATE) return;
+      const val = inp.value || '';
+      const pos = inp.selectionStart ?? val.length;
+      const before = val.slice(0, pos);
+      const m = before.match(/(?:^|\s)@([^\s@]{0,24})$/);
+      if (!m) { hideMentionPopup(); return; }
+      const q = m[1].toLowerCase();
+      const ms = STATE.members || {};
+      MENTION_LIST = getRunnableIds(STATE).filter(id => {
+        const mem = ms[id];
+        return !q || id.toLowerCase().includes(q) || (mem.name || '').toLowerCase().includes(q) || (mem.specialty || '').toLowerCase().includes(q) || (mem.model || '').toLowerCase().includes(q);
+      });
+      if (!MENTION_LIST.length) { hideMentionPopup(); return; }
+      MENTION_OPEN = true;
+      MENTION_INDEX = 0;
+      renderMentionPopup();
+    }
+
+    function renderMentionPopup() {
+      const pop = document.getElementById('mention-popup');
+      if (!pop || !MENTION_OPEN || !STATE) return;
+      const ms = STATE.members || {};
+      pop.innerHTML = MENTION_LIST.map((id, idx) => {
+        const m = ms[id];
+        return `
+          <div class="cmdk-item ${idx === MENTION_INDEX ? 'active' : ''}" onmousedown="event.preventDefault(); pickMention('${esc(id)}')">
+            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+              ${avatarHtml(id, m, { sm: true })}
+              <div style="min-width:0;">
+                <div style="font-weight:600; font-size:12.5px;">${esc(m.name || id)}</div>
+                <div class="cmdk-item-sub">${esc(m.specialty || m.model)}</div>
+              </div>
+            </div>
+            <span class="tag">${m.client === 'antigravity' ? 'AGY' : 'Codex'}</span>
+          </div>
+        `;
+      }).join('');
+      pop.classList.remove('hidden');
+    }
+
+    function pickMention(mid) {
+      const inp = document.getElementById('interject-input');
+      const m = STATE?.members?.[mid];
+      if (inp && m) {
+        const val = inp.value || '';
+        const pos = inp.selectionStart ?? val.length;
+        const before = val.slice(0, pos).replace(/(^|\s)@([^\s@]{0,24})$/, `$1@${m.name} `);
+        inp.value = before + val.slice(pos);
+        inp.focus();
+      }
+      setInterjectTarget(mid);
+      hideMentionPopup();
+    }
+
+    function onInterjectKeydown(ev) {
+      if (MENTION_OPEN) {
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); MENTION_INDEX = (MENTION_INDEX + 1) % MENTION_LIST.length; renderMentionPopup(); return; }
+        if (ev.key === 'ArrowUp') { ev.preventDefault(); MENTION_INDEX = (MENTION_INDEX - 1 + MENTION_LIST.length) % MENTION_LIST.length; renderMentionPopup(); return; }
+        if (ev.key === 'Enter' || ev.key === 'Tab') { ev.preventDefault(); if (MENTION_LIST[MENTION_INDEX]) pickMention(MENTION_LIST[MENTION_INDEX]); return; }
+        if (ev.key === 'Escape') { ev.preventDefault(); hideMentionPopup(); return; }
+      }
+      if (ev.key === 'Enter') { ev.preventDefault(); sendInterjection(); }
+    }
+
     function syncInterjectBar(st, focused) {
       const dock = document.getElementById('active-stage-interject');
       if (!focused) {
         dock.classList.add('hidden');
+        hideMentionPopup();
         FOCUSED_TASK_ID = null;
         return;
       }
@@ -2886,6 +3417,7 @@
         sel.setAttribute('data-sig', sig);
       }
       FOCUSED_TASK_ID = focused.id;
+      renderQuickTargetChips();
     }
 
     function renderActiveStage(st, projUnarchived) {
@@ -2968,14 +3500,40 @@
         ? `<div class="notice notice-err"><span>${esc(focused.blocking_reason)}</span></div>`
         : '';
 
+      const fc = focused.latest_fact_check;
+      const auditHtml = (fc && fc.content) ? `
+        <div class="audit-panel">
+          <div class="audit-panel-head">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              ${svgIcon('shield', 15)}
+              <strong style="font-size:13px;">${esc(t('auditPanelTitle'))}</strong>
+              <span class="tag">${esc(fc.checker_name || fc.checker_id)} · ${esc(fc.checker_model || '')}</span>
+              ${fc.cross_engine ? `<span class="tag tag-ok">${esc(t('auditCrossEngine'))}</span>` : ''}
+            </div>
+            ${focused.status !== 'running' ? `<button class="btn btn-sm" onclick="runReviseFromAudit('${esc(focused.id)}')">${svgIcon('check', 13)} ${esc(t('auditApplyBtn'))}</button>` : ''}
+          </div>
+          <details data-persist-id="fc-${esc(focused.id)}" open style="margin-top:10px;">
+            <summary style="font-size:12px;">${LANG === 'en' ? 'Show / Hide Audit Report' : '展开 / 收起逐项核查表'} (${fmtTime(fc.ts)})</summary>
+            <div class="doc-reading" style="margin:10px 0 0; max-width:none; font-size:13px;">${renderLiteMarkdown(fc.content)}</div>
+          </details>
+        </div>
+      ` : '';
+
       let tabContentHtml = '';
       if (curTab === 'deliverable') {
         tabContentHtml = mainOutput
           ? `
             <div class="doc-reading">
+              ${auditHtml}
               <div class="doc-actions-row">
                 <span style="font-size:12px; color:var(--text-3);" class="tabular">${esc(t('charsUnit', { n: mainOutput.length }))}</span>
-                <button class="btn btn-sec btn-sm" onclick="copyText(window._LATEST_MAIN_OUTPUT || '')">${svgIcon('copy', 13)} ${esc(t('copyMd'))}</button>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  ${focused.status !== 'running' ? `
+                    <button class="btn btn-sec btn-sm" onclick="openFactCheckModal('${esc(focused.id)}')">${svgIcon('shield', 13)} ${esc(t('factCheckBtn'))}</button>
+                    <button class="btn btn-sec btn-sm" onclick="openReanswerModal('${esc(focused.id)}')">${svgIcon('repeat', 13)} ${esc(t('switchSpecBtn'))}</button>
+                  ` : ''}
+                  <button class="btn btn-sec btn-sm" onclick="copyText(window._LATEST_MAIN_OUTPUT || '')">${svgIcon('copy', 13)} ${esc(t('copyMd'))}</button>
+                </div>
               </div>
               ${renderLiteMarkdown(mainOutput)}
             </div>
@@ -3084,6 +3642,31 @@
       }).join('') + `</div>`;
     }
 
+    function renderTemplateGallery() {
+      const box = document.getElementById('tpl-gallery-grid');
+      if (!box) return;
+      const tpls = CATALOG.templates || [];
+      box.innerHTML = tpls.map(tpl => {
+        const nm = LANG === 'en' ? tpl.name_en : tpl.name_zh;
+        const sp = LANG === 'en' ? tpl.specialty_en : tpl.specialty_zh;
+        return `
+          <div class="tpl-card">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <strong style="font-size:13px;">${esc(nm)}</strong>
+                <span class="tag">${tpl.recommended_client === 'antigravity' ? 'AGY' : 'Codex'}</span>
+              </div>
+              <div style="font-size:11.5px; color:var(--text-2); margin-top:3px;">${esc(sp)}</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="tag tag-ok">${svgIcon('shield', 11)}Strict</span>
+              <button class="btn btn-sec btn-sm" onclick="recruitFromTemplate('${esc(tpl.template_id)}')">${svgIcon('plus', 12)} ${esc(t('recruitBtn'))}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     function renderMembersView(st) {
       const grid = document.getElementById('members-grid');
       const ms = st.members || {};
@@ -3092,6 +3675,7 @@
       grid.innerHTML = ids.map(id => {
         const m = ms[id];
         const roleName = st.roles?.[m.role]?.name || m.role;
+        const gm = m.grounding_mode || 'strict';
         return `
           <div class="member-card">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
@@ -3101,16 +3685,19 @@
                   <div style="font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                     <span>${esc(m.name || id)}</span>
                     ${engineTag(m.client)}
+                    ${gm === 'strict' ? `<span class="tag tag-ok" style="height:20px; font-size:10.5px;">${svgIcon('shield', 10)}Strict</span>` : ''}
                   </div>
-                  <div style="font-size:11.5px; color:var(--text-3); margin-top:2px;"><code>${esc(id)}</code> · ${esc(roleName)}</div>
+                  <div style="font-size:11.5px; color:var(--text-2); margin-top:2px;">${esc(m.specialty || roleName)}</div>
+                  <div style="font-size:11px; color:var(--text-3); margin-top:1px;"><code>${esc(id)}</code> · ${esc(roleName)}</div>
                 </div>
               </div>
               ${statusTag(m.status)}
             </div>
             <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-2);">
               <span><code>${esc(m.model)}</code> / <code>${esc(m.reasoning_effort)}</code></span>
-              <div style="display:flex; gap:6px;">
+              <div style="display:flex; gap:5px;">
                 <button class="btn btn-sec btn-sm" onclick="openSwitchMemberModal('${esc(id)}', false)">${svgIcon('edit', 12)} ${esc(t('editMember'))}</button>
+                <button class="btn btn-ghost btn-sm" onclick="cloneMemberModal('${esc(id)}')" title="${esc(t('cloneBtn'))}">${svgIcon('clone', 12)}</button>
                 ${m.status !== 'working' ? `<button class="btn btn-ghost btn-sm" style="color:var(--err);" onclick="deleteMember('${esc(id)}')">${esc(t('remove'))}</button>` : ''}
               </div>
             </div>
@@ -3118,6 +3705,8 @@
           </div>
         `;
       }).join('');
+
+      renderTemplateGallery();
 
       document.getElementById('roles-box').innerHTML = Object.keys(st.roles || {}).map(rid => {
         const r = st.roles[rid];
@@ -3588,18 +4177,53 @@
       } catch (e) { toast(t('toastFail', { err: e.message }), true); }
     }
 
+    function applyTemplateToEditModal(tplId) {
+      const tpl = (CATALOG.templates || []).find(x => x.template_id === tplId);
+      if (!tpl) return;
+      const specEl = document.getElementById('sw-spec');
+      const pEl = document.getElementById('sw-persona');
+      const rEl = document.getElementById('sw-role');
+      const gmEl = document.getElementById('sw-grounding');
+      if (specEl) specEl.value = LANG === 'en' ? tpl.specialty_en : tpl.specialty_zh;
+      if (pEl) pEl.value = tpl.persona_prompt;
+      if (rEl && STATE?.roles?.[tpl.role]) rEl.value = tpl.role;
+      if (gmEl) gmEl.value = tpl.grounding_mode || 'strict';
+    }
+
     function openSwitchMemberModal(mid, focusName = false) {
       const m = STATE.members[mid];
       const isWorking = m.status === 'working';
       const roleOpts = Object.keys(STATE.roles).map(rid => `<option value="${esc(rid)}" ${rid === m.role ? 'selected' : ''}>${esc(STATE.roles[rid].name)}</option>`).join('');
+      const tplOpts = `<option value="">--</option>` + (CATALOG.templates || []).map(tpl =>
+        `<option value="${esc(tpl.template_id)}">${esc(LANG === 'en' ? tpl.name_en : tpl.name_zh)}</option>`
+      ).join('');
       openModal(`
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
           <strong style="font-size:15px;">${esc(t('editMember'))} · <code>${esc(mid)}</code></strong>
           <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
         </div>
-        <div style="margin-bottom:10px;">
-          <label>${esc(t('mName'))}</label>
-          <input type="text" id="sw-name" value="${esc(m.name || mid)}">
+        <div class="grid-2" style="margin-bottom:10px;">
+          <div>
+            <label>${esc(t('mName'))}</label>
+            <input type="text" id="sw-name" value="${esc(m.name || mid)}">
+          </div>
+          <div>
+            <label>${esc(t('applyTplLbl'))}</label>
+            <select onchange="applyTemplateToEditModal(this.value)">${tplOpts}</select>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-bottom:10px;">
+          <div>
+            <label>${esc(t('mSpecialty'))}</label>
+            <input type="text" id="sw-spec" value="${esc(m.specialty || '')}">
+          </div>
+          <div>
+            <label>${esc(t('mGrounding'))}</label>
+            <select id="sw-grounding">
+              <option value="strict" ${(m.grounding_mode || 'strict') === 'strict' ? 'selected' : ''}>${esc(t('groundStrict'))}</option>
+              <option value="balanced" ${m.grounding_mode === 'balanced' ? 'selected' : ''}>${esc(t('groundBalanced'))}</option>
+            </select>
+          </div>
         </div>
         <div class="grid-2" style="margin-bottom:10px;">
           <div>
@@ -3612,6 +4236,10 @@
           <div><label>${esc(t('mRole'))}</label><select id="sw-role">${roleOpts}</select></div>
           <div><label>${esc(t('mModel'))}</label><select id="sw-model" onchange="syncClientEfforts('sw-client', 'sw-model', 'sw-effort')"></select></div>
           <div><label>${esc(t('mEffort'))}</label><select id="sw-effort"></select></div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>${esc(t('mPersona'))}</label>
+          <textarea id="sw-persona" style="min-height:92px;">${esc(m.persona_prompt || '')}</textarea>
         </div>
         ${isWorking ? `
           <div style="margin-bottom:10px;">
@@ -3626,7 +4254,7 @@
           <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
           <button class="btn btn-sm" onclick="doSwitchMember('${esc(mid)}', ${isWorking})">${esc(t('save'))}</button>
         </div>
-      `);
+      `, true);
       populateClientModels('sw-client', 'sw-model', 'sw-effort', m.model, m.reasoning_effort);
       if (focusName) setTimeout(() => document.getElementById('sw-name')?.focus(), 40);
     }
@@ -3641,6 +4269,9 @@
           role: document.getElementById('sw-role').value,
           model: document.getElementById('sw-model').value,
           reasoning_effort: document.getElementById('sw-effort').value,
+          specialty: document.getElementById('sw-spec').value.trim(),
+          grounding_mode: document.getElementById('sw-grounding').value,
+          persona_prompt: document.getElementById('sw-persona').value.trim(),
           mode: isWorking ? document.getElementById('sw-mode').value : 'next_round',
           reason: 'Updated via UI'
         });
@@ -3657,12 +4288,399 @@
           role: document.getElementById('add-m-role').value,
           client: document.getElementById('add-m-client').value,
           model: document.getElementById('add-m-model').value,
-          reasoning_effort: document.getElementById('add-m-effort').value
+          reasoning_effort: document.getElementById('add-m-effort').value,
+          specialty: document.getElementById('add-m-spec').value.trim(),
+          grounding_mode: document.getElementById('add-m-grounding').value,
+          persona_prompt: document.getElementById('add-m-persona').value.trim()
         });
         document.getElementById('add-m-id').value = '';
         document.getElementById('add-m-name').value = '';
+        document.getElementById('add-m-spec').value = '';
+        document.getElementById('add-m-persona').value = '';
         await refreshState(true);
       } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function recruitFromTemplate(tplId) {
+      const tpl = (CATALOG.templates || []).find(x => x.template_id === tplId);
+      if (!tpl || !STATE) return;
+      const client = tpl.recommended_client || 'codex';
+      const models = (CAPS.clients?.[client]?.models) || [];
+      const firstM = models[0] || { slug: client === 'antigravity' ? 'gemini-4-carbon' : 'gpt-6.1-sol', default_reasoning_effort: 'medium' };
+      let baseId = tpl.template_id;
+      let newId = baseId;
+      let n = 2;
+      while (STATE.members?.[newId]) { newId = `${baseId}_${n++}`; }
+      const nm = LANG === 'en' ? tpl.name_en : tpl.name_zh;
+      try {
+        await api('POST', '/api/members', {
+          id: newId,
+          name: nm,
+          role: STATE.roles?.[tpl.role] ? tpl.role : 'review',
+          client,
+          model: firstM.slug,
+          reasoning_effort: firstM.default_reasoning_effort || 'medium',
+          specialty: LANG === 'en' ? tpl.specialty_en : tpl.specialty_zh,
+          persona_prompt: tpl.persona_prompt,
+          grounding_mode: tpl.grounding_mode || 'strict',
+          tags: tpl.tags || []
+        });
+        toast(t('recruitedToast', { name: nm }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    function cloneMemberModal(srcId) {
+      const m = STATE?.members?.[srcId];
+      if (!m) return;
+      let newId = `${srcId}_v2`;
+      let n = 3;
+      while (STATE.members?.[newId]) { newId = `${srcId}_v${n++}`; }
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <strong style="font-size:15px;">${esc(t('cloneBtn'))} · ${esc(m.name || srcId)}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div class="grid-2" style="margin-bottom:10px;">
+          <div><label>${esc(t('mId'))}</label><input type="text" id="cl-id" value="${esc(newId)}"></div>
+          <div><label>${esc(t('mName'))}</label><input type="text" id="cl-name" value="${esc((m.name || srcId) + ' (Copy)')}"></div>
+        </div>
+        <div style="margin-bottom:10px;"><label>${esc(t('mSpecialty'))}</label><input type="text" id="cl-spec" value="${esc(m.specialty || '')}"></div>
+        <div style="margin-bottom:10px;"><label>${esc(t('mPersona'))}</label><textarea id="cl-persona" style="min-height:84px;">${esc(m.persona_prompt || '')}</textarea></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
+          <button class="btn btn-sm" onclick="doCloneMember('${esc(srcId)}')">${esc(t('saveMember'))}</button>
+        </div>
+      `);
+    }
+
+    async function doCloneMember(srcId) {
+      const m = STATE?.members?.[srcId];
+      if (!m) return;
+      try {
+        await api('POST', '/api/members', {
+          id: document.getElementById('cl-id').value.trim(),
+          name: document.getElementById('cl-name').value.trim(),
+          role: m.role,
+          client: m.client,
+          model: m.model,
+          reasoning_effort: m.reasoning_effort,
+          specialty: document.getElementById('cl-spec').value.trim(),
+          persona_prompt: document.getElementById('cl-persona').value.trim(),
+          grounding_mode: m.grounding_mode || 'strict',
+          tags: m.tags || []
+        });
+        closeModal();
+        toast(t('recruitedToast', { name: document.getElementById('cl-name').value.trim() }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    // ==================== FACT-CHECK, REVISE & SWITCH SPECIALIST MODALS ====================
+    function pickRecommendedChecker(task, targetChatId) {
+      const ms = STATE?.members || {};
+      const ids = getRunnableIds(STATE);
+      let authorClient = null;
+      let authorId = null;
+      if (targetChatId) {
+        const cm = (task?.chat_room || []).find(c => c.id === targetChatId);
+        if (cm) { authorId = cm.sender_id; authorClient = cm.sender_client; }
+      }
+      if (!authorClient) {
+        const synth = [...(task?.steps || [])].reverse().find(s => s.step_type !== 'fact_check');
+        if (synth) { authorId = synth.member_id; authorClient = ms[authorId]?.client; }
+      }
+      return ids.slice().sort((a, b) => {
+        const sc = (id) => {
+          const m = ms[id];
+          return (authorClient && m.client !== authorClient ? 4 : 0)
+            + ((m.tags || []).includes('fact_check') || m.role === 'review' ? 2 : 0)
+            + (id !== authorId ? 1 : 0);
+        };
+        return sc(b) - sc(a);
+      })[0] || ids[0];
+    }
+
+    function openFactCheckModal(taskId, targetChatId = '') {
+      const task = (STATE?.tasks || []).find(x => x.id === taskId);
+      if (!task) return;
+      const ms = STATE.members || {};
+      const ids = getRunnableIds(STATE);
+      const rec = pickRecommendedChecker(task, targetChatId);
+      const opts = ids.map(id => {
+        const m = ms[id];
+        const tag = id === rec ? (LANG === 'en' ? ' (Recommended)' : '（推荐异构核查）') : '';
+        return `<option value="${esc(id)}" ${id === rec ? 'selected' : ''}>[${m.client === 'antigravity' ? 'AGY' : 'Codex'}] ${esc(m.name || id)} — ${esc(m.specialty || m.model)}${tag}</option>`;
+      }).join('');
+
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <strong style="font-size:15px; display:inline-flex; align-items:center; gap:7px;">${svgIcon('shield', 16)} ${esc(t('factCheckTitle'))}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div style="font-size:12px; color:var(--text-2); margin-bottom:12px;">${esc(t('factCheckDesc'))}</div>
+        <div style="margin-bottom:10px;">
+          <label>${esc(t('factCheckChecker'))}</label>
+          <select id="fc-checker">${opts}</select>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>${esc(t('factCheckFocus'))}</label>
+          <textarea id="fc-focus" style="min-height:66px;" placeholder="${esc(t('factCheckFocusPh'))}"></textarea>
+        </div>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin-bottom:12px; cursor:pointer; color:var(--text);">
+          <input type="checkbox" id="fc-autorev" style="width:auto;">
+          <span>${esc(t('factCheckAutoRevise'))}</span>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
+          <button class="btn btn-sm" onclick="runFactCheck('${esc(taskId)}', '${esc(targetChatId)}')">${svgIcon('shield', 13)} ${esc(t('factCheckRun'))}</button>
+        </div>
+      `);
+    }
+
+    async function runFactCheck(taskId, targetChatId = '') {
+      const checker = document.getElementById('fc-checker')?.value || null;
+      const focusNote = document.getElementById('fc-focus')?.value || '';
+      const autoRev = Boolean(document.getElementById('fc-autorev')?.checked);
+      try {
+        const res = await api('POST', '/api/tasks/fact_check', {
+          task_id: taskId,
+          checker_member_id: checker,
+          target_chat_id: targetChatId || null,
+          focus_note: focusNote,
+          auto_revise: autoRev
+        });
+        closeModal();
+        MANUAL_STAGE_TABS[taskId] = 'discussion';
+        const nm = STATE?.members?.[res.checker_member_id]?.name || res.checker_member_id;
+        toast(t('factCheckStarted', { name: nm }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function runReviseFromAudit(taskId) {
+      try {
+        await api('POST', '/api/tasks/revise_from_audit', { task_id: taskId });
+        MANUAL_STAGE_TABS[taskId] = 'discussion';
+        toast(t('auditRevising'));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    function openReanswerModal(taskId, targetChatId = '') {
+      const ms = STATE?.members || {};
+      const ids = getRunnableIds(STATE);
+      window._REANS_SELECTED = ids[0] || '';
+      const cards = ids.map(id => {
+        const m = ms[id];
+        return `
+          <div class="seat-pill ${id === window._REANS_SELECTED ? 'selected' : ''}" data-reans-id="${esc(id)}" onclick="selectReansPill('${esc(id)}')">
+            ${avatarHtml(id, m, { sm: true })}
+            <span style="font-weight:600;">${esc(m.name || id)}</span>
+            <span style="font-size:10.5px; color:var(--text-3);">${esc((m.specialty || m.model).split('·')[0].trim())}</span>
+          </div>
+        `;
+      }).join('');
+
+      openModal(`
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <strong style="font-size:15px;">${esc(t('switchSpecTitle'))}</strong>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 15)}</button>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>${esc(t('switchSpecTarget'))}</label>
+          <div class="seat-picks" id="reans-pills">${cards}</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>${esc(t('switchSpecInst'))}</label>
+          <textarea id="reans-inst" style="min-height:66px;" placeholder="${esc(t('switchSpecInstPh'))}"></textarea>
+        </div>
+        <label style="display:inline-flex; align-items:center; gap:6px; margin-bottom:12px; cursor:pointer; color:var(--text);">
+          <input type="checkbox" id="reans-deliv" checked style="width:auto;">
+          <span>${esc(t('switchSpecAsDeliv'))}</span>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('cancel'))}</button>
+          <button class="btn btn-sm" onclick="runReanswer('${esc(taskId)}', '${esc(targetChatId)}')">${esc(t('confirm'))}</button>
+        </div>
+      `);
+    }
+
+    function selectReansPill(mid) {
+      window._REANS_SELECTED = mid;
+      document.querySelectorAll('#reans-pills .seat-pill').forEach(el => {
+        el.classList.toggle('selected', el.getAttribute('data-reans-id') === mid);
+      });
+    }
+
+    async function runReanswer(taskId, targetChatId = '') {
+      const mid = window._REANS_SELECTED;
+      if (!mid) return;
+      try {
+        await api('POST', '/api/tasks/reanswer', {
+          task_id: taskId,
+          new_member_id: mid,
+          target_chat_id: targetChatId || null,
+          instruction: document.getElementById('reans-inst')?.value || '',
+          as_deliverable: Boolean(document.getElementById('reans-deliv')?.checked)
+        });
+        closeModal();
+        MANUAL_STAGE_TABS[taskId] = 'discussion';
+        toast(t('switchSpecStarted', { name: STATE?.members?.[mid]?.name || mid }));
+        await refreshState(true);
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    // ==================== COMMAND & SPECIALIST SWITCHER PALETTE (Ctrl+K) ====================
+    function openCmdK() {
+      CMDK_OPEN = true;
+      CMDK_INDEX = 0;
+      const bd = document.getElementById('cmdk-backdrop');
+      const inp = document.getElementById('cmdk-input');
+      bd.style.display = 'flex';
+      inp.value = '';
+      renderCmdKList();
+      setTimeout(() => inp.focus(), 20);
+    }
+
+    function closeCmdK() {
+      CMDK_OPEN = false;
+      document.getElementById('cmdk-backdrop').style.display = 'none';
+    }
+
+    function renderCmdKList() {
+      const box = document.getElementById('cmdk-list');
+      const q = (document.getElementById('cmdk-input')?.value || '').trim().toLowerCase();
+      const ms = STATE?.members || {};
+      const ids = getRunnableIds(STATE || {});
+      CMDK_ITEMS = [];
+
+      const itemsHtml = [];
+      // 1. Specialists
+      const matchedMems = ids.filter(id => {
+        const m = ms[id];
+        return !q || id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q) || (m.specialty || '').toLowerCase().includes(q) || (m.model || '').toLowerCase().includes(q);
+      });
+      if (matchedMems.length) {
+        itemsHtml.push(`<div class="cmdk-group">${esc(t('cmdKGroupSpecialists'))}</div>`);
+        matchedMems.forEach(id => {
+          const m = ms[id];
+          const idx = CMDK_ITEMS.length;
+          CMDK_ITEMS.push({
+            run: () => {
+              closeCmdK();
+              if (FOCUSED_TASK_ID && CURRENT_VIEW === 'workspace' && !isComposerOpen(getProjUnarchived())) {
+                setInterjectTarget(id);
+                toast(`${LANG === 'en' ? 'Switched reply target to' : '已切换对话对象为'} @${m.name || id}`);
+              } else {
+                CMP.soloId = id;
+                if (!CMP.rtParticipants.includes(id)) CMP.rtParticipants.push(id);
+                renderComposerStudio();
+                toast(`${LANG === 'en' ? 'Selected specialist' : '已选中专家'}: ${m.name || id}`);
+              }
+            }
+          });
+          itemsHtml.push(`
+            <div class="cmdk-item ${idx === CMDK_INDEX ? 'active' : ''}" data-cmdk="${idx}" onclick="execCmdK(${idx})">
+              <div style="display:flex; align-items:center; gap:9px; min-width:0;">
+                ${avatarHtml(id, m, { sm: true })}
+                <div style="min-width:0;">
+                  <div style="font-weight:600;">${esc(m.name || id)}</div>
+                  <div class="cmdk-item-sub">${esc(m.specialty || m.model)} · ${esc(m.model)}</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="tag">${m.client === 'antigravity' ? 'AGY' : 'Codex'}</span>
+                <button class="btn btn-ghost btn-sm" style="height:24px; padding:0 6px;" onclick="event.stopPropagation(); closeCmdK(); openSwitchMemberModal('${esc(id)}');">${esc(t('editMember'))}</button>
+              </div>
+            </div>
+          `);
+        });
+      }
+
+      // 2. Fact-check & Quick Actions
+      const actions = [];
+      if (FOCUSED_TASK_ID) {
+        actions.push({
+          label: t('factCheckTitle'),
+          sub: t('factCheckDesc'),
+          icon: 'shield',
+          run: () => { closeCmdK(); openFactCheckModal(FOCUSED_TASK_ID); }
+        });
+        actions.push({
+          label: t('switchSpecTitle'),
+          sub: LANG === 'en' ? 'Summon another specialist for a fresh independent answer' : '一键换另一位专家独立重新研判',
+          icon: 'repeat',
+          run: () => { closeCmdK(); openReanswerModal(FOCUSED_TASK_ID); }
+        });
+      }
+      actions.push({
+        label: t('themeToggle'),
+        sub: THEME === 'light' ? 'Switch to Dark' : 'Switch to Light',
+        icon: THEME === 'light' ? 'moon' : 'sun',
+        run: () => { closeCmdK(); toggleTheme(); }
+      });
+
+      const matchedActs = actions.filter(a => !q || a.label.toLowerCase().includes(q) || a.sub.toLowerCase().includes(q));
+      if (matchedActs.length) {
+        itemsHtml.push(`<div class="cmdk-group">${esc(t('cmdKGroupActions'))}</div>`);
+        matchedActs.forEach(a => {
+          const idx = CMDK_ITEMS.length;
+          CMDK_ITEMS.push(a);
+          itemsHtml.push(`
+            <div class="cmdk-item ${idx === CMDK_INDEX ? 'active' : ''}" data-cmdk="${idx}" onclick="execCmdK(${idx})">
+              <div style="display:flex; align-items:center; gap:9px;">
+                ${svgIcon(a.icon, 15)}
+                <div>
+                  <div style="font-weight:600;">${esc(a.label)}</div>
+                  <div class="cmdk-item-sub">${esc(a.sub)}</div>
+                </div>
+              </div>
+            </div>
+          `);
+        });
+      }
+
+      // 3. Squad Presets
+      const matchedPresets = (CATALOG.squad_presets || []).filter(p => {
+        const nm = (p.name_zh + ' ' + p.name_en + ' ' + p.desc_zh).toLowerCase();
+        return !q || nm.includes(q);
+      });
+      if (matchedPresets.length) {
+        itemsHtml.push(`<div class="cmdk-group">${esc(t('cmdKGroupPresets'))}</div>`);
+        matchedPresets.forEach(p => {
+          const idx = CMDK_ITEMS.length;
+          CMDK_ITEMS.push({
+            run: () => { closeCmdK(); setComposerOpen(true); applySquadPreset(p.id); }
+          });
+          itemsHtml.push(`
+            <div class="cmdk-item ${idx === CMDK_INDEX ? 'active' : ''}" data-cmdk="${idx}" onclick="execCmdK(${idx})">
+              <div style="display:flex; align-items:center; gap:9px;">
+                ${svgIcon('users', 14)}
+                <div>
+                  <div style="font-weight:600;">${esc(LANG === 'en' ? p.name_en : p.name_zh)}</div>
+                  <div class="cmdk-item-sub">${esc(LANG === 'en' ? p.desc_en : p.desc_zh)}</div>
+                </div>
+              </div>
+            </div>
+          `);
+        });
+      }
+
+      if (CMDK_INDEX >= CMDK_ITEMS.length) CMDK_INDEX = 0;
+      box.innerHTML = itemsHtml.join('') || `<div style="padding:20px; text-align:center; color:var(--text-3); font-size:12.5px;">No match</div>`;
+    }
+
+    function execCmdK(idx) {
+      if (CMDK_ITEMS[idx]) CMDK_ITEMS[idx].run();
+    }
+
+    function onCmdKKeydown(ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); closeCmdK(); return; }
+      if (!CMDK_ITEMS.length) return;
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); CMDK_INDEX = (CMDK_INDEX + 1) % CMDK_ITEMS.length; renderCmdKList(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); CMDK_INDEX = (CMDK_INDEX - 1 + CMDK_ITEMS.length) % CMDK_ITEMS.length; renderCmdKList(); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); execCmdK(CMDK_INDEX); }
     }
     async function deleteMember(id) {
       try { await api('POST', '/api/members/delete', { id }); await refreshState(true); }
@@ -3685,7 +4703,16 @@
       } catch (e) { toast(t('toastFail', { err: e.message }), true); }
     }
 
-    // Global click delegation: answer links + click-outside to close popover
+    // Global click & keyboard shortcuts (Ctrl+K / Cmd+K Quick Switcher!)
+    document.addEventListener('keydown', (ev) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+        ev.preventDefault();
+        if (CMDK_OPEN) closeCmdK(); else openCmdK();
+      } else if (ev.key === 'Escape' && CMDK_OPEN) {
+        closeCmdK();
+      }
+    });
+
     document.addEventListener('click', (ev) => {
       const linkEl = ev.target.closest && ev.target.closest('a.ans-link');
       if (linkEl) {
@@ -3696,12 +4723,15 @@
       if (UTILS_OPEN && !ev.target.closest('#utils-popover') && !ev.target.closest('#btn-utils-menu')) {
         closeUtilsMenu();
       }
+      if (MENTION_OPEN && !ev.target.closest('#mention-popup') && !ev.target.closest('#interject-input')) {
+        hideMentionPopup();
+      }
     });
 
     // Boot
     (async function boot() {
       renderStaticChrome();
-      await loadCapabilities(false);
+      await Promise.all([loadCapabilities(false), loadCatalog()]);
       await refreshState(true);
       selectComposerMode('roundtable');
       await loadProjects();

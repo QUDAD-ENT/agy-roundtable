@@ -800,6 +800,131 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
         finally:
             orch.stop_scheduler()
 
+    def test_11_specialist_persona_grounding_fact_check_and_revision_loop(self) -> None:
+        seen_prompts: list[tuple[str, str, object]] = []
+
+        def audit_runner(prompt, session_id, **kwargs):
+            client = kwargs["requested_config"]["client"]
+            seen_prompts.append((client, prompt, session_id))
+            if "请严格依据独立事实核查官" in prompt:
+                return CodexExecutionResult(
+                    session_id="rev-sess-1",
+                    response_text="修订终稿：已将样本量修正为 100，并保留证据锚点。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if "执行严格的反幻觉与事实核查审计" in prompt:
+                return CodexExecutionResult(
+                    session_id="fc-sess-1",
+                    response_text="### 核查结论\n发现 1 处数字偏差：真实样本量为 100（非 120），请修订。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if "独立重新研判并回答本任务" in prompt:
+                return CodexExecutionResult(
+                    session_id="reans-sess-1",
+                    response_text="切换专家后的全新独立结论：所有指标均核对无误。",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id="orig-sess-1",
+                response_text="初始终稿：样本量约 120，建议继续推进。",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=kwargs["requested_config"],
+                accepted_config=kwargs["accepted_config"],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=audit_runner),
+            agy_adapter=AgyAdapter(runner_override=audit_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            # Verify catalog templates & squad presets exist
+            cat = orch.get_specialist_catalog()
+            self.assertGreaterEqual(len(cat["templates"]), 6)
+            self.assertGreaterEqual(len(cat["squad_presets"]), 4)
+
+            # Customize specialist persona & strict grounding
+            orch.switch_member_config(
+                member_id="agy_gemini",
+                specialty="自定义方法学核验",
+                persona_prompt="CUSTOM_PERSONA_MARKER_XYZ: 必须逐行核对样本量。",
+                grounding_mode="strict",
+            )
+            t = orch.create_task(
+                title="防幻觉与跨引擎纠错闭环测试",
+                goal="输出初步分析并接受异构核查与修订",
+                execution_mode="single_member",
+                target_member_id="agy_gemini",
+            )
+
+            deadline = time.time() + 15.0
+            cur = None
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+
+            self.assertEqual(cur["status"], "succeeded")
+            self.assertIn("CUSTOM_PERSONA_MARKER_XYZ", seen_prompts[0][1])
+            self.assertIn("Strict Grounding", seen_prompts[0][1])
+
+            # 1. Dispatch cross-engine fact-check (AGY author -> should auto-pick Codex checker!)
+            fc_res = orch.fact_check_task(task_id=t["id"], focus_note="核对样本量")
+            self.assertTrue(fc_res["cross_engine"])
+            self.assertEqual(orch.store.snapshot()["members"][fc_res["checker_member_id"]]["client"], "codex")
+
+            deadline = time.time() + 15.0
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded" and cur.get("latest_fact_check"):
+                    break
+                time.sleep(0.06)
+
+            self.assertEqual(cur["status"], "succeeded")
+            # Fact-check MUST NOT overwrite the original primary deliverable summary!
+            self.assertIn("初始终稿", cur["summary"])
+            self.assertIn("真实样本量为 100", cur["latest_fact_check"]["content"])
+            # Clean unbiased session must have been passed to fact-checker
+            self.assertIsNone(seen_prompts[1][2])
+
+            # 2. Apply audit fixes -> updates summary cleanly
+            orch.revise_from_fact_check(task_id=t["id"])
+            deadline = time.time() + 15.0
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded" and "修订终稿" in cur["summary"]:
+                    break
+                time.sleep(0.06)
+            self.assertIn("样本量修正为 100", cur["summary"])
+
+            # 3. 1-click Switch Specialist & Re-answer
+            orch.reanswer_with_specialist(task_id=t["id"], new_member_id="codex_author", instruction="请独立复核")
+            deadline = time.time() + 15.0
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded" and "切换专家后的全新独立结论" in cur["summary"]:
+                    break
+                time.sleep(0.06)
+            self.assertIn("切换专家后的全新独立结论", cur["summary"])
+        finally:
+            orch.stop_scheduler()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
