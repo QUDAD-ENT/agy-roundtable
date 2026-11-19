@@ -38,18 +38,17 @@
    - **🧱 Multi-Track Pipeline Studio (`custom_dag`)**: Visually stack Stage `1..N` columns with parallel workstations and independent review gates (bounded 2-round auto-repair before escalating to human ruling).
    - **⚡ 1-on-1 Specialist Desk (`single_member`)**: Direct low-latency specialist execution with session continuation.
 
-2. **OpenScience-Inspired Scientific Reasoning & Anti-Sycophancy Protocol**
-   - **🔬 Blind Round 1 Initialization (`Blind Round 1`)**: Roundtable Round 1 specialists are strictly isolated from sibling Round 1 drafts so fast models never anchor slower peers.
-   - **🧠 Model-Family Prompt Dialect Calibration**: Dynamically adapts prompt structure to the model family — XML-structured adversarial peer review (`BLOCKING` vs `OBSERVATION`) for **Claude**, wide-context hypothesis evolution & M-MAD matrices for **Gemini Flagship**, rapid `explore`-style Evidence Indexing for **Gemini Flash**, and tool-first mechanical acceptance checks for **Codex / GPT**.
-   - **⚖️ Three-Tier Epistemic Calibration (`Strict Grounding` + Disciplined Extrapolation)**: Zero fabrication on files/numbers/DOIs (`[Observed]`), calibrated directional inference (`[Inferred]`), and explicitly encouraged mechanistic/scientific deep extrapolation (`[Hypothesis · Falsifiable Test]`) rather than cowardly hedging.
-   - **🤝 Persona-Aware Structured `@consult` Handoffs**: Mid-step `team_consult` wakes teammates with their full specialist persona & dialect and returns structured `Verdict (CONFIRMED/REFUTED/PARTIAL/UNVERIFIABLE) + Evidence + Correction` contracts.
-   - **🛡️ Independent Cross-Engine Fact-Checking & 1-Click Live Roster Calibration**: Run clean-session opposite-engine audits (`POST /api/tasks/fact_check`), apply 1-click audit revisions (`POST /api/tasks/revise_from_audit`), switch specialists via `Ctrl+K`, or auto-calibrate all idle members against live CLI models (`POST /api/specialists/optimize_roster`).
+2. **Deep OpenScience Research & Scientific Computing / Publication Plotting Fusion**
+   - **🔬 Blind Round 1 Isolation + 7 Modular OpenScience Playbooks (`openscience_playbooks.py`)**: Roundtable Round 1 drafts & disk transcripts are strictly sealed from sibling peers until Round 1 finishes; 7 composable OpenScience core protocols (`Statistical Rigor & Power`, `Experimental Design & DOE`, `Execution Hygiene & Submitted Code`, `Publication Figures & Schematics`, `Atomic Sources & Citation Audit`, `Autoresearch & Experiment Loop`, `Peer Review & Manuscript Craft`) can be auto-matched or toggled directly in the Composer.
+   - **📊 Pure-Stdlib Publication Figure QA & Plotting Runtime Probe (`figure_qa.py`)**: Live detection of Python (`matplotlib`/`seaborn`/`scipy`/`statsmodels`) and R (`ggplot2`/`patchwork`/`ComplexHeatmap`/`svglite`/`ragg`) plotting runtimes; pure-stdlib binary TIFF IFD dual-axis DPI + physical-mm anti-spoofing verification, PNG/SVG/PDF structural checks, and panel-level source-data CSV/TSV semantic consistency checks (catching swapped group labels & raw-P vs adjusted-P misuse).
+   - **🔒 Lock-Free Hash-Locked Mechanical Acceptance & Content-Addressed Provenance DAG (`research_verifier.py`, `provenance_store.py`)**: Executes SHA-256 hash-locked acceptance scripts (`shell=False`) and `readonly_inputs` tamper checks strictly outside state locks; records content-addressed `source → run → artifact → claim` lineage and `experiment_run` baseline-vs-delta tables in sidecar JSONL/JSON ledgers without bloating `team_state.json`.
+   - **🧠 Latest-Generation Model-Family Dialects & Role-Preserving Quota Backup (`spawn_quota_backup_member`)**: Calibrated for `Gemini 4 Neon`, `Gemini 4 Carbon`, `Gemini 4 Hydrogen`, `Claude Opus 5.5` / `Sonnet 5.5`, `GPT-6.2-Astra` (`gpt-astra.txt` action-first dialect), and `GPT-6.2-Sol`. When any model nears or hits quota/429 limits, automatically (or via 1-click **Quota Backup** modal) spawns a backup specialist inheriting 100% of the same role, specialty, grounding mode, and persona SOP on a different same-engine or cross-engine flagship model (while strictly respecting `requires_shell` routing).
+   - **🛡️ Fail-Closed Review Gate & Hard Sandbox Trust Root**: Malformed/non-JSON review output routes safely to `needs_ruling` (never silently falling back to `ACCEPT`); hard `read-only` / `workspace-write` sandbox ceiling (`danger-full-access` rejected), path-escape guard, loopback CSRF `Origin`/`Content-Type` validation, and `/api/fs/raw_file` root allowlist.
 
-3. **Minimalist Dual-Theme UI (Dark / Paper Light), Bilingual (`EN / 中文`) & Local File Previewer**
-   - **✨ Quiet Reading-First Studio**: Single-line sticky top bar, Dark + Paper Light theme toggle, 11 curated OpenScience + Engineering specialist templates, 5 one-click Squad Presets (including **OpenScience Discovery Loop** & 3-stage OpenScience DAG pipeline), and `Ctrl+K` Command Palette.
-   - **🔔 Auto-Popup Confirmation Modal**: When an agent poses structured choices (`team_questions`), a modal automatically pops up (with toggleable auto-popup & "View Context First" minimize support).
-   - **📎 Real Local File & Line-Anchor Previewer**: Clicking any file link in agent answers (`file:///...`, `.docx`, `.csv`, `.md#L29-L35`, `.pdf`, images, or relative paths) previews the real content in-browser (including zero-dependency Word `.docx` text/table extraction and highlighted line anchors) and offers 1-click launch in native OS apps or Win32 Shell `SHOpenFolderAndSelectItems` Explorer reveal (spaces-safe!).
-   - **🛡️ Resilience & Safety**: Session-scoped `--settings` read/write boundaries, write-scope conflict serialization, 240s idle-stream watchdog, transient network auto-retry, and 1-click partial-stream rescue (`accept_step_partial`).
+3. **Minimalist Dual-Theme UI (Dark / Paper Light), Artifacts & Figures Gallery, Bilingual (`EN / 中文`)**
+   - **✨ Quiet Reading-First Studio**: Single-line sticky top bar, Dark + Paper Light theme toggle, **15** curated OpenScience + Scientific Plotting + Engineering specialist templates, **7** one-click Squad Presets (including **Scientific Code & Publication Plots** and **OpenScience Autoresearch Loop**), `Ctrl+K` Command Palette, and 1-click **Quota Backup**.
+   - **🖼️ Artifacts & Figures Tab (`产物与科研图`)**: Pure-white publication proof canvas (immune to dark-mode distortion), `Fit / 100% / 150%` zoom, unified `SVG / PNG / PDF / TIFF` format switcher, Before/After side-by-side comparison, command exit-code ledger, Experiment Baseline-vs-Delta board, and interactive Provenance DAG lineage.
+   - **🔔 Auto-Popup Confirmation Modal & Real Local File Previewer**: Clicking any file link (`file:///...`, `.docx`, wide `.csv`/`.tsv` up to 60 cols × 100 rows with explicit truncation indicators, `.md#L29-L35`, `.pdf`, `.svg`, `.png`, `.tiff`) previews real content in-browser (`strict=1` disables silent basename fallback for artifact verification) and supports 1-click OS launch or Win32 Shell Explorer reveal.
 
 ### Quick Start (English)
 
@@ -89,16 +88,17 @@
    - **🧱 多轨搭积木工坊（`custom_dag`）**：自由增删第 `1..N` 阶段与同阶段并行工位，支持插入独立审查关卡（最多 2 轮自动退回修复，超限交人工裁决）。
    - **⚡ 专家一对一专办（`single_member`）**：直连单名专家快速分析或改码。
 
-2. **OpenScience 级科研推理闭环与反迎合多智能体通信**
-   - **🔬 第 1 轮真盲评隔离（Blind Round 1）**：并行参会成员首轮严密隔离彼此草稿，彻底消除先完成模型造成的早期锚定与群体思维；
-   - **🧠 按模型族自适应调优（Model-Family Dialect）**：借鉴 `synthetic-sciences/openscience` 提示词工程，分别为 **Claude**（XML 批判审稿 + `BLOCKING`/`OBSERVATION`）、**Gemini 旗舰**（广域综合 + 5 类创新算子 + M-MAD 仲裁矩阵）、**Gemini Flash**（极速证据索引）与 **Codex / GPT**（工具先行 + 机械验收脚本）注入专属方言；
-   - **⚖️ 三层认知标定（防幻觉 × 合理深度外推）**：事实层零编造（`[实证观察]`），逻辑推演给置信度与边界（`[统计/逻辑推断]`），同时鼓励机理阐释与创新外推（`[机制假说/深度外推 · 最小判别实验]`），拒绝怯懦回避解读；
-   - **🤝 携带人设的结构化 `@队友` 核验与跨引擎独立纠错**：中途 `team_consult` 支持 `claim_to_verify` / `evidence_needed`，以被询专家完整专长返回 `Verdict (CONFIRMED/REFUTED/PARTIAL/UNVERIFIABLE) + Evidence + Correction`；支持一键异构跨引擎事实核查与修订终稿、11 个 OpenScience + 工程专家模板及一键实测校准全员模型。
+2. **深度融合 OpenScience 科研方法论、科研编程与出版级绘图闭环**
+   - **🔬 第 1 轮真盲评隔离 + 7 大模块化 OpenScience 协议（`openscience_playbooks.py`）**：首轮草稿与磁盘纪要双端严密隔离；内置 7 套可组合核心科研规约（统计规范与效能、实验设计与防伪重复、科研代码洁净与隐性评分器验收、顶刊绘图与示意图、原子声明与文献溯源、自动科研实验循环、顶刊审稿与论文撰写），支持自动匹配或一键点选注入；
+   - **📊 纯标准库顶刊科研图 QA 与 Python/R 环境探测（`figure_qa.py`）**：实时检测本机 Python（`matplotlib`/`seaborn`/`scipy`/`statsmodels`）与 R（`ggplot2`/`patchwork`/`ComplexHeatmap`/`svglite`/`ragg`）绘图栈；零第三方依赖解析二进制 TIFF 双轴 DPI 与物理毫米像素联动（识破伪造 600 DPI）、SVG 栅格陷阱与字号下限，以及面板级 Source CSV/TSV 图数一致性核验（拦截组别标签互换与原始 P 值冒充校正 `p_adj`）；
+   - **🔒 无锁哈希锁定机械验收与内容寻址溯源谱系（`research_verifier.py`、`provenance_store.py`）**：在状态锁外执行 SHA-256 锁定验收脚本（`shell=False`）与只读原始数据篡改守卫；旁路 JSONL/JSON 账本自动记录 `source → run → artifact → claim` 溯源 DAG 与 `experiment_run` 基线 Delta 对比榜；
+   - **🔄 模型额度预警与自动同角色跨模型替补（`spawn_quota_backup_member`）**：全面校准最新一代旗舰阵容（`Gemini 4 Neon` / `Gemini 4 Carbon` / `Gemini 4 Hydrogen` / `Claude Opus 5.5` / `GPT-6.2-Astra` / `GPT-6.2-Sol`）；当某模型额度快用尽或触发 429/限流时，支持自动或一键补充完全继承相同职责、专长与防幻觉 SOP 但改用不同同端/跨端模型的替补专家并无缝接力（严格遵守 `requires_shell` 路由约束）；
+   - **🛡️ Fail-Closed 审查门禁与安全信任根**：审查输出缺少合法 JSON `verdict` 时自动拦截进入 `needs_ruling`（绝不默认放行）；强制限制 `read-only`/`workspace-write` 沙箱上限、目录越界防逃逸、本机 POST CSRF 校验与 `/api/fs/raw_file` 根目录白名单。
 
-3. **极简双主题（深色 / 纸感浅色）、中英双语与真实文件预览**
-   - **✨ 专注阅读体验**：单行粘滞顶栏、深浅色一键切换、`Ctrl+K` 专家快切面板、5 套一键阵容预设（含 **OpenScience 科研发现闭环** 与 3 阶段科研流水线）；
-   - **🔔 AI 提问自动弹窗确认**：成员提出选项问题时自动弹出居中确认窗（支持右上角开关、暂收起看上下文及随时重弹）；
-   - **📎 回答内链接真实打开**：点击回答中的 `.docx` Word 稿件、`.csv` 数据表、`#L29-L35` 行号锚点、PDF、图片或外部网页链接，可直接在页内预览真实正文/表格/高亮代码行，或一键调起本机软件 / Win32 原生文件夹精确定位（完美支持含空格路径）。
+3. **极简双主题（深色 / 纸感浅色）、产物与科研图画廊、中英双语与真实文件预览**
+   - **✨ 专注阅读体验**：单行粘滞顶栏、深浅色一键切换、**15 位** OpenScience 科研 + 代码绘图 + 工程专家模板、**7 套**一键阵容预设（含 **科研代码与顶刊绘图闭环** 与 **OpenScience 自动科研实验循环**）、`Ctrl+K` 专家快切与「额度替补」弹窗；
+   - **🖼️ 产物与科研图画廊（纯白投稿底板）**：不受深色模式干扰的纯白科研图预览画布，支持 `Fit / 100% / 150%` 缩放、`SVG / PNG / PDF / TIFF` 同源切换、Before/After 并排对比、命令退出码账本、实验对比榜与溯源谱系树；
+   - **🔔 AI 提问自动弹窗与宽表/源码严格预览**：宽 CSV/TSV 预览扩容至 60 列 × 100 行并显式提示列截断；官方产物预览支持 `strict=1` 禁用同名静默回退。
 
 ### 快速启动（中文）
 
@@ -115,16 +115,20 @@
 ```text
 agy-roundtable/
 ├── prototype/
-│   ├── serve_sidebar.py          # Loopback HTTP server & local file preview/open REST API (127.0.0.1:8765)
-│   ├── sidebar_panel.html        # Bilingual (EN/ZH) anthropomorphic collaboration studio UI
-│   ├── team_runtime.py           # v4 Orchestrator (Roundtable, Chief Dispatch, Custom DAG, @Peer Consult)
-│   ├── team_state_manager.py     # Atomic state persistence & crash-recovery verification guard
-│   ├── agy_adapter.py            # Official Google Antigravity CLI stream-json worker adapter
-│   ├── codex_adapter.py          # Official OpenAI Codex CLI JSONL worker adapter + watchdog
+│   ├── serve_sidebar.py          # Loopback HTTP server, CSRF/root guard & Artifacts/Preview REST API (rev 11)
+│   ├── sidebar_panel.html        # Bilingual (EN/ZH) Studio UI + Pure-White Figure Gallery + Quota Backup modal
+│   ├── team_runtime.py           # v5 Orchestrator (Roundtable, Chief, DAG, @Consult, Auto Quota Failover)
+│   ├── team_state_manager.py     # Atomic state persistence, 15 specialist templates & orphan-PID recovery
+│   ├── figure_qa.py              # Pure-stdlib Python/R runtime probe, TIFF/PNG/SVG/PDF & Source-CSV QA
+│   ├── research_verifier.py      # Lock-free SHA-256 hash-locked acceptance verifier & readonly_inputs guard
+│   ├── openscience_playbooks.py  # 7 modular OpenScience core methodology playbooks & auto-matcher
+│   ├── provenance_store.py       # Content-addressed Provenance DAG & Experiment Baseline-vs-Delta ledger
+│   ├── agy_adapter.py            # Official Google Antigravity CLI stream-json worker adapter (stdin NDJSON)
+│   ├── codex_adapter.py          # Official OpenAI Codex CLI JSONL worker adapter + command/file ledger
 │   ├── project_discovery.py      # Cross-platform workspace & folder browser
 │   ├── team_cli.py               # CLI client & background daemon launcher
 │   ├── codex_team_mcp.py         # MCP server ('codex-team') for IDE native integration
-│   └── test_runtime_mechanisms.py# 13 automated lifecycle, Blind-R1, OpenScience & resilience unit tests
+│   └── test_runtime_mechanisms.py# 19 automated lifecycle, P0 security, Figure QA, Quota Backup & OpenScience tests
 ├── docs/
 │   └── USER_GUIDE.md             # Detailed Bilingual (EN/ZH) User Guide
 ├── Start-Roundtable.cmd          # Windows 1-click launcher

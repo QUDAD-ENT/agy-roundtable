@@ -373,12 +373,14 @@ class AgyAdapter:
             return res
         return res  # type: ignore[return-value]
 
-    def _build_workdir_index(self, raw_dir: str, max_entries: int = 85, max_depth: int = 4) -> str:
+    def _build_workdir_index(self, raw_dir: str, max_entries: int = 140, max_depth: int = 4) -> str:
         root = os.path.normpath(os.path.abspath(raw_dir))
         if not os.path.isdir(root):
             return ""
         skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", ".codex", ".idea", ".vscode"}
-        items: List[str] = []
+        priority_items: List[str] = []
+        regular_items: List[str] = []
+        priority_exts = {".svg", ".pdf", ".png", ".tif", ".tiff", ".csv", ".tsv", ".py", ".r", ".rmd", ".ipynb"}
         try:
             for cur_root, dirs, files in os.walk(root):
                 rel_dir = os.path.relpath(cur_root, root)
@@ -390,16 +392,19 @@ class AgyAdapter:
                     if fn.startswith(".") or fn.endswith((".pyc", ".tmp")):
                         continue
                     full_p = os.path.join(cur_root, fn).replace("\\", "/")
-                    items.append(f"  - {full_p}")
-                    if len(items) >= max_entries:
-                        break
-                if len(items) >= max_entries:
-                    break
+                    low_fn = fn.lower()
+                    ext = os.path.splitext(low_fn)[1]
+                    if "manifest" in low_fn or ext in priority_exts:
+                        priority_items.append(f"  - {full_p}")
+                    else:
+                        regular_items.append(f"  - {full_p}")
         except Exception:
             return ""
+        items = (priority_items + regular_items)[:max_entries]
         if not items:
             return "【当前目录文件索引】（目录为空）"
-        more = "（仅列前 85 项）" if len(items) >= max_entries else ""
+        total_found = len(priority_items) + len(regular_items)
+        more = f"（共 {total_found} 项，已优先置顶图件/Manifest/数据表/脚本并展示前 {max_entries} 项）" if total_found > max_entries else ""
         return f"【当前项目文件绝对路径索引{more}】\n" + "\n".join(items)
 
     def _build_session_settings_json(self, work_dir: str, sandbox: str) -> str:
@@ -434,9 +439,15 @@ class AgyAdapter:
         on_event: Optional[Callable[[Dict[str, Any]], None]],
         on_partial_text: Optional[Callable[[str], None]],
     ) -> CodexExecutionResult:
+        if sandbox not in ("read-only", "workspace-write"):
+            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write）: {sandbox}")
         mode = "plan" if sandbox == "read-only" else "accept-edits"
         work_dir = os.path.normpath(os.path.abspath(cwd or os.getcwd()))
-        os.makedirs(work_dir, exist_ok=True)
+        if sandbox == "read-only":
+            if not os.path.isdir(work_dir):
+                raise ValueError(f"只读工作目录不存在: {work_dir}")
+        else:
+            os.makedirs(work_dir, exist_ok=True)
         settings_json = self._build_session_settings_json(work_dir, sandbox)
 
         # Stream the prompt over stdin as NDJSON (--input-format stream-json) so Windows never hits

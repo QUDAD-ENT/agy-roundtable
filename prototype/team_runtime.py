@@ -19,7 +19,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agy_adapter import AgyAdapter
 from codex_adapter import CodexAdapter, CodexExecutionResult, get_runtime_dirs
+from figure_qa import inspect_any_figure, probe_plotting_backend, sha256_file, verify_figure_manifest
+from openscience_playbooks import auto_select_playbooks, get_playbooks_catalog, render_playbooks_prompt
 from project_discovery import browse_directory, discover_projects, pick_folder_native_dialog
+from provenance_store import TaskProvenanceStore
+from research_verifier import run_acceptance_checks, snapshot_readonly_inputs
 from team_state_manager import (
     SPECIALIST_TEMPLATES,
     STATE_FILE_PATH,
@@ -30,6 +34,105 @@ from team_state_manager import (
 
 
 SUPPORTED_CLIENTS = ("codex", "antigravity")
+_SANDBOX_RANK = {"read-only": 0, "workspace-write": 1}
+
+_QUOTA_ERROR_PATTERNS = (
+    "quota",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "429",
+    "resource_exhausted",
+    "resource exhausted",
+    "insufficient_quota",
+    "usage limit",
+    "usage_limit",
+    "credit balance",
+    "out of credits",
+    "too many requests",
+    "capacity",
+    "overloaded",
+    "额度",
+    "配额",
+    "限流",
+)
+
+_FLAGSHIP_BACKUP_PRIORITY: Dict[str, List[str]] = {
+    "antigravity": [
+        "gemini-4-neon",
+        "gemini-4-carbon",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "gemini-4-hydrogen",
+    ],
+    "codex": [
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
+    ],
+}
+
+
+def _is_quota_or_rate_limit_error(error_text: Optional[str], stderr_lines: Optional[List[str]] = None) -> bool:
+    """Detect model quota exhaustion, 429 rate-limiting, or capacity errors from CLI output."""
+    parts = [str(error_text or "")]
+    if stderr_lines:
+        parts.extend(str(x) for x in stderr_lines[-12:])
+    combined = "\n".join(parts).lower()
+    if not combined.strip():
+        return False
+    return any(pat in combined for pat in _QUOTA_ERROR_PATTERNS)
+
+
+def _strip_model_parens(name: str) -> str:
+    """Strip trailing '(Model Name)' or '[替补 · ...]' suffix so backup names stay clean."""
+    s = re.sub(r"\s*\[(?:替补|Backup)[^\]]*\]\s*$", "", (name or "").strip())
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
+    return s or (name or "").strip()
+
+
+def _short_model_id_token(model_slug: str) -> str:
+    tok = re.sub(r"[^a-z0-9]+", "_", (model_slug or "alt").lower()).strip("_")
+    return tok[:18] or "alt"
+
+
+def _effective_sandbox(ceiling: Optional[str], requested: Optional[str], read_only: bool = False) -> str:
+    """P0-0 Hard Sandbox Trust Root: strictly allow only read-only / workspace-write and clamp by ceiling."""
+    ceil_val = (ceiling or "workspace-write").strip().lower()
+    if ceil_val not in _SANDBOX_RANK:
+        raise ValueError(f"非法上限 sandbox 策略: {ceil_val}")
+    req_val = (requested or ceil_val).strip().lower()
+    if req_val not in _SANDBOX_RANK:
+        raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write，拒绝 {req_val}）")
+    if read_only:
+        return "read-only"
+    return "read-only" if min(_SANDBOX_RANK[ceil_val], _SANDBOX_RANK[req_val]) == 0 else "workspace-write"
+
+
+def _resolve_workdir(proj_root: str, rel_scope: Optional[str]) -> str:
+    """P0-0 Path-Escape Guard: resolve rel_scope under proj_root and reject .., absolute, cross-drive & symlink escapes."""
+    root_real = os.path.realpath(os.path.abspath(proj_root))
+    raw_rel = (rel_scope or ".").strip() or "."
+    if os.path.isabs(raw_rel):
+        raise ValueError(f"workspace_scope 禁止使用绝对路径: {raw_rel}")
+    cand = os.path.realpath(os.path.join(root_real, raw_rel))
+    try:
+        common = os.path.commonpath([os.path.normcase(root_real), os.path.normcase(cand)])
+    except ValueError:
+        raise ValueError(f"workspace_scope 跨盘符越界: {raw_rel}")
+    if common != os.path.normcase(root_real):
+        raise ValueError(f"workspace_scope 越出绑定项目目录: {raw_rel}")
+    return cand
+
+
+def _write_sidecar_ledger(task_id: str, attempt_id: str, payload: Dict[str, Any]) -> str:
+    """P0-2 Lock-free sidecar JSONL ledger so team_state.json stays compact without O(N^2) bloat."""
+    tmp_dir, _ = get_runtime_dirs()
+    ledger_dir = os.path.join(tmp_dir, "team_ledgers", task_id)
+    os.makedirs(ledger_dir, exist_ok=True)
+    ledger_path = os.path.join(ledger_dir, f"{attempt_id}.jsonl")
+    with open(ledger_path, "w", encoding="utf-8") as lf:
+        lf.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    return ledger_path
 
 
 def _new_id(prefix: str) -> str:
@@ -115,11 +218,17 @@ def _build_model_family_tuning(client: str, model: str) -> str:
             "- 遵循 OpenScience 原则：严禁以“无法确定/观察性数据无法推断”为借口回避机理与转化解读；请在给出客观实证后，显式以 `[机制假说/深度外推]` 提出可证伪机制与下一步判别实验。\n"
             "</dialect_calibration>"
         )
-    if "flash" in low_m:
+    if "hydrogen" in low_m or "flash" in low_m:
         return (
-            "【模型族协同调优 · Gemini Flash 极速勘察模式】\n"
+            "【模型族协同调优 · Gemini 4 Hydrogen 极速勘察模式】\n"
             "- 发挥极速多文件并行扫描优势（借鉴 OpenScience explore.txt）：优先并行读取关键文件、数据表与核心符号，输出紧凑的《证据索引卡》。\n"
             "- 严格逐条给出精确路径、行号、原样数值与单位，明确区分 `[实证观察]`、推断与证据缺口；零过程废话，文末给出 1~3 条最关键发现与最小下一步动作。"
+        )
+    if "carbon" in low_m:
+        return (
+            "【模型族协同调优 · Gemini 4 Carbon 顶刊绘图架构与视觉质检模式】\n"
+            "- 发挥高密度多模态/空间版面推理与科研绘图架构优势（对齐 Nature/Science/Cell 投稿规范）：逐项审查图件版面网格（单栏 89mm / 双栏 183mm）、字体层级（≥6pt/7pt 最终尺寸）、色盲友好调色板（Okabe-Ito / viridis / 灰度可辨）、纯白底板对比度、误差棒与 n 值标注完整性。\n"
+            "- 严查图数一致性：交叉比对图件坐标轴/显著性星号与原始冻结 CSV/TSV 中的 `p_adj`/`FDR`/组别标签，明确区分 `BLOCKING`（阻断投稿的数据错位、DPI 伪造、字号重叠）与 `OBSERVATION`（审美与排版优化）。"
         )
     if "gemini" in low_m or (low_c == "antigravity" and "oss" not in low_m):
         return (
@@ -127,10 +236,16 @@ def _build_model_family_tuning(client: str, model: str) -> str:
             "- 发挥超长上下文全局映射与跨学科综合优势（借鉴 OpenScience brainstorming/hypotheses + AI Co-Scientist）：先测绘全局事实与矛盾点，再使用 5 类创新算子（Gap / Transfer / Inversion / Constraint / Failure）生成正交备选路线。\n"
             "- 综合多方观点时请输出清晰的【多维仲裁矩阵】，在收敛主推荐方案的同时保留具有独特机理价值的亚军路径与最小判别实验，切勿抹平多样性。"
         )
+    if "astra" in low_m:
+        return (
+            "【模型族协同调优 · GPT-6.2-Astra OpenScience 行动执行与高密核验模式 (gpt-astra.txt)】\n"
+            "- 发挥 GPT-6.2-Astra 高自主深度执行优势：结论先行、并行执行独立只读/计算工具调用、改前必读文件；不写“不是X而是Y”等空洞铺垫，不做半途敷衍的“够用就行”答案。\n"
+            "- 遵循 OpenScience specialist 交接格式（仅保留有实质内容的节）：Outcome / Findings / Evidence / Changes & Outputs / Verification（精确命令+退出码+所证结论）/ Limitations / Next Action。"
+        )
     return (
-        "【模型族协同调优 · Codex / GPT 工具先行与机械验收模式】\n"
-        "- 发挥精确代码/数据执行与机械核验优势（借鉴 OpenScience codex.txt + acceptance-checks）：先读文件、并行检索、对关键数值/边界条件做独立复算，绝不凭直觉猜测。\n"
-        "- 工程与分析坚持最小精准改动原则：不破坏已有有效变更；修改或计算后必须复跑验收检查并明确区分已实测验证区间与未覆盖边界。"
+        "【模型族协同调优 · Codex / GPT-6.2-Sol 工具先行与机械验收模式 (codex.txt + acceptance-checks)】\n"
+        "- 发挥精确代码/数据执行与机械核验优势：先读文件、并行检索、对关键数值/边界条件做独立复算，绝不凭直觉猜测。\n"
+        "- 工程与分析坚持非破坏性重跑与最小精准改动原则（不覆盖原数据目录）；修改或计算后必须复跑验收检查并明确区分已实测验证区间与未覆盖边界。"
     )
 
 
@@ -239,6 +354,7 @@ class TeamOrchestrator:
         self._stop_event = threading.Event()
         self._running_attempts: Dict[str, Dict[str, Any]] = {}
         self._scheduler_thread: Optional[threading.Thread] = None
+        self._plotting_backends_cache: Optional[Tuple[float, Dict[str, Any]]] = None
         if auto_start_scheduler:
             self.start_scheduler()
 
@@ -405,6 +521,7 @@ class TeamOrchestrator:
         remote_control_url: Optional[str] = None,
         max_concurrency: Optional[int] = None,
         default_max_auto_repairs: Optional[int] = None,
+        auto_spawn_quota_backup: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if project_path is not None:
             self.switch_project(project_path)
@@ -420,6 +537,8 @@ class TeamOrchestrator:
             if default_max_auto_repairs is not None:
                 mr = max(0, min(5, int(default_max_auto_repairs)))
                 st.setdefault("settings", {})["default_max_auto_repairs"] = mr
+            if auto_spawn_quota_backup is not None:
+                st.setdefault("settings", {})["auto_spawn_quota_backup"] = bool(auto_spawn_quota_backup)
             return b
 
         res = self.store.mutate(_upd)
@@ -469,6 +588,7 @@ class TeamOrchestrator:
     def get_specialist_catalog(self) -> Dict[str, Any]:
         return {
             "templates": SPECIALIST_TEMPLATES,
+            "openscience_playbooks": get_playbooks_catalog(),
             "squad_presets": [
                 {
                     "id": "openscience_discovery",
@@ -480,6 +600,33 @@ class TeamOrchestrator:
                     "rounds": 2,
                     "sandbox": "read-only",
                     "preferred_tags": ["openscience", "hypothesis", "review", "fact_check"],
+                    "playbooks": ["experimental_design", "statistical_rigor"],
+                    "target_count": 4,
+                },
+                {
+                    "id": "scientific_coding_plotting",
+                    "name_zh": "科研代码与顶刊绘图闭环",
+                    "name_en": "Scientific Code & Publication Plots",
+                    "desc_zh": "GPT-6.2-Astra/Sol 编写并跑通 Python/R 统计与出版级矢量/600DPI 绘图 → Gemini 4 Carbon + Claude Opus 5.5 视觉与数据联合审稿",
+                    "desc_en": "GPT-6.2 scientific coding & vector/600-DPI plotting + Gemini 4 Carbon & Claude Opus 5.5 visual/statistical QA",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "workspace-write",
+                    "preferred_tags": ["plotting", "openscience", "implementation", "review"],
+                    "playbooks": ["publication_figures_schematics", "execution_hygiene_code"],
+                    "target_count": 4,
+                },
+                {
+                    "id": "openscience_autoresearch",
+                    "name_zh": "OpenScience 自动科研实验循环",
+                    "name_en": "OpenScience Autoresearch Loop",
+                    "desc_zh": "锁定单一北极星指标与基线 (Baseline) → 假设驱动消融/调优实验 → 对比 Delta 榜与内容寻址溯源谱系",
+                    "desc_en": "Single-metric baseline + hypothesis-driven experiment queue + delta ledger & provenance DAG",
+                    "mode": "roundtable",
+                    "rounds": 2,
+                    "sandbox": "workspace-write",
+                    "preferred_tags": ["openscience", "implementation", "fact_check", "review"],
+                    "playbooks": ["autoresearch_loop", "execution_hygiene_code"],
                     "target_count": 4,
                 },
                 {
@@ -533,6 +680,542 @@ class TeamOrchestrator:
             ],
         }
 
+    def get_plotting_backends(self, refresh: bool = False) -> Dict[str, Any]:
+        """Return cached live Python (matplotlib/seaborn) & R (ggplot2/patchwork/ComplexHeatmap) runtime status."""
+        now = time.time()
+        if not refresh and self._plotting_backends_cache and (now - self._plotting_backends_cache[0]) < 60.0:
+            return self._plotting_backends_cache[1]
+        data = probe_plotting_backend("all")
+        data["probed_at"] = now
+        self._plotting_backends_cache = (now, data)
+        return data
+
+    def get_task_artifacts(self, task_id: str) -> Dict[str, Any]:
+        """P0-5 Version-bound task artifacts, execution ledgers, scientific figure groups & source tables (lock-free)."""
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        proj_abs = os.path.realpath(os.path.abspath(task.get("project_path") or snap["binding"]["project_path"]))
+        root_nc = os.path.normcase(proj_abs)
+        tmp_dir, _ = get_runtime_dirs()
+        ledger_dir = os.path.join(tmp_dir, "team_ledgers", task_id)
+
+        def _within_proj(cand_abs: str) -> bool:
+            try:
+                return os.path.commonpath([root_nc, os.path.normcase(cand_abs)]) == root_nc
+            except ValueError:
+                return False
+
+        def _to_rel(raw_p: str) -> Optional[str]:
+            if not raw_p or not str(raw_p).strip():
+                return None
+            p_str = str(raw_p).strip()
+            cand = os.path.realpath(p_str if os.path.isabs(p_str) else os.path.join(proj_abs, p_str))
+            if not _within_proj(cand) or not os.path.isfile(cand):
+                return None
+            return os.path.relpath(cand, proj_abs).replace("\\", "/")
+
+        attempts_ledger: List[Dict[str, Any]] = []
+        changed_rel_set: set = set()
+        for step in task.get("steps", []):
+            mid = step.get("member_id", "")
+            mname = snap.get("members", {}).get(mid, {}).get("name", mid)
+            for att in step.get("attempts", []):
+                aid = att.get("attempt_id", "")
+                l_path = os.path.join(ledger_dir, f"{aid}.jsonl")
+                cmd_logs: List[Dict[str, Any]] = []
+                chg_files: List[Dict[str, Any]] = []
+                edit_after = False
+                if os.path.isfile(l_path):
+                    try:
+                        with open(l_path, "r", encoding="utf-8", errors="replace") as lf:
+                            line = lf.readline().strip()
+                            if line:
+                                obj = json.loads(line)
+                                cmd_logs = list(obj.get("command_logs") or [])
+                                chg_files = list(obj.get("changed_files") or [])
+                                edit_after = bool(obj.get("edit_after_check", False))
+                    except Exception:
+                        pass
+                for cf in chg_files:
+                    rel = _to_rel(cf.get("path", ""))
+                    if rel:
+                        changed_rel_set.add(rel)
+                attempts_ledger.append(
+                    {
+                        "attempt_id": aid,
+                        "step_index": step.get("step_index"),
+                        "step_title": step.get("title", ""),
+                        "member_id": mid,
+                        "member_name": mname,
+                        "status": att.get("status"),
+                        "ended_at": att.get("ended_at"),
+                        "edit_after_check": edit_after,
+                        "command_logs": cmd_logs,
+                        "changed_files": chg_files,
+                        "ledger_summary": att.get("ledger_summary"),
+                    }
+                )
+
+        # Collect manifests (declared + changed + top-level / figures / outputs / plots)
+        manifest_rels: List[str] = []
+        seen_mf: set = set()
+
+        def _add_mf(rel: Optional[str]) -> None:
+            if rel and rel not in seen_mf:
+                seen_mf.add(rel)
+                manifest_rels.append(rel)
+
+        rspec = task.get("research_spec") if isinstance(task.get("research_spec"), dict) else {}
+        for m_rel in rspec.get("figure_manifests") or []:
+            _add_mf(_to_rel(str(m_rel)))
+        for rel in sorted(changed_rel_set):
+            if rel.lower().endswith(".json") and "manifest" in os.path.basename(rel).lower():
+                _add_mf(rel)
+        for sub in ("", "figures", "plots", "outputs", "figs"):
+            dpath = os.path.join(proj_abs, sub) if sub else proj_abs
+            if os.path.isdir(dpath):
+                try:
+                    for fn in sorted(os.listdir(dpath)):
+                        if fn.lower().endswith(".json") and "manifest" in fn.lower():
+                            _add_mf(_to_rel(os.path.join(dpath, fn)))
+                except Exception:
+                    pass
+
+        signoff = task.get("research_signoff") if isinstance(task.get("research_signoff"), dict) else None
+        qa_by_mf: Dict[str, Dict[str, Any]] = {}
+        if signoff:
+            for fr in signoff.get("figure_reports") or []:
+                mp = str(fr.get("manifest_path") or "")
+                rel_mp = _to_rel(mp) if mp else None
+                if rel_mp:
+                    qa_by_mf[rel_mp] = fr
+
+        manifests_out: List[Dict[str, Any]] = []
+        manifest_fig_meta: Dict[str, Dict[str, Any]] = {}
+        manifest_tables: set = set()
+        for m_rel in manifest_rels[:12]:
+            m_abs = os.path.join(proj_abs, m_rel)
+            parsed_m: Dict[str, Any] = {}
+            try:
+                with open(m_abs, "r", encoding="utf-8") as mf:
+                    parsed_m = json.load(mf)
+            except Exception:
+                parsed_m = {}
+            qa_rep = qa_by_mf.get(m_rel)
+            manifests_out.append(
+                {
+                    "rel_path": m_rel,
+                    "figure_id": parsed_m.get("figure_id") or os.path.splitext(os.path.basename(m_rel))[0],
+                    "title": parsed_m.get("title") or "",
+                    "backend": parsed_m.get("backend") or "",
+                    "qa_report": qa_rep,
+                }
+            )
+            src_tables_m: List[str] = []
+            for p_obj in (parsed_m.get("panel_sources") or parsed_m.get("panels") or []):
+                if isinstance(p_obj, dict):
+                    raw_tbl = p_obj.get("source_table") or p_obj.get("source_data")
+                    if raw_tbl:
+                        t_rel = _to_rel(str(raw_tbl))
+                        if t_rel:
+                            manifest_tables.add(t_rel)
+                            if t_rel not in src_tables_m:
+                                src_tables_m.append(t_rel)
+            raw_exp = parsed_m.get("exports") or parsed_m.get("outputs") or {}
+            exp_vals = [x.get("path") for x in raw_exp if isinstance(x, dict)] if isinstance(raw_exp, list) else (
+                [(v.get("path") if isinstance(v, dict) else v) for v in raw_exp.values()] if isinstance(raw_exp, dict) else []
+            )
+            for f_raw in exp_vals:
+                if not f_raw:
+                    continue
+                f_rel = _to_rel(str(f_raw))
+                if f_rel:
+                    manifest_fig_meta[f_rel] = {
+                        "manifest_rel": m_rel,
+                        "figure_id": parsed_m.get("figure_id") or "",
+                        "title": parsed_m.get("title") or "",
+                        "source_tables": src_tables_m,
+                        "qa_ok": qa_rep.get("ok") if isinstance(qa_rep, dict) else None,
+                    }
+
+        # Discover figure files & CSV/TSV tables (changed/manifest first, then workspace figure dirs)
+        fig_exts = {".svg", ".pdf", ".png", ".tif", ".tiff", ".jpg", ".jpeg"}
+        tbl_exts = {".csv", ".tsv"}
+        fig_sources: Dict[str, str] = {}
+        tbl_sources: Dict[str, str] = {}
+
+        for rel in manifest_fig_meta:
+            fig_sources[rel] = "manifest"
+        for rel in manifest_tables:
+            tbl_sources[rel] = "manifest"
+        for rel in sorted(changed_rel_set):
+            ext = os.path.splitext(rel)[1].lower()
+            if ext in fig_exts and rel not in fig_sources:
+                fig_sources[rel] = "changed"
+            elif ext in tbl_exts and rel not in tbl_sources:
+                tbl_sources[rel] = "changed"
+
+        # Bounded workspace scan (max 50 figure files + 30 tables across common scientific output dirs)
+        for sub in ("", "figures", "plots", "outputs", "figs", "data", "results"):
+            dpath = os.path.join(proj_abs, sub) if sub else proj_abs
+            if not os.path.isdir(dpath):
+                continue
+            try:
+                for fn in sorted(os.listdir(dpath)):
+                    fp = os.path.join(dpath, fn)
+                    if not os.path.isfile(fp):
+                        continue
+                    ext = os.path.splitext(fn)[1].lower()
+                    rel = _to_rel(fp)
+                    if not rel:
+                        continue
+                    if ext in fig_exts and rel not in fig_sources and len(fig_sources) < 50:
+                        fig_sources[rel] = "workspace"
+                    elif ext in tbl_exts and rel not in tbl_sources and len(tbl_sources) < 30:
+                        tbl_sources[rel] = "workspace"
+            except Exception:
+                pass
+
+        # Group figure files by (dir, stem) so SVG/PDF/PNG/TIFF stay unified in one publication card
+        groups_map: Dict[str, Dict[str, Any]] = {}
+        fmt_order = {"svg": 0, "png": 1, "pdf": 2, "tiff": 3, "tif": 4, "jpg": 5, "jpeg": 6}
+        for rel, src_tag in fig_sources.items():
+            abs_p = os.path.join(proj_abs, rel)
+            stem_key = os.path.splitext(rel)[0]
+            ext_clean = os.path.splitext(rel)[1].lstrip(".").lower()
+            fmt_key = "tiff" if ext_clean == "tif" else ext_clean
+            insp = inspect_any_figure(abs_p)
+            st_stat = os.stat(abs_p)
+            mmeta = manifest_fig_meta.get(rel, {})
+            grp = groups_map.setdefault(
+                stem_key,
+                {
+                    "id": stem_key,
+                    "stem": os.path.basename(stem_key),
+                    "dir": os.path.dirname(rel) or ".",
+                    "title": mmeta.get("title") or os.path.basename(stem_key),
+                    "figure_id": mmeta.get("figure_id") or os.path.basename(stem_key),
+                    "manifest_rel": mmeta.get("manifest_rel") or "",
+                    "qa_ok": mmeta.get("qa_ok"),
+                    "source": src_tag,
+                    "source_tables": list(mmeta.get("source_tables") or []),
+                    "mtime": st_stat.st_mtime,
+                    "formats": {},
+                },
+            )
+            if src_tag == "manifest" or (src_tag == "changed" and grp["source"] == "workspace"):
+                grp["source"] = src_tag
+            if mmeta.get("title") and grp["title"] == grp["stem"]:
+                grp["title"] = mmeta["title"]
+            if mmeta.get("manifest_rel") and not grp["manifest_rel"]:
+                grp["manifest_rel"] = mmeta["manifest_rel"]
+            if mmeta.get("qa_ok") is not None:
+                grp["qa_ok"] = mmeta["qa_ok"]
+            for stbl in mmeta.get("source_tables") or []:
+                if stbl not in grp["source_tables"]:
+                    grp["source_tables"].append(stbl)
+            grp["mtime"] = max(grp["mtime"], st_stat.st_mtime)
+            grp["formats"][fmt_key] = {
+                "format": fmt_key,
+                "rel_path": rel,
+                "size": st_stat.st_size,
+                "mtime": st_stat.st_mtime,
+                "inspect": insp,
+            }
+
+        # Attach matching stem CSV/TSV source tables if not already linked
+        for grp in groups_map.values():
+            stem_low = grp["stem"].lower()
+            for t_rel in tbl_sources:
+                t_base = os.path.splitext(os.path.basename(t_rel))[0].lower()
+                if (t_base == stem_low or t_base.startswith(stem_low + "_")) and t_rel not in grp["source_tables"]:
+                    grp["source_tables"].append(t_rel)
+            grp["format_list"] = sorted(grp["formats"].keys(), key=lambda x: fmt_order.get(x, 99))
+
+        src_priority = {"manifest": 0, "changed": 1, "workspace": 2}
+        figures_out = sorted(
+            groups_map.values(),
+            key=lambda g: (src_priority.get(g["source"], 9), -g["mtime"], g["id"]),
+        )
+        tables_out = [
+            {
+                "rel_path": t_rel,
+                "name": os.path.basename(t_rel),
+                "source": t_src,
+                "size": os.path.getsize(os.path.join(proj_abs, t_rel)),
+                "mtime": os.path.getmtime(os.path.join(proj_abs, t_rel)),
+            }
+            for t_rel, t_src in sorted(tbl_sources.items(), key=lambda kv: (src_priority.get(kv[1], 9), kv[0]))
+        ]
+        return {
+            "task_id": task_id,
+            "project_path": proj_abs,
+            "openscience_playbooks": list(task.get("openscience_playbooks") or []),
+            "research_spec": task.get("research_spec"),
+            "research_signoff": signoff,
+            "attempts_ledger": attempts_ledger,
+            "figures": figures_out,
+            "tables": tables_out,
+            "manifests": manifests_out,
+            "provenance": self.get_task_provenance(task_id),
+        }
+
+    def get_task_provenance(self, task_id: str) -> Dict[str, Any]:
+        """Return OpenScience content-addressed Provenance DAG (nodes + edges) & Experiment Runs."""
+        tmp_dir, _ = get_runtime_dirs()
+        store = TaskProvenanceStore(os.path.join(tmp_dir, "team_ledgers"), task_id)
+        return store.get_summary()
+
+    def verify_task_figure(self, task_id: str, manifest_path: str) -> Dict[str, Any]:
+        """Run lock-free publication-grade figure_qa.verify_figure_manifest on a task's manifest."""
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        proj_abs = os.path.realpath(os.path.abspath(task.get("project_path") or snap["binding"]["project_path"]))
+        mf_abs = _resolve_workdir(proj_abs, manifest_path)
+        if not os.path.isfile(mf_abs):
+            raise ValueError(f"图件契约文件不存在: {manifest_path}")
+        report = verify_figure_manifest(mf_abs, proj_abs)
+        report["verified_at"] = time.time()
+
+        def _save_qa(st: Dict[str, Any]) -> None:
+            t = self._find_task(st, task_id)
+            so = t.get("research_signoff")
+            if not isinstance(so, dict):
+                so = {
+                    "ok": bool(report.get("ok")),
+                    "status": "passed" if report.get("ok") else "failed",
+                    "mode": "manual_figure_qa",
+                    "checks": [],
+                    "figure_reports": [],
+                    "blocking": list(report.get("blocking") or []),
+                    "observations": list(report.get("observations") or []),
+                    "verified_at": report["verified_at"],
+                }
+                t["research_signoff"] = so
+            reports = [r for r in (so.get("figure_reports") or []) if r.get("manifest_path") != report.get("manifest_path")]
+            reports.append(report)
+            so["figure_reports"] = reports
+            if not report.get("ok"):
+                so["ok"] = False
+                so["status"] = "failed"
+                for b in report.get("blocking") or []:
+                    msg = f"[Figure QA] {b}"
+                    if msg not in so.setdefault("blocking", []):
+                        so["blocking"].append(msg)
+            t["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "figure.qa",
+                    "summary": f"科研图质检 {'通过' if report.get('ok') else '发现阻断项'}: {os.path.basename(mf_abs)}",
+                }
+            )
+            t["updated_at"] = time.time()
+
+        self.store.mutate(_save_qa)
+        return report
+
+    def list_backup_candidates(
+        self,
+        source_member_id: str,
+        require_same_client: bool = False,
+        prefer_cross_engine: bool = False,
+    ) -> Dict[str, Any]:
+        """Rank live alternative models (excluding source model & gpt-6.1-terra) for role-preserving quota backup."""
+        snap = self.store.snapshot()
+        mem = snap.get("members", {}).get(source_member_id)
+        if not mem:
+            raise ValueError(f"成员不存在: {source_member_id}")
+        caps = self.get_capabilities(refresh_cli=False)
+        src_client = mem.get("client", "codex")
+        src_model = (mem.get("model") or "").strip().lower()
+        src_effort = mem.get("reasoning_effort") or "high"
+        other_client = "antigravity" if src_client == "codex" else "codex"
+        client_order = [src_client] if require_same_client else (
+            [other_client, src_client] if prefer_cross_engine else [src_client, other_client]
+        )
+
+        candidates: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+        for cl in client_order:
+            avail = (caps.get("clients") or {}).get(cl, {}).get("models") or []
+            by_slug = {m.get("slug"): m for m in avail if m.get("slug")}
+            prio = list(_FLAGSHIP_BACKUP_PRIORITY.get(cl, []))
+            # Append any remaining live non-terra models on this client
+            for m in avail:
+                sl = m.get("slug") or ""
+                if sl and sl not in prio and "terra" not in sl.lower():
+                    prio.append(sl)
+            for slug in prio:
+                if "terra" in slug.lower():
+                    continue
+                if cl == src_client and slug.lower() == src_model:
+                    continue
+                mobj = by_slug.get(slug)
+                if not mobj:
+                    continue
+                key = (cl, slug)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                effs = mobj.get("supported_reasoning_efforts") or []
+                eff = src_effort if src_effort in effs else (
+                    "high" if "high" in effs else (mobj.get("default_reasoning_effort") or (effs[0] if effs else "medium"))
+                )
+                candidates.append(
+                    {
+                        "client": cl,
+                        "model": slug,
+                        "display_name": mobj.get("display_name") or slug,
+                        "reasoning_effort": eff,
+                        "supported_reasoning_efforts": effs,
+                        "same_engine": cl == src_client,
+                    }
+                )
+        return {
+            "source_member_id": source_member_id,
+            "source_client": src_client,
+            "source_model": mem.get("model"),
+            "candidates": candidates,
+            "recommended": candidates[0] if candidates else None,
+        }
+
+    def spawn_quota_backup_member(
+        self,
+        source_member_id: str,
+        new_client: Optional[str] = None,
+        new_model: Optional[str] = None,
+        new_effort: Optional[str] = None,
+        prefer_cross_engine: bool = False,
+        task_id: Optional[str] = None,
+        step_index: Optional[int] = None,
+        auto_reassign: bool = False,
+        reason: str = "模型额度预警，补充同角色跨模型替补",
+    ) -> Dict[str, Any]:
+        """Spawn (or reuse idle) backup specialist inheriting 100% of source role/persona/grounding on a different model."""
+        snap = self.store.snapshot()
+        src_mem = snap.get("members", {}).get(source_member_id)
+        if not src_mem:
+            raise ValueError(f"原专家不存在: {source_member_id}")
+
+        req_same_client = False
+        if task_id is not None and step_index is not None:
+            try:
+                t_chk = self._find_task(snap, task_id)
+                s_chk = t_chk["steps"][int(step_index)]
+                req_same_client = bool(s_chk.get("requires_shell", False))
+            except Exception:
+                pass
+
+        cands_info = self.list_backup_candidates(
+            source_member_id,
+            require_same_client=req_same_client,
+            prefer_cross_engine=prefer_cross_engine,
+        )
+        cands = cands_info.get("candidates") or []
+
+        if new_model:
+            chosen_client = (new_client or src_mem.get("client", "codex")).strip().lower()
+            if chosen_client not in SUPPORTED_CLIENTS:
+                raise ValueError(f"不支持的替补引擎: {chosen_client}")
+            if chosen_client == src_mem.get("client") and new_model.strip().lower() == str(src_mem.get("model", "")).lower():
+                raise ValueError("替补角色必须使用与原角色不同的模型（或跨引擎模型）")
+            if req_same_client and chosen_client == "antigravity":
+                raise ValueError("当前步骤需要 Shell/脚本执行权限，替补必须选用 Codex 引擎下的不同模型")
+            matched_c = next((c for c in cands if c["client"] == chosen_client and c["model"] == new_model), None)
+            chosen_model = new_model.strip()
+            chosen_effort = new_effort or (matched_c["reasoning_effort"] if matched_c else (src_mem.get("reasoning_effort") or "high"))
+            chosen_disp = matched_c["display_name"] if matched_c else chosen_model
+            self._validate_client_model_effort(chosen_client, chosen_model, chosen_effort)
+        else:
+            if not cands:
+                raise ValueError("当前没有可用的不同旗舰模型可作为额度替补")
+            rec = cands[0]
+            chosen_client = rec["client"]
+            chosen_model = rec["model"]
+            chosen_effort = new_effort or rec["reasoning_effort"]
+            chosen_disp = rec["display_name"]
+
+        def _spawn(st: Dict[str, Any]) -> Dict[str, Any]:
+            src = st["members"].get(source_member_id)
+            if not src:
+                raise ValueError(f"原专家不存在: {source_member_id}")
+            # Reuse existing idle backup with exact same source + target (client, model) to avoid clutter
+            for ex_id, ex_m in st["members"].items():
+                if (
+                    ex_m.get("backup_of") == source_member_id
+                    and ex_m.get("client") == chosen_client
+                    and ex_m.get("model") == chosen_model
+                    and ex_m.get("status") != "working"
+                ):
+                    # Refresh inherited persona/specialty in case source was tuned
+                    ex_m["role"] = src.get("role", ex_m.get("role"))
+                    ex_m["specialty"] = src.get("specialty", "")
+                    ex_m["persona_prompt"] = src.get("persona_prompt", "")
+                    ex_m["grounding_mode"] = src.get("grounding_mode", "strict")
+                    ex_m["tags"] = list(src.get("tags") or [])
+                    ex_m["reasoning_effort"] = chosen_effort
+                    ex_m["backup_reason"] = reason
+                    return {"member": ex_m, "reused": True}
+
+            base_token = _short_model_id_token(chosen_model)
+            root_id = src.get("backup_of") or source_member_id
+            cand_id = f"{root_id}_bk_{base_token}"
+            seq = 2
+            while cand_id in st["members"]:
+                cand_id = f"{root_id}_bk_{base_token}_{seq}"
+                seq += 1
+
+            base_name = _strip_model_parens(src.get("name") or source_member_id)
+            bk_name = f"{base_name} [替补 · {chosen_disp}]"
+            eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), src.get("sandbox", "read-only"))
+            new_mem = {
+                "id": cand_id,
+                "name": bk_name,
+                "role": src.get("role", "implementation"),
+                "client": chosen_client,
+                "model": chosen_model,
+                "reasoning_effort": chosen_effort,
+                "specialty": src.get("specialty", ""),
+                "persona_prompt": src.get("persona_prompt", ""),
+                "grounding_mode": src.get("grounding_mode", "strict"),
+                "tags": list(src.get("tags") or []),
+                "workspace_scope": src.get("workspace_scope", "."),
+                "sandbox": eff_sb,
+                "backup_of": source_member_id,
+                "backup_reason": reason,
+                "session_id": None,
+                "session_history": [],
+                "config_history": [
+                    {
+                        "changed_at": time.time(),
+                        "from": {"source_member_id": source_member_id, "client": src.get("client"), "model": src.get("model")},
+                        "to": {"client": chosen_client, "model": chosen_model, "reasoning_effort": chosen_effort},
+                        "reason": reason,
+                    }
+                ],
+                "pending_config": None,
+                "status": "idle",
+                "live_activity": "",
+                "current_task_id": None,
+                "current_attempt_id": None,
+            }
+            enrich_member_metadata(new_mem)
+            st["members"][cand_id] = new_mem
+            return {"member": new_mem, "reused": False}
+
+        out = self.store.mutate(_spawn)
+        bk_id = out["member"]["id"]
+
+        if auto_reassign and task_id is not None and step_index is not None:
+            reassigned_task = self.reassign_step(
+                task_id=task_id,
+                step_index=int(step_index),
+                new_member_id=bk_id,
+                reason=f"模型额度预警/耗尽，自动交接同角色替补 {out['member']['name']} ({chosen_client}/{chosen_model})",
+            )
+            out["task"] = reassigned_task
+        return out
+
     def optimize_roster(self, apply_names: bool = True, refresh_cli: bool = False) -> Dict[str, Any]:
         """Auto-calibrate all idle members against live CLI capabilities & benchmark-proven OpenScience/Engineering roles."""
         caps = self.get_capabilities(refresh_cli=refresh_cli)
@@ -567,26 +1250,58 @@ class TeamOrchestrator:
             low = mid.lower()
             client = mem.get("client", "codex")
             role = mem.get("role", "implementation")
-            if "flash" in low or "scout" in low:
-                return "openscience_scout", "极速证据勘察员 (Gemini 3.8 Flash)"
+            if "carbon" in low or "visual" in low:
+                return "visual_figure_qa", "科研绘图架构与视觉质检官 (Gemini 4 Carbon)"
+            if "flash" in low or "scout" in low or "hydrogen" in low:
+                return "openscience_scout", "极速证据勘察员 (Gemini 4 Hydrogen)"
             if client == "antigravity" and (role == "review" or "claude" in low or "review" in low):
-                return "journal_reviewer", "顶刊方法学审稿官 (Claude Opus 5.5)"
+                return "journal_reviewer", "顶刊方法学与代码审稿官 (Claude Opus 5.5)"
             if client == "antigravity" and ("gemini" in low or "pi" in low or role == "implementation"):
                 return "openscience_pi", "OpenScience 科研首席 (Gemini 4 Neon)"
             if client == "codex" and (role == "review" or "review" in low or "fact" in low):
-                return "fact_checker", "红队事实核查官 (Codex Auto Review)"
+                return "fact_checker", "红队事实核查与代码安全官 (GPT-6.2-Astra)"
             if role == "documentation" or "doc" in low or "writ" in low:
-                return "academic_strategist", "学术撰写与交付官 (GPT-6.1 Terra)"
+                return "academic_strategist", "学术撰写与交付策略官 (GPT-6.2-Sol)"
+            if "plot" in low:
+                return "scientific_plotter", "顶刊科研代码绘图专家 (GPT-6.2-Astra)"
             if "2" in low or "stat" in low or "data" in low or "biostat" in low:
-                return "biostat_auditor", "统计与数据复算官 (GPT-6 Astra)"
-            return "openscience_experimenter", "实验与工程实施官 (GPT-6.1 Sol)"
+                return "biostat_auditor", "统计复算与顶刊科研绘图官 (GPT-6.2-Astra)"
+            return "openscience_experimenter", "科研代码与可复现工程官 (GPT-6.2-Sol)"
 
         changes: List[Dict[str, Any]] = []
         skipped: List[str] = []
 
         def _opt(st: Dict[str, Any]) -> Dict[str, Any]:
+            # Ensure Gemini 4 Carbon visual/figure QA specialist seat exists if available in Antigravity!
+            agy_slugs = {m.get("slug") for m in (caps.get("clients") or {}).get("antigravity", {}).get("models", [])}
+            if "gemini-4-carbon" in agy_slugs and "agy_carbon_plotter" not in st.get("members", {}):
+                vtpl = tpl_map.get("visual_figure_qa") or SPECIALIST_TEMPLATES[0]
+                st.setdefault("members", {})["agy_carbon_plotter"] = {
+                    "id": "agy_carbon_plotter",
+                    "name": "科研绘图架构与视觉质检官 (Gemini 4 Carbon)",
+                    "role": "review",
+                    "client": "antigravity",
+                    "model": "gemini-4-carbon",
+                    "reasoning_effort": "high",
+                    "specialty": vtpl["specialty_zh"],
+                    "persona_prompt": vtpl["persona_prompt"],
+                    "grounding_mode": "strict",
+                    "tags": list(vtpl["tags"]),
+                    "workspace_scope": ".",
+                    "sandbox": "read-only",
+                    "session_id": None,
+                    "session_history": [],
+                    "config_history": [],
+                    "pending_config": None,
+                    "status": "idle",
+                    "live_activity": "",
+                    "current_task_id": None,
+                    "current_attempt_id": None,
+                }
             for mid, mem in st.get("members", {}).items():
                 if mem.get("client") not in SUPPORTED_CLIENTS:
+                    continue
+                if mem.get("backup_of"):
                     continue
                 if mem.get("status") == "working":
                     skipped.append(mid)
@@ -678,7 +1393,7 @@ class TeamOrchestrator:
         client = client.strip().lower()
         if client not in SUPPORTED_CLIENTS:
             raise ValueError(f"不支持的客户端: {client}")
-        use_model = model or ("gpt-6.1-sol" if client == "codex" else "gemini-4-carbon")
+        use_model = model or ("gpt-6.2-sol" if client == "codex" else "gemini-4-carbon")
         self._validate_client_model_effort(client, use_model, reasoning_effort)
 
         def _upd(st: Dict[str, Any]) -> Dict[str, Any]:
@@ -691,6 +1406,9 @@ class TeamOrchestrator:
             if gm not in ("strict", "balanced"):
                 gm = "strict"
             clean_tags = [str(x).strip() for x in (tags if tags is not None else (existing.get("tags") if existing else [])) if str(x).strip()]
+            clean_scope = workspace_scope.strip() or "."
+            _resolve_workdir(st["binding"]["project_path"], clean_scope)
+            eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), sandbox)
             new_mem = {
                 "id": member_id,
                 "name": (name or (existing.get("name") if existing else member_id)).strip(),
@@ -702,8 +1420,8 @@ class TeamOrchestrator:
                 "persona_prompt": (persona_prompt if persona_prompt is not None else (existing.get("persona_prompt", "") if existing else "")).strip(),
                 "grounding_mode": gm,
                 "tags": clean_tags,
-                "workspace_scope": workspace_scope.strip() or ".",
-                "sandbox": sandbox if sandbox in ("read-only", "workspace-write") else "read-only",
+                "workspace_scope": clean_scope,
+                "sandbox": eff_sb,
                 "session_id": existing.get("session_id") if existing and existing.get("client") == client else None,
                 "session_history": existing.get("session_history", []) if existing else [],
                 "config_history": existing.get("config_history", []) if existing else [],
@@ -766,6 +1484,12 @@ class TeamOrchestrator:
         clean_spec = specialty.strip() if specialty is not None else m.get("specialty", "")
         clean_persona = persona_prompt.strip() if persona_prompt is not None else m.get("persona_prompt", "")
         clean_tags = [str(x).strip() for x in tags if str(x).strip()] if tags is not None else list(m.get("tags") or [])
+        clean_ws = (workspace_scope if workspace_scope is not None else m.get("workspace_scope", ".")).strip() or "."
+        _resolve_workdir(snap["binding"]["project_path"], clean_ws)
+        eff_sb = _effective_sandbox(
+            snap["binding"].get("max_sandbox", "workspace-write"),
+            sandbox if sandbox is not None else m.get("sandbox", "read-only"),
+        )
 
         new_cfg = {
             "name": clean_name,
@@ -773,8 +1497,8 @@ class TeamOrchestrator:
             "role": role_id or m.get("role"),
             "model": target_model,
             "reasoning_effort": target_effort,
-            "workspace_scope": workspace_scope if workspace_scope is not None else m.get("workspace_scope", "."),
-            "sandbox": sandbox if sandbox is not None else m.get("sandbox", "read-only"),
+            "workspace_scope": clean_ws,
+            "sandbox": eff_sb,
             "specialty": clean_spec,
             "persona_prompt": clean_persona,
             "grounding_mode": clean_gm,
@@ -927,6 +1651,9 @@ class TeamOrchestrator:
         require_manual_ruling: bool = False,
         reuse_member_session: bool = False,
         archive_previous_done: bool = True,
+        research_spec: Optional[Dict[str, Any]] = None,
+        openscience_playbooks: Optional[List[str]] = None,
+        squad_preset: str = "",
     ) -> Dict[str, Any]:
         if project_path:
             self.switch_project(project_path)
@@ -941,7 +1668,7 @@ class TeamOrchestrator:
         task_id = _new_id("TASK")
 
         def _create(st: Dict[str, Any]) -> Dict[str, Any]:
-            nonlocal mode
+            nonlocal mode, sandbox
             if archive_previous_done and st.get("active_task_id"):
                 try:
                     prev_t = self._find_task(st, st["active_task_id"])
@@ -953,12 +1680,15 @@ class TeamOrchestrator:
             proj_abs = st["binding"]["project_path"]
             proj_norm = st["binding"]["normalized_project_path"]
             proj_name = st["binding"].get("project_name") or os.path.basename(proj_abs)
+            max_sb = st["binding"].get("max_sandbox", "workspace-write")
+            sandbox = _effective_sandbox(max_sb, sandbox)
             default_repairs = st.get("settings", {}).get("default_max_auto_repairs", 2)
             repairs_cap = default_repairs if max_auto_repairs is None else max(0, min(5, int(max_auto_repairs)))
 
             built_steps: List[Dict[str, Any]] = []
             mode_meta: Dict[str, Any] = {}
-            scope_default = workspace_scope or "."
+            scope_default = (workspace_scope or ".").strip() or "."
+            _resolve_workdir(proj_abs, scope_default)
 
             if mode == "roundtable":
                 # 1. Roundtable Conference Collaboration
@@ -1158,9 +1888,18 @@ class TeamOrchestrator:
                         if ntype == "review" and last_exec_step_idx is not None and len(stage_nodes) == 1:
                             rev_target = last_exec_step_idx
 
+                        req_shell = bool(node.get("requires_shell", False))
+                        if req_shell and st["members"][mid].get("client") == "antigravity":
+                            raise ValueError(
+                                f"能力路由拦截：搭积木阶段 {stg_i + 1} 节点需要 Shell/脚本执行权限 (requires_shell=True)，不能指派给无头 Antigravity 节点 {mid}"
+                            )
                         ro_node = True if ntype in ("review", "discussion") else (
                             bool(node["read_only"]) if "read_only" in node else (sandbox == "read-only")
                         )
+                        node_sb = _effective_sandbox(sandbox, node.get("sandbox") or ("read-only" if ro_node else sandbox), read_only=ro_node)
+                        ro_node = node_sb == "read-only"
+                        node_ws = (node.get("workspace_scope") or scope_default).strip() or "."
+                        _resolve_workdir(proj_abs, node_ws)
                         custom_p = (node.get("prompt") or "").strip()
                         node_prompt = (
                             f"{custom_p}\n\n（所属总任务目标：{goal}）"
@@ -1183,9 +1922,10 @@ class TeamOrchestrator:
                                 depends_on=list(prev_stage_step_indices),
                                 review_of=rev_target,
                                 read_only=ro_node,
-                                write_scope=[] if ro_node else [scope_default],
-                                workspace_scope=scope_default,
-                                sandbox="read-only" if ro_node else sandbox,
+                                write_scope=[] if ro_node else [node_ws],
+                                workspace_scope=node_ws,
+                                sandbox=node_sb,
+                                requires_shell=req_shell,
                             )
                         )
                         if ntype in ("execution", "synthesis"):
@@ -1204,8 +1944,17 @@ class TeamOrchestrator:
                     mid = raw_s["member_id"]
                     if mid not in st["members"]:
                         raise ValueError(f"步骤 {idx} 指定的成员不存在: {mid}")
+                    req_shell = bool(raw_s.get("requires_shell", False))
+                    if req_shell and st["members"][mid].get("client") == "antigravity":
+                        raise ValueError(
+                            f"能力路由拦截：步骤 {idx} 需要 Shell/脚本执行权限 (requires_shell=True)，不能指派给无头 Antigravity 节点 {mid}，请改派 Codex 成员或走 external_import 模式"
+                        )
                     ro = bool(raw_s.get("read_only", True))
-                    w_scope = raw_s.get("write_scope") or raw_s.get("file_scope") or []
+                    step_sb = _effective_sandbox(sandbox, raw_s.get("sandbox") or ("read-only" if ro else sandbox), read_only=ro)
+                    ro = step_sb == "read-only"
+                    step_ws = (raw_s.get("workspace_scope") or scope_default).strip() or "."
+                    _resolve_workdir(proj_abs, step_ws)
+                    w_scope = [] if ro else (raw_s.get("write_scope") or raw_s.get("file_scope") or [])
                     built_steps.append(
                         self._make_step(
                             step_index=idx,
@@ -1219,9 +1968,10 @@ class TeamOrchestrator:
                             review_of=int(raw_s["review_of"]) if raw_s.get("review_of") is not None else None,
                             read_only=ro,
                             write_scope=w_scope,
-                            workspace_scope=raw_s.get("workspace_scope") or scope_default,
-                            sandbox="read-only" if ro else (raw_s.get("sandbox") or sandbox or "workspace-write"),
+                            workspace_scope=step_ws,
+                            sandbox=step_sb,
                             initial_session_id=raw_s.get("session_id"),
+                            requires_shell=req_shell,
                         )
                     )
                 initial_status = "queued" if st.get("paused") else "running"
@@ -1328,6 +2078,17 @@ class TeamOrchestrator:
                 "messages": [],
                 "reviews": [],
                 "rulings": [],
+                "openscience_playbooks": (
+                    [str(x) for x in openscience_playbooks if str(x).strip()]
+                    if openscience_playbooks is not None
+                    else auto_select_playbooks(goal, execution_mode=mode, squad_preset=squad_preset)
+                ),
+                "research_spec": research_spec if isinstance(research_spec, dict) else None,
+                "research_signoff": (
+                    {"status": "pending", "checks": [], "figure_reports": [], "blocking": [], "observations": []}
+                    if isinstance(research_spec, dict)
+                    else None
+                ),
                 "summary": "",
                 "created_at": now,
                 "updated_at": now,
@@ -1364,6 +2125,7 @@ class TeamOrchestrator:
         stage_index: int = 0,
         round_label: str = "",
         initial_session_id: Optional[str] = None,
+        requires_shell: bool = False,
     ) -> Dict[str, Any]:
         return {
             "step_index": step_index,
@@ -1376,6 +2138,7 @@ class TeamOrchestrator:
             "depends_on": depends_on,
             "review_of": review_of,
             "read_only": read_only,
+            "requires_shell": bool(requires_shell),
             "write_scope": write_scope,
             "workspace_scope": workspace_scope,
             "sandbox": sandbox,
@@ -1857,12 +2620,21 @@ class TeamOrchestrator:
             task = self._find_task(st, task_id)
             if task["steps"]:
                 raise ValueError("该任务已包含执行步骤")
+            proj_abs = task.get("project_path") or st["binding"]["project_path"]
+            task_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), task.get("sandbox", "read-only"))
             built = []
             for idx, raw_s in enumerate(steps):
                 mid = raw_s["member_id"]
                 if mid not in st["members"]:
                     raise ValueError(f"成员不存在: {mid}")
-                ro = bool(raw_s.get("read_only", True))
+                req_shell = bool(raw_s.get("requires_shell", False))
+                if req_shell and st["members"][mid].get("client") == "antigravity":
+                    raise ValueError(f"能力路由拦截：步骤 {idx} 需要 Shell 执行权限，不能指派给 Antigravity 节点 {mid}")
+                ro_req = bool(raw_s.get("read_only", True))
+                step_sb = _effective_sandbox(task_sb, raw_s.get("sandbox") or ("read-only" if ro_req else task_sb), read_only=ro_req)
+                ro = step_sb == "read-only"
+                step_ws = (raw_s.get("workspace_scope") or ".").strip() or "."
+                _resolve_workdir(proj_abs, step_ws)
                 built.append(
                     self._make_step(
                         step_index=idx,
@@ -1873,9 +2645,10 @@ class TeamOrchestrator:
                         depends_on=[int(x) for x in raw_s.get("depends_on", [])],
                         review_of=int(raw_s["review_of"]) if raw_s.get("review_of") is not None else None,
                         read_only=ro,
-                        write_scope=raw_s.get("write_scope") or raw_s.get("file_scope") or [],
-                        workspace_scope=raw_s.get("workspace_scope") or ".",
-                        sandbox="read-only" if ro else "workspace-write",
+                        write_scope=[] if ro else (raw_s.get("write_scope") or raw_s.get("file_scope") or []),
+                        workspace_scope=step_ws,
+                        sandbox=step_sb,
+                        requires_shell=req_shell,
                     )
                 )
             task["steps"] = built
@@ -2048,6 +2821,11 @@ class TeamOrchestrator:
                 if rev_step is not None:
                     rev_step["status"] = "succeeded"
                     rev_step["blocking_reason"] = None
+                # P0-1 Decoupling: human override rejecting a review NEVER grants automated research_signoff = passed!
+                if isinstance(task.get("research_signoff"), dict) and task["research_signoff"].get("status") != "passed":
+                    if task["research_signoff"].get("status") != "failed":
+                        task["research_signoff"]["status"] = "needs_ruling"
+                    task["research_signoff"]["human_override_noted"] = True
                 task["blocking_reason"] = None
                 self._refresh_task_overall_status_unlocked(st, task)
             else:
@@ -2069,6 +2847,8 @@ class TeamOrchestrator:
                 raise ValueError("该步骤正在运行，请先中止当前尝试再改派")
             if new_member_id not in st["members"]:
                 raise ValueError(f"新成员不存在: {new_member_id}")
+            if step.get("requires_shell") and st["members"][new_member_id].get("client") == "antigravity":
+                raise ValueError(f"能力路由拦截：该步骤需要 Shell 执行权限，不可改派给无头 Antigravity 节点 {new_member_id}")
 
             old_member = step["member_id"]
             step["member_id"] = new_member_id
@@ -2250,6 +3030,9 @@ class TeamOrchestrator:
             step["latest_result_text"] = text_candidate
             step["status"] = "succeeded"
             step["blocking_reason"] = None
+            # P0-1 Decoupling: adopting a partial streamed draft NEVER grants research_signoff = passed!
+            if isinstance(task.get("research_signoff"), dict) and task["research_signoff"].get("status") != "passed":
+                task["research_signoff"]["status"] = "needs_ruling"
 
             chat_kind = "deliverable" if step.get("step_type") in ("synthesis", "execution") else "speech"
             self._append_room_chat(
@@ -2505,21 +3288,25 @@ class TeamOrchestrator:
 
         if grounding_mode == "strict":
             parts.append(
-                "【OpenScience 证据核证、合理深度外推与反幻觉规约 (Strict Grounding)】\n"
-                "1. 事实层零编造：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、最新期刊影响因子、文献作者或 DOI；引用项目内任何数字、表格结论或代码实现必须先读后引，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出锚点；\n"
-                "2. 推演层鼓励合理深度外推（三层认知标定）：遵循 OpenScience 原则，严禁以“观察性数据无法推断/无法确定”为借口回避机理阐释、跨学科迁移或前瞻假说；所有核心陈述须显式分层：\n"
+                "【OpenScience 证据核证、科学诚实与反幻觉规约 (Strict Grounding + science.txt)】\n"
+                "1. 事实层零编造与科学诚实：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、文献作者或 DOI；引用项目内任何数字、表格结论或代码实现必须先读后引，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出锚点；若实证数据反驳预设假说或用户预期，必须以精确数字坦诚报告而非迎合预期；\n"
+                "2. 非破坏性重跑与数据直绘：严禁覆盖或删除原始数据与既有结果目录（重跑写入新目录或版本化文件名）；统计图必须直接由脚本从实测数据绘制，AI 生成位图绝不可作为实验证据；\n"
+                "3. 推演层鼓励合理深度外推（三层认知标定）：遵循 OpenScience 原则，严禁以“观察性数据无法推断/无法确定”为借口回避机理阐释、跨学科迁移或前瞻假说；所有核心陈述须显式分层：\n"
                 "   - `[实证观察 Observed]`：直接由工作区文件/数据表/代码或实测命令证实的客观事实；\n"
                 "   - `[统计/逻辑推断 Inferred]`：基于实证推导出的方向性判断（注明置信度与会推翻该判断的证据边界）；\n"
                 "   - `[机制假说/深度外推 Hypothesis]`：有科研/工程创新价值的机制解释、迁移路径或前瞻外推（每条必须附带具体的“可证伪检验/最小判别实验”）；\n"
-                "3. 覆盖边界与代码验收纪律：禁止将局部子集上测得的结论宣称为普适结果；若涉及代码/脚本改动，改动后必须重新运行验证并如实报告实测状态（严禁空口宣称已通过）；\n"
-                "4. 反回音室与 Steelman 沟通：阅读其他队友发言时严禁盲目附和；反驳前先准确复述对方最强论点，再用真实文件证据或更简洁的竞争性解释 `@队友` 纠错；\n"
-                "5. 末尾附简短【证据溯源与外推假说台账】（列出本条直接核验过的真实文件/命令，以及关键外推假说及其证伪条件/待外部核实项）。"
+                "4. 覆盖边界与代码验收纪律：禁止将局部子集上测得的结论宣称为普适结果；若涉及代码/脚本改动，改动后必须重新运行验证并如实报告实测状态（严禁空口宣称已通过）；\n"
+                "5. 反回音室与 Steelman 沟通：阅读其他队友发言时严禁盲目附和；反驳前先准确复述对方最强论点，再用真实文件证据或更简洁的竞争性解释 `@队友` 纠错；\n"
+                "6. 末尾附简短【证据溯源与外推假说台账】（列出本条直接核验过的真实文件/命令，以及关键外推假说及其证伪条件/待外部核实项）。"
             )
         else:
             parts.append(
                 "【证据规范 (Balanced Grounding)】\n"
                 "引用项目文件与数据时请优先读取真实文件并用 `[文件名](路径)` 标注来源；鼓励给出机理与前瞻推演，但未实证项须注明 `[推断/假说]` 与验证路径，切勿编造具体数据或文献。"
             )
+        pb_block = render_playbooks_prompt(task.get("openscience_playbooks"))
+        if pb_block:
+            parts.append(pb_block)
         if step.get("read_only", True):
             parts.append("【权限边界】当前为只读模式 (read-only)：可读取检查项目内文件，不得修改或删除文件。")
 
@@ -2692,11 +3479,44 @@ class TeamOrchestrator:
             mem = snap["members"][step["member_id"]]
             proj_root = task.get("project_path") or snap["binding"]["project_path"]
             rel_scope = step.get("workspace_scope") or mem.get("workspace_scope") or "."
-            work_dir = os.path.normpath(os.path.join(proj_root, rel_scope))
+
+            # P0-0 Secondary Guard: validate path confinement, hard sandbox ceiling & shell capability BEFORE spawning CLI!
+            try:
+                work_dir = _resolve_workdir(proj_root, rel_scope)
+                max_sb = snap["binding"].get("max_sandbox", "workspace-write")
+                task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"))
+                sandbox_arg = _effective_sandbox(
+                    task_sb,
+                    step.get("sandbox") or mem.get("sandbox") or "read-only",
+                    read_only=bool(step.get("read_only", True)),
+                )
+                if step.get("requires_shell") and mem.get("client") == "antigravity":
+                    raise ValueError(
+                        f"能力路由拦截：步骤 {step_index} 需要 Shell/脚本执行权限 (requires_shell=True)，不能指派给无头 Antigravity 节点 {step['member_id']}"
+                    )
+            except ValueError as sec_exc:
+                blocked_res = CodexExecutionResult(
+                    session_id=step.get("worker_session_id"),
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    policy_blocked=True,
+                    blocking_reason=f"安全/能力策略拦截: {sec_exc}",
+                    requested_config={},
+                    accepted_config={},
+                )
+                self._finalize_attempt(task_id, step_index, attempt_id, blocked_res, False, None)
+                return
+
+            # P0-3 Lock-Free pre-execution SHA-256 snapshot of readonly_inputs (strictly outside state lock!)
+            research_spec = task.get("research_spec") if isinstance(task.get("research_spec"), dict) else None
+            before_inputs: Dict[str, str] = {}
+            if research_spec and research_spec.get("readonly_inputs"):
+                before_inputs = snapshot_readonly_inputs(work_dir, list(research_spec.get("readonly_inputs") or []))
 
             prompt_text = self._build_step_prompt(snap, task, step, work_dir)
             sess_to_use = step.get("worker_session_id")
-            sandbox_arg = step.get("sandbox") or mem.get("sandbox") or "read-only"
             agy_proj_id = snap["binding"].get("project_agy_map", {}).get(normalize_win_path(work_dir)) or (
                 snap["binding"].get("antigravity_project_id")
                 if normalize_win_path(work_dir) == normalize_win_path(snap["binding"]["project_path"]) and snap["binding"].get("antigravity_project_id")
@@ -2896,7 +3716,95 @@ class TeamOrchestrator:
                     mem, followup_to_caller, res.session_id, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text
                 )
 
-            self._finalize_attempt(task_id, step_index, attempt_id, res, used_fallback, fallback_of)
+            # P0-2 Lock-Free Sidecar Execution Ledger (keeps team_state.json lean & avoids O(N^2) bloat)
+            ledger_summary: Optional[Dict[str, Any]] = None
+            cmd_logs = list(getattr(res, "command_logs", None) or [])
+            chg_files = list(getattr(res, "changed_files", None) or [])
+            edit_after = bool(getattr(res, "edit_after_check", False))
+            if cmd_logs or chg_files or research_spec:
+                ledger_path = ""
+                try:
+                    ledger_path = _write_sidecar_ledger(
+                        task_id,
+                        attempt_id,
+                        {
+                            "task_id": task_id,
+                            "step_index": step_index,
+                            "attempt_id": attempt_id,
+                            "member_id": step["member_id"],
+                            "client": mem.get("client"),
+                            "model": mem.get("model"),
+                            "sandbox": sandbox_arg,
+                            "final_status": res.final_status,
+                            "exit_code": res.exit_code,
+                            "edit_after_check": edit_after,
+                            "command_logs": cmd_logs,
+                            "changed_files": chg_files,
+                            "recorded_at": time.time(),
+                        },
+                    )
+                except Exception:
+                    ledger_path = ""
+                nonzero_cmds = sum(1 for c in cmd_logs if c.get("exit_code") not in (0, None))
+                ledger_summary = {
+                    "command_count": len(cmd_logs),
+                    "nonzero_command_count": nonzero_cmds,
+                    "changed_files_count": len(chg_files),
+                    "changed_files_preview": [c.get("path", "") for c in chg_files[:12] if c.get("path")],
+                    "edit_after_check": edit_after,
+                    "ledger_path": ledger_path,
+                }
+
+            # P0-3 Lock-Free Mechanical Acceptance Checks & Figure QA (STRICTLY OUTSIDE TeamStateManager._lock!)
+            verif_report: Optional[Dict[str, Any]] = None
+            if (
+                research_spec
+                and res.final_status == "succeeded"
+                and step.get("step_type") in ("execution", "synthesis")
+                and step.get("review_of") is None
+            ):
+                verif_report = run_acceptance_checks(
+                    work_dir=work_dir,
+                    research_spec=research_spec,
+                    before_inputs_snapshot=before_inputs,
+                    command_logs=cmd_logs,
+                    edit_after_check=edit_after,
+                )
+
+            # OpenScience Content-Addressed Provenance DAG & Experiment Runs (STRICTLY OUTSIDE state lock!)
+            try:
+                tmp_dir_p, _ = get_runtime_dirs()
+                prov_store = TaskProvenanceStore(os.path.join(tmp_dir_p, "team_ledgers"), task_id)
+                prov_store.record_attempt_lineage(
+                    step_index=step_index,
+                    attempt_id=attempt_id,
+                    member_id=step["member_id"],
+                    member_name=mem.get("name") or step["member_id"],
+                    client=mem.get("client", "codex"),
+                    model=mem.get("model", ""),
+                    sandbox=sandbox_arg,
+                    final_status=res.final_status,
+                    readonly_snapshots=before_inputs,
+                    command_logs=cmd_logs,
+                    changed_files=chg_files,
+                    verif_report=verif_report,
+                    response_text=res.response_text or "",
+                    work_dir=work_dir,
+                    sha_fn=sha256_file,
+                )
+            except Exception:
+                pass
+
+            self._finalize_attempt(
+                task_id,
+                step_index,
+                attempt_id,
+                res,
+                used_fallback,
+                fallback_of,
+                ledger_summary=ledger_summary,
+                verif_report=verif_report,
+            )
         except Exception as exc:
             # Never leave a step permanently stuck in "running" or a member stuck in "working" on OS/adapter errors!
             try:
@@ -2931,7 +3839,9 @@ class TeamOrchestrator:
         )
 
         valid_members = [k for k, v in st["members"].items() if v.get("client") in SUPPORTED_CLIENTS]
-        task_sb = task.get("sandbox", "read-only")
+        codex_members = [k for k in valid_members if st["members"][k].get("client") == "codex"]
+        max_sb = st["binding"].get("max_sandbox", "workspace-write")
+        task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"))
         sc = task.get("workspace_scope", ".")
 
         if not raw_steps:
@@ -2954,6 +3864,9 @@ class TeamOrchestrator:
             mid = str(rs.get("member_id") or "").strip()
             if mid not in st["members"]:
                 mid = valid_members[local_i % len(valid_members)]
+            req_shell = bool(rs.get("requires_shell", False))
+            if req_shell and st["members"][mid].get("client") == "antigravity" and codex_members:
+                mid = codex_members[local_i % len(codex_members)]
             if mid not in recruited:
                 recruited.append(mid)
 
@@ -2967,6 +3880,9 @@ class TeamOrchestrator:
 
             stype = str(rs.get("step_type") or ("review" if rev_of is not None else "execution"))
             ro = True if (task_sb == "read-only" or rev_of is not None or stype in ("review", "discussion")) else bool(rs.get("read_only", False))
+            raw_sb_val = str(rs.get("sandbox") or "").strip().lower()
+            step_sb = _effective_sandbox(task_sb, raw_sb_val if raw_sb_val in _SANDBOX_RANK else ("read-only" if ro else task_sb), read_only=ro)
+            ro = step_sb == "read-only"
 
             task["steps"].append(
                 self._make_step(
@@ -2982,7 +3898,8 @@ class TeamOrchestrator:
                     read_only=ro,
                     write_scope=[] if ro else [sc],
                     workspace_scope=sc,
-                    sandbox="read-only" if ro else task_sb,
+                    sandbox=step_sb,
+                    requires_shell=req_shell,
                 )
             )
 
@@ -3018,7 +3935,27 @@ class TeamOrchestrator:
         res: CodexExecutionResult,
         used_fallback: bool,
         fallback_of: Optional[str],
+        ledger_summary: Optional[Dict[str, Any]] = None,
+        verif_report: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # Pre-compute quota-exhaustion backup candidate OUTSIDE TeamStateManager._lock!
+        quota_failover_candidate: Optional[Dict[str, Any]] = None
+        if res.final_status not in ("succeeded", "aborted", "blocked") and _is_quota_or_rate_limit_error(res.error, res.stderr_lines):
+            try:
+                pre_snap = self.store.snapshot()
+                if pre_snap.get("settings", {}).get("auto_spawn_quota_backup", True):
+                    pre_task = self._find_task(pre_snap, task_id)
+                    pre_step = pre_task["steps"][step_index]
+                    if int(pre_step.get("quota_failover_count", 0)) < 1:
+                        cinfo = self.list_backup_candidates(
+                            pre_step["member_id"],
+                            require_same_client=bool(pre_step.get("requires_shell", False)),
+                        )
+                        if cinfo.get("recommended"):
+                            quota_failover_candidate = cinfo["recommended"]
+            except Exception:
+                quota_failover_candidate = None
+
         def _fin(st: Dict[str, Any]) -> None:
             now = time.time()
             task = self._find_task(st, task_id)
@@ -3036,6 +3973,8 @@ class TeamOrchestrator:
             att["status"] = res.final_status
             att["blocking_reason"] = res.blocking_reason or res.error
             att["ended_at"] = now
+            if ledger_summary is not None:
+                att["ledger_summary"] = ledger_summary
 
             if res.session_id:
                 old_mem_sess = mem.get("session_id")
@@ -3093,6 +4032,99 @@ class TeamOrchestrator:
                 return
 
             if res.final_status != "succeeded":
+                if quota_failover_candidate and int(step.get("quota_failover_count", 0)) < 1:
+                    # Auto-spawn (or reuse idle) same-role different-model backup specialist & hand off seamlessly!
+                    src_id = step["member_id"]
+                    src_m = st["members"][src_id]
+                    ch_cl = quota_failover_candidate["client"]
+                    ch_md = quota_failover_candidate["model"]
+                    ch_ef = quota_failover_candidate["reasoning_effort"]
+                    ch_disp = quota_failover_candidate.get("display_name") or ch_md
+                    bk_id = None
+                    for ex_id, ex_m in st["members"].items():
+                        if (
+                            ex_m.get("backup_of") == src_id
+                            and ex_m.get("client") == ch_cl
+                            and ex_m.get("model") == ch_md
+                            and ex_m.get("status") != "working"
+                        ):
+                            bk_id = ex_id
+                            break
+                    if not bk_id:
+                        tok = _short_model_id_token(ch_md)
+                        root_id = src_m.get("backup_of") or src_id
+                        cand_id = f"{root_id}_bk_{tok}"
+                        seq = 2
+                        while cand_id in st["members"]:
+                            cand_id = f"{root_id}_bk_{tok}_{seq}"
+                            seq += 1
+                        bk_id = cand_id
+                        base_name = _strip_model_parens(src_m.get("name") or src_id)
+                        eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), src_m.get("sandbox", "read-only"))
+                        bk_mem = {
+                            "id": bk_id,
+                            "name": f"{base_name} [替补 · {ch_disp}]",
+                            "role": src_m.get("role", "implementation"),
+                            "client": ch_cl,
+                            "model": ch_md,
+                            "reasoning_effort": ch_ef,
+                            "specialty": src_m.get("specialty", ""),
+                            "persona_prompt": src_m.get("persona_prompt", ""),
+                            "grounding_mode": src_m.get("grounding_mode", "strict"),
+                            "tags": list(src_m.get("tags") or []),
+                            "workspace_scope": src_m.get("workspace_scope", "."),
+                            "sandbox": eff_sb,
+                            "backup_of": src_id,
+                            "backup_reason": f"原模型 {src_m.get('model')} 触发额度/限流，自动补充同角色替补",
+                            "session_id": None,
+                            "session_history": [],
+                            "config_history": [],
+                            "pending_config": None,
+                            "status": "idle",
+                            "live_activity": "",
+                            "current_task_id": None,
+                            "current_attempt_id": None,
+                        }
+                        enrich_member_metadata(bk_mem)
+                        st["members"][bk_id] = bk_mem
+
+                    bk_name = st["members"][bk_id]["name"]
+                    step["member_id"] = bk_id
+                    step["worker_session_id"] = None
+                    step["quota_failover_count"] = int(step.get("quota_failover_count", 0)) + 1
+                    step["handoff_context"] = {
+                        "reassigned_from": f"{src_m.get('name')} ({src_m.get('model')})",
+                        "reassigned_to": f"{bk_name} ({ch_cl}/{ch_md})",
+                        "reason": f"原模型 {src_m.get('model')} 遇到额度/限流受阻，自动由同角色跨模型替补接力继续",
+                        "completed_steps": [s["step_index"] for s in task["steps"] if s["status"] == "succeeded"],
+                        "prior_outputs": [(res.partial_text or "")[:1000]] if res.partial_text else [],
+                        "open_issues_and_evidence": [str(res.error or "quota/rate_limit")[:200]],
+                    }
+                    step["status"] = "pending"
+                    step["blocking_reason"] = None
+                    task["status"] = "queued" if st.get("paused") else "running"
+                    task["blocking_reason"] = None
+                    task["recent_events"].append(
+                        {
+                            "ts": now,
+                            "type": "quota.auto_backup",
+                            "summary": f"检测到 {src_m.get('model')} 额度/限流受阻，已自动补充同角色替补 {bk_name} ({ch_cl}/{ch_md}) 接力续跑步骤 {step_index}",
+                        }
+                    )
+                    task["recent_events"] = task["recent_events"][-40:]
+                    self._append_room_chat(
+                        st,
+                        task,
+                        sender_id="user",
+                        kind="handoff",
+                        content=f"检测到 {src_m.get('name')} ({src_m.get('model')}) 额度/限流受阻，系统已自动补充同角色跨模型替补 **{bk_name}** ({ch_cl}/{ch_md}) 接力继续当前节点。",
+                        to_member_id=bk_id,
+                        step_index=step_index,
+                        round_label="额度自动替补",
+                    )
+                    task["updated_at"] = now
+                    return
+
                 step["status"] = "failed"
                 step["blocking_reason"] = res.error or f"进程非正常退出 (code={res.exit_code})"
                 task["status"] = "failed"
@@ -3102,6 +4134,33 @@ class TeamOrchestrator:
 
             step["latest_result_text"] = res.response_text
             step["accepted_attempt_id"] = attempt_id
+
+            # P0-3 Persist decoupled lock-free mechanical acceptance & figure QA signoff
+            if verif_report is not None:
+                vcopy = dict(verif_report)
+                vcopy["attempt_id"] = attempt_id
+                vcopy["step_index"] = step_index
+                task["research_signoff"] = vcopy
+                task["recent_events"].append(
+                    {
+                        "ts": now,
+                        "type": "research.signoff",
+                        "summary": (
+                            f"科研机械验收通过 ({len(vcopy.get('checks', []))} 项检查 / {len(vcopy.get('figure_reports', []))} 份图件契约)"
+                            if vcopy.get("ok")
+                            else f"科研机械验收拦截：{'; '.join((vcopy.get('blocking') or [])[:2])[:160]}"
+                        ),
+                    }
+                )
+                task["recent_events"] = task["recent_events"][-40:]
+                if not vcopy.get("ok") and (task.get("research_spec") or {}).get("block_on_failed_signoff", False):
+                    b_msg = "; ".join((vcopy.get("blocking") or [])[:3])
+                    step["status"] = "needs_ruling"
+                    step["blocking_reason"] = f"机械验收未通过（已拦截签发）：{b_msg}"
+                    task["status"] = "needs_ruling"
+                    task["blocking_reason"] = f"步骤 {step_index} 科研机械验收未通过：{b_msg}"
+                    task["updated_at"] = now
+                    return
 
             # Chief Dynamic Plan Expansion!
             if step.get("step_type") == "chief_plan":
@@ -3115,10 +4174,42 @@ class TeamOrchestrator:
             if step.get("review_of") is not None:
                 target_idx = int(step["review_of"])
                 target_step = task["steps"][target_idx]
-                parsed_rev = _extract_json_obj(res.response_text) or {}
-                verdict = str(parsed_rev.get("verdict", "")).upper()
-                if verdict not in ("ACCEPT", "REJECT"):
-                    verdict = "REJECT" if ("reject" in res.response_text.lower() or "不通过" in res.response_text) else "ACCEPT"
+                parsed_rev = _extract_json_obj(res.response_text)
+                verdict = str((parsed_rev or {}).get("verdict", "")).strip().upper()
+                if not isinstance(parsed_rev, dict) or verdict not in ("ACCEPT", "REJECT"):
+                    # P0-1 Fail-Closed Review Gate: malformed/non-JSON output NEVER falls back to ACCEPT!
+                    bad_record = {
+                        "id": _new_id("REV"),
+                        "ts": now,
+                        "review_step_index": step_index,
+                        "target_step_index": target_idx,
+                        "reviewer_id": step["member_id"],
+                        "reviewer_session_id": res.session_id,
+                        "round": target_step.get("repair_count", 0) + 1,
+                        "verdict": "INVALID_FORMAT",
+                        "problem": "审查输出缺少合法结构化 JSON verdict (ACCEPT/REJECT)",
+                        "evidence": (res.response_text or "")[:240],
+                        "impact": "Fail-Closed 门禁已阻止自动放行",
+                        "expected_fix": "请人工裁决或要求审稿人返回合法 JSON verdict",
+                        "scope_expanded": False,
+                    }
+                    task["reviews"].append(bad_record)
+                    self._append_room_chat(
+                        st,
+                        task,
+                        sender_id=step["member_id"],
+                        kind="review",
+                        content=f"审查输出格式非法（未包含合法 JSON verdict: ACCEPT/REJECT），按 Fail-Closed 门禁拦截放行，等待人工裁决。\n原文节选：{(res.response_text or '')[:240]}",
+                        to_member_id=target_step["member_id"],
+                        step_index=step_index,
+                        round_label="审查门禁拦截",
+                    )
+                    step["status"] = "needs_ruling"
+                    step["blocking_reason"] = "审查输出缺少合法结构化 verdict (ACCEPT/REJECT)，按 Fail-Closed 门禁拦截等待人工裁决"
+                    task["status"] = "needs_ruling"
+                    task["blocking_reason"] = f"步骤 {step_index} 审查输出缺少合法 verdict，已拦截放行等待人工裁决"
+                    task["updated_at"] = now
+                    return
 
                 rev_record = {
                     "id": _new_id("REV"),

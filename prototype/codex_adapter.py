@@ -131,6 +131,9 @@ class CodexExecutionResult:
     requested_config: Dict[str, Any] = field(default_factory=dict)
     accepted_config: Dict[str, Any] = field(default_factory=dict)
     usage: Dict[str, Any] = field(default_factory=dict)
+    command_logs: List[Dict[str, Any]] = field(default_factory=list)
+    changed_files: List[Dict[str, Any]] = field(default_factory=list)
+    edit_after_check: bool = False
 
     @property
     def final_status(self) -> str:
@@ -157,6 +160,9 @@ class CodexExecutionResult:
             "requested_config": self.requested_config,
             "accepted_config": self.accepted_config,
             "usage": self.usage,
+            "command_logs": self.command_logs,
+            "changed_files": self.changed_files,
+            "edit_after_check": self.edit_after_check,
             "error": self.error,
             "event_count": len(self.raw_events),
         }
@@ -214,10 +220,35 @@ class CodexAdapter:
             return [self.node_bin, self.codex_js]
         return ["cmd.exe", "/d", "/s", "/c", self.codex_bin]
 
+    def _highwater_cache_path(self) -> Optional[str]:
+        default_cache = os.path.normcase(os.path.abspath(os.path.expanduser(r"~/.codex/models_cache.json")))
+        cur_cache = os.path.normcase(os.path.abspath(self.models_cache_path))
+        if cur_cache != default_cache:
+            return None
+        tmp_dir, _ = get_runtime_dirs()
+        return os.path.join(tmp_dir, "codex_models_highwater.json")
+
     def discover_capabilities(self, refresh_cli: bool = False) -> Dict[str, Any]:
-        """Return official Codex models, supported reasoning efforts, and CLI login status."""
-        models: List[Dict[str, Any]] = []
+        """Return official Codex models, supported reasoning efforts, and CLI login status.
+        Preserves a high-water mirror so an older CLI binary overwriting models_cache.json
+        never hides newer flagship slugs (e.g., gpt-6.2-sol / gpt-6.2-astra) already reported by
+        a newer local Codex client and accepted by the backend.
+        """
+        merged: Dict[str, Dict[str, Any]] = {}
+        hw_path = self._highwater_cache_path()
+        if hw_path and os.path.exists(hw_path):
+            try:
+                with open(hw_path, "r", encoding="utf-8") as hf:
+                    hw_raw = json.load(hf)
+                for m in hw_raw.get("models", []):
+                    slug = m.get("slug")
+                    if slug:
+                        merged[slug] = m
+            except Exception:
+                pass
+
         cache_meta: Dict[str, Any] = {"source": self.models_cache_path, "available": False}
+        live_count = 0
         if os.path.exists(self.models_cache_path):
             try:
                 with open(self.models_cache_path, "r", encoding="utf-8") as f:
@@ -228,26 +259,47 @@ class CodexAdapter:
                     "fetched_at": raw.get("fetched_at"),
                     "client_version": raw.get("client_version"),
                 }
-                for m in raw.get("models", []):
+                for idx, m in enumerate(raw.get("models", [])):
                     slug = m.get("slug")
                     if not slug:
                         continue
+                    live_count += 1
                     efforts = [
                         lvl.get("effort")
                         for lvl in m.get("supported_reasoning_levels", [])
                         if lvl.get("effort")
                     ]
-                    models.append(
-                        {
-                            "slug": slug,
-                            "display_name": m.get("display_name") or slug,
-                            "description": m.get("description") or "",
-                            "default_reasoning_effort": m.get("default_reasoning_level") or (efforts[0] if efforts else "low"),
-                            "supported_reasoning_efforts": efforts,
-                        }
-                    )
+                    merged[slug] = {
+                        "slug": slug,
+                        "priority": int(m.get("priority", idx + 10)),
+                        "display_name": m.get("display_name") or slug,
+                        "description": m.get("description") or "",
+                        "default_reasoning_effort": m.get("default_reasoning_level") or (efforts[0] if efforts else "low"),
+                        "supported_reasoning_efforts": efforts,
+                    }
             except Exception as exc:
                 cache_meta["error"] = str(exc)
+
+        def _model_sort_key(item: Dict[str, Any]) -> Tuple[int, int, str]:
+            slug = str(item.get("slug") or "")
+            # Prefer newer generations (e.g. gpt-6.2 > gpt-6.1 > gpt-6 > gpt-5.6) even when an older CLI overwrote priority=1
+            m_ver = re.search(r"gpt-(\d+)(?:\.(\d+))?", slug.lower())
+            if m_ver:
+                maj = int(m_ver.group(1))
+                mino = int(m_ver.group(2) or 0)
+                gen_rank = -(maj * 100 + mino)
+            else:
+                gen_rank = 0
+            return (gen_rank, int(item.get("priority", 99)), slug)
+
+        models: List[Dict[str, Any]] = sorted(merged.values(), key=_model_sort_key)
+        if hw_path and live_count > 0:
+            try:
+                os.makedirs(os.path.dirname(hw_path), exist_ok=True)
+                with open(hw_path, "w", encoding="utf-8") as hf:
+                    json.dump({"updated_at": time.time(), "models": models}, hf, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
         if refresh_cli or self._cached_probe is None:
             cli_version = None
@@ -449,6 +501,10 @@ class CodexAdapter:
         on_partial_text: Optional[Callable[[str], None]],
     ) -> CodexExecutionResult:
 
+        # P0-0 Hard Sandbox Trust Root: reject danger-full-access or any non-allowlisted sandbox mode!
+        if sandbox not in ("read-only", "workspace-write"):
+            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write）: {sandbox}")
+
         argv = list(self._base_argv())
         if session_id:
             argv.extend(["exec", "resume", session_id, "--json", "-c", 'approval_policy="never"', "-c", f'sandbox_mode="{sandbox}"'])
@@ -470,7 +526,11 @@ class CodexAdapter:
             argv.append("-")
 
         work_dir = cwd or os.getcwd()
-        os.makedirs(work_dir, exist_ok=True)
+        if sandbox == "read-only":
+            if not os.path.isdir(work_dir):
+                raise ValueError(f"只读工作目录不存在: {work_dir}")
+        else:
+            os.makedirs(work_dir, exist_ok=True)
 
         proc = subprocess.Popen(
             argv,
@@ -561,6 +621,11 @@ class CodexAdapter:
         response_text = ""
         partial_chunks: List[str] = []
         events: List[Dict[str, Any]] = []
+        command_logs: List[Dict[str, Any]] = []
+        changed_files: List[Dict[str, Any]] = []
+        last_ok_cmd_seq = -1
+        last_file_edit_seq = -1
+        event_seq = 0
         turn_completed = False
         usage_info: Dict[str, Any] = {}
         stream_error: Optional[str] = None
@@ -611,6 +676,45 @@ class CodexAdapter:
                         istatus = item.get("status") or ""
                         if istatus in ("declined", "failed") and "policy" in json.dumps(item).lower():
                             policy_reasons.append(f"命令被策略拒绝: {cmd_str}")
+                        if ev_type == "item.completed":
+                            event_seq += 1
+                            raw_rc = item.get("exit_code")
+                            agg_out = str(item.get("aggregated_output") or "")
+                            command_logs.append(
+                                {
+                                    "id": item.get("id") or f"cmd_{event_seq}",
+                                    "command": cmd_str,
+                                    "exit_code": raw_rc,
+                                    "status": istatus,
+                                    "output_excerpt": agg_out[-800:] if agg_out else "",
+                                    "ts": time.time(),
+                                }
+                            )
+                            if raw_rc == 0:
+                                last_ok_cmd_seq = event_seq
+                    elif itype == "file_change" and ev_type == "item.completed":
+                        event_seq += 1
+                        raw_changes = item.get("changes") or []
+                        if isinstance(raw_changes, list) and raw_changes:
+                            for ch in raw_changes:
+                                if isinstance(ch, dict) and ch.get("path"):
+                                    changed_files.append(
+                                        {
+                                            "path": str(ch.get("path")),
+                                            "kind": str(ch.get("kind") or "update"),
+                                            "ts": time.time(),
+                                        }
+                                    )
+                            last_file_edit_seq = event_seq
+                        elif item.get("path"):
+                            changed_files.append(
+                                {
+                                    "path": str(item.get("path")),
+                                    "kind": str(item.get("kind") or "update"),
+                                    "ts": time.time(),
+                                }
+                            )
+                            last_file_edit_seq = event_seq
                     if on_event:
                         friendly_map = {
                             "web_search": "🌐 联网检索学术/期刊资料",
@@ -698,4 +802,7 @@ class CodexAdapter:
             requested_config=requested_cfg,
             accepted_config=accepted_final,
             usage=usage_info,
+            command_logs=command_logs,
+            changed_files=changed_files,
+            edit_after_check=(last_file_edit_seq > last_ok_cmd_seq and last_file_edit_seq >= 0),
         )

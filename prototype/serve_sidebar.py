@@ -24,7 +24,8 @@ PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROTO_DIR not in sys.path:
     sys.path.insert(0, PROTO_DIR)
 
-from codex_adapter import CREATE_NO_WINDOW
+from codex_adapter import CREATE_NO_WINDOW, get_runtime_dirs
+from figure_qa import inspect_any_figure
 from team_runtime import TeamOrchestrator
 
 PORT = int(os.environ.get("TEAM_SIDEBAR_PORT", "8765"))
@@ -54,7 +55,38 @@ def _focus_antigravity_window() -> Dict[str, Any]:
         return {"window_activated": False, "note": str(exc)}
 
 
-def _resolve_link_target(raw_target: str, task_id: Optional[str] = None) -> Dict[str, Any]:
+def _is_allowed_raw_file_path(abs_p: str) -> bool:
+    """P0-0 Root Allowlist for /api/fs/raw_file: restrict strictly to active project, task project roots & runtime dirs."""
+    target_nc = os.path.normcase(os.path.realpath(os.path.abspath(abs_p)))
+    snap = ORCHESTRATOR.store.snapshot()
+    allowed_roots: List[str] = []
+    if snap.get("binding", {}).get("project_path"):
+        allowed_roots.append(snap["binding"]["project_path"])
+    for t in snap.get("tasks", []):
+        if t.get("project_path"):
+            allowed_roots.append(t["project_path"])
+    try:
+        tmp_dir, _ = get_runtime_dirs()
+        allowed_roots.append(tmp_dir)
+    except Exception:
+        pass
+    for root in allowed_roots:
+        if not root:
+            continue
+        root_nc = os.path.normcase(os.path.realpath(os.path.abspath(root)))
+        try:
+            if os.path.commonpath([root_nc, target_nc]) == root_nc:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _resolve_link_target(
+    raw_target: str,
+    task_id: Optional[str] = None,
+    allow_basename_fallback: bool = True,
+) -> Dict[str, Any]:
     raw = (raw_target or "").strip().strip("'\"")
     if not raw:
         raise ValueError("链接地址为空")
@@ -107,8 +139,8 @@ def _resolve_link_target(raw_target: str, task_id: Optional[str] = None) -> Dict
     else:
         abs_p = os.path.normpath(os.path.join(proj_root, path_str))
 
-    # Fallback filename / partial-subpath search within project_root if agent wrote a bare filename or partial relative path
-    if not os.path.exists(abs_p) and os.path.isdir(proj_root):
+    # Fallback filename / partial-subpath search within project_root (disabled when strict=1 for artifact QA!)
+    if allow_basename_fallback and not os.path.exists(abs_p) and os.path.isdir(proj_root):
         target_base = os.path.basename(path_str).lower()
         norm_rel = path_str.replace("/", "\\").lstrip(".\\").lower()
         best_match: Optional[str] = None
@@ -308,9 +340,26 @@ def _build_file_preview(resolved: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"):
-        return {**base_info, "preview_type": "image", "raw_url": f"/api/fs/raw_file?path={urllib.parse.quote(abs_p)}"}
+        return {
+            **base_info,
+            "preview_type": "image",
+            "inspect": inspect_any_figure(abs_p) if ext in (".png", ".svg") else None,
+            "raw_url": f"/api/fs/raw_file?path={urllib.parse.quote(abs_p)}",
+        }
+    if ext in (".tif", ".tiff"):
+        return {
+            **base_info,
+            "preview_type": "tiff",
+            "inspect": inspect_any_figure(abs_p),
+            "raw_url": f"/api/fs/raw_file?path={urllib.parse.quote(abs_p)}",
+        }
     if ext == ".pdf":
-        return {**base_info, "preview_type": "pdf", "raw_url": f"/api/fs/raw_file?path={urllib.parse.quote(abs_p)}"}
+        return {
+            **base_info,
+            "preview_type": "pdf",
+            "inspect": inspect_any_figure(abs_p),
+            "raw_url": f"/api/fs/raw_file?path={urllib.parse.quote(abs_p)}",
+        }
     if ext == ".docx":
         try:
             docx_md = _extract_docx_text(abs_p)
@@ -331,12 +380,30 @@ def _build_file_preview(resolved: Dict[str, Any]) -> Dict[str, Any]:
             if ext in (".csv", ".tsv") and not resolved.get("start_line"):
                 delim = "\t" if ext == ".tsv" else ","
                 reader = csv.reader(io.StringIO(txt), delimiter=delim)
-                rows = []
-                for idx, r in enumerate(reader):
-                    rows.append(r[:24])
-                    if idx >= 80:
+                max_cols = 60
+                max_rows = 100
+                rows: List[List[str]] = []
+                total_cols = 0
+                col_truncated = False
+                row_truncated = False
+                for r in reader:
+                    if len(rows) >= max_rows:
+                        row_truncated = True
                         break
-                return {**base_info, "preview_type": "table", "rows": rows, "truncated": truncated or len(rows) > 80}
+                    total_cols = max(total_cols, len(r))
+                    if len(r) > max_cols:
+                        col_truncated = True
+                    rows.append(r[:max_cols])
+                return {
+                    **base_info,
+                    "preview_type": "table",
+                    "rows": rows,
+                    "total_cols": total_cols,
+                    "shown_cols": min(total_cols, max_cols),
+                    "col_truncated": col_truncated,
+                    "row_truncated": row_truncated or truncated,
+                    "truncated": truncated or col_truncated or row_truncated,
+                }
             return {
                 **base_info,
                 "preview_type": "markdown" if (ext in (".md", ".markdown") and not resolved.get("start_line")) else "text",
@@ -362,6 +429,26 @@ class SidebarHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _check_local_post_security(self) -> Optional[str]:
+        """P0-0 Local CSRF / Host / Origin / Content-Type guard for loopback write endpoints."""
+        loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+        host_hdr = (self.headers.get("Host") or "").strip()
+        if host_hdr:
+            parsed_h = urllib.parse.urlparse(f"http://{host_hdr}")
+            if (parsed_h.hostname or "").lower() not in loopback_hosts:
+                return f"安全拦截：拒绝非本机 Host ({host_hdr})"
+        origin_hdr = (self.headers.get("Origin") or "").strip()
+        if origin_hdr:
+            parsed_o = urllib.parse.urlparse(origin_hdr)
+            if parsed_o.scheme not in ("http", "https") or (parsed_o.hostname or "").lower() not in loopback_hosts:
+                return f"CSRF 安全拦截：拒绝跨站 Origin ({origin_hdr})"
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        ct = (self.headers.get("Content-Type") or "").strip().lower()
+        if length > 0 and (origin_hdr or ct):
+            if "application/json" not in ct:
+                return f"CSRF 安全拦截：POST 写请求必须使用 application/json (收到 {ct or 'empty'})"
+        return None
+
     def _read_json_body(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
@@ -386,7 +473,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 10})
+                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 11})
             elif route == "/api/state":
                 self._send_json(200, ORCHESTRATOR.store.snapshot())
             elif route == "/api/models":
@@ -394,6 +481,36 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 self._send_json(200, ORCHESTRATOR.get_capabilities(refresh_cli=refresh))
             elif route == "/api/specialists/catalog":
                 self._send_json(200, ORCHESTRATOR.get_specialist_catalog())
+            elif route == "/api/openscience/playbooks":
+                self._send_json(200, {"ok": True, "playbooks": ORCHESTRATOR.get_specialist_catalog().get("openscience_playbooks", [])})
+            elif route == "/api/tasks/provenance":
+                tid = qs.get("task_id", [""])[0]
+                if not tid:
+                    raise ValueError("缺少 task_id 参数")
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.get_task_provenance(tid)})
+            elif route == "/api/members/backup_candidates":
+                mid = qs.get("member_id", [""])[0]
+                if not mid:
+                    raise ValueError("缺少 member_id 参数")
+                req_same = qs.get("require_same_client", ["0"])[0] in ("1", "true", "yes")
+                pref_cross = qs.get("prefer_cross_engine", ["0"])[0] in ("1", "true", "yes")
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        **ORCHESTRATOR.list_backup_candidates(
+                            mid, require_same_client=req_same, prefer_cross_engine=pref_cross
+                        ),
+                    },
+                )
+            elif route == "/api/env/plotting_backends":
+                refresh = qs.get("refresh", ["0"])[0] == "1"
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.get_plotting_backends(refresh=refresh)})
+            elif route == "/api/tasks/artifacts":
+                tid = qs.get("task_id", [""])[0]
+                if not tid:
+                    raise ValueError("缺少 task_id 参数")
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.get_task_artifacts(tid)})
             elif route == "/api/projects":
                 self._send_json(200, ORCHESTRATOR.list_projects())
             elif route == "/api/fs/browse":
@@ -402,19 +519,27 @@ class SidebarHandler(BaseHTTPRequestHandler):
             elif route == "/api/fs/preview_file":
                 target = qs.get("target", [""])[0]
                 task_id = qs.get("task_id", [None])[0]
-                resolved = _resolve_link_target(target, task_id=task_id)
+                strict = qs.get("strict", ["0"])[0] in ("1", "true", "yes")
+                resolved = _resolve_link_target(target, task_id=task_id, allow_basename_fallback=not strict)
                 self._send_json(200, _build_file_preview(resolved))
             elif route == "/api/fs/raw_file":
                 raw_p = qs.get("path", [""])[0]
-                resolved = _resolve_link_target(raw_p)
+                task_id = qs.get("task_id", [None])[0]
+                resolved = _resolve_link_target(raw_p, task_id=task_id, allow_basename_fallback=False)
                 if resolved["kind"] != "file":
                     raise ValueError("仅支持读取普通文件")
                 abs_p = resolved["path"]
-                mime, _ = mimetypes.guess_type(abs_p)
+                if not _is_allowed_raw_file_path(abs_p):
+                    raise ValueError(f"安全拦截：拒绝读取绑定项目目录之外的文件: {abs_p}")
+                ext_low = os.path.splitext(abs_p)[1].lower()
+                mime = "image/svg+xml" if ext_low == ".svg" else (mimetypes.guess_type(abs_p)[0] or "application/octet-stream")
                 with open(abs_p, "rb") as f:
                     data = f.read()
                 self.send_response(200)
-                self.send_header("Content-Type", mime or "application/octet-stream")
+                self.send_header("Content-Type", mime)
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if ext_low == ".svg":
+                    self.send_header("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -429,6 +554,11 @@ class SidebarHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path
+
+        sec_err = self._check_local_post_security()
+        if sec_err:
+            self._send_json(403, {"ok": False, "error": sec_err})
+            return
 
         try:
             body = self._read_json_body()
@@ -470,6 +600,7 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     remote_control_url=body.get("remote_control_url"),
                     max_concurrency=body.get("max_concurrency"),
                     default_max_auto_repairs=body.get("default_max_auto_repairs"),
+                    auto_spawn_quota_backup=body.get("auto_spawn_quota_backup"),
                 )
                 self._send_json(200, {"ok": True, "binding": res})
             elif route == "/api/roles":
@@ -520,6 +651,19 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     reason=body.get("reason", "界面编辑成员名称/配置"),
                 )
                 self._send_json(200, {"ok": True, **res})
+            elif route == "/api/members/spawn_backup":
+                res = ORCHESTRATOR.spawn_quota_backup_member(
+                    source_member_id=body["source_member_id"],
+                    new_client=body.get("client") or None,
+                    new_model=body.get("model") or None,
+                    new_effort=body.get("reasoning_effort") or None,
+                    prefer_cross_engine=bool(body.get("prefer_cross_engine", False)),
+                    task_id=body.get("task_id") or None,
+                    step_index=body.get("step_index") if body.get("step_index") is not None else None,
+                    auto_reassign=bool(body.get("auto_reassign", False)),
+                    reason=body.get("reason", "模型额度预警，补充同角色跨模型替补"),
+                )
+                self._send_json(200, {"ok": True, **res})
             elif route == "/api/specialists/optimize_roster":
                 res = ORCHESTRATOR.optimize_roster(
                     apply_names=bool(body.get("apply_names", True)),
@@ -548,8 +692,17 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     max_auto_repairs=body.get("max_auto_repairs"),
                     require_manual_ruling=bool(body.get("require_manual_ruling", False)),
                     reuse_member_session=bool(body.get("reuse_member_session", False)),
+                    research_spec=body.get("research_spec"),
+                    openscience_playbooks=body.get("openscience_playbooks"),
+                    squad_preset=str(body.get("squad_preset") or ""),
                 )
                 self._send_json(200, {"ok": True, "task": res})
+            elif route == "/api/tasks/verify_figure":
+                res = ORCHESTRATOR.verify_task_figure(
+                    task_id=body["task_id"],
+                    manifest_path=body["manifest_path"],
+                )
+                self._send_json(200, {"ok": True, "report": res})
             elif route == "/api/tasks/interject":
                 res = ORCHESTRATOR.interject_chat(
                     task_id=body["task_id"],

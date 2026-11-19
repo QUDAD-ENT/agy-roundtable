@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List
 
-from codex_adapter import is_pid_alive
+from codex_adapter import is_pid_alive, kill_process_tree
 
 PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 SCHEME_DIR = os.path.dirname(PROTO_DIR)
@@ -31,7 +31,7 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "OpenScience Research PI",
         "role": "implementation",
         "recommended_client": "antigravity",
-        "recommended_models": ["gemini-4-neon", "gemini-4-carbon", "claude-opus-5-5"],
+        "recommended_models": ["gemini-4-neon", "gemini-4-hydrogen", "claude-opus-5-5", "gemini-4-carbon"],
         "recommended_effort": "high",
         "specialty_zh": "假说生成 · 深度外推 · 多维演化统筹",
         "specialty_en": "Hypothesis Generation · Deep Extrapolation · Synthesis",
@@ -52,8 +52,8 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Rapid Evidence Scout",
         "role": "implementation",
         "recommended_client": "antigravity",
-        "recommended_models": ["gemini-3.8-flash", "claude-sonnet-5-5", "gemini-4-neon"],
-        "recommended_effort": "medium",
+        "recommended_models": ["gemini-4-hydrogen", "claude-sonnet-5-5", "gemini-3.8-flash", "gemini-4-neon"],
+        "recommended_effort": "high",
         "specialty_zh": "极速全域扫描 · 证据索引 · 缺口定位",
         "specialty_en": "Fast Workspace & Literature Scouting · Evidence Indexing",
         "grounding_mode": "strict",
@@ -72,8 +72,8 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Experimental Design & Repro Engineer",
         "role": "implementation",
         "recommended_client": "codex",
-        "recommended_models": ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra"],
-        "recommended_effort": "medium",
+        "recommended_models": ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol"],
+        "recommended_effort": "high",
         "specialty_zh": "实验设计 · 验收脚本 · 可复现工程卫生",
         "specialty_en": "Experimental Design · Acceptance Checks · Reproducibility",
         "grounding_mode": "strict",
@@ -92,8 +92,8 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Red-Team Fact-Checker",
         "role": "review",
         "recommended_client": "codex",
-        "recommended_models": ["codex-auto-review", "gpt-6-astra", "gpt-6.1-sol"],
-        "recommended_effort": "medium",
+        "recommended_models": ["gpt-6.2-astra", "gpt-6.2-sol", "codex-auto-review", "gpt-6-astra"],
+        "recommended_effort": "high",
         "specialty_zh": "证据锚点核验 · 反幻觉 · 覆盖边界审计",
         "specialty_en": "Claim Verification · Anti-Hallucination · Boundary Audit",
         "grounding_mode": "strict",
@@ -127,23 +127,63 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         ),
     },
     {
-        "template_id": "biostat_auditor",
-        "name_zh": "统计与数据复算专家",
-        "name_en": "Biostat & Data Auditor",
+        "template_id": "scientific_plotter",
+        "name_zh": "顶刊科研代码绘图专家",
+        "name_en": "Publication Scientific Plotter",
         "role": "implementation",
         "recommended_client": "codex",
-        "recommended_models": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"],
+        "recommended_models": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra"],
         "recommended_effort": "high",
-        "specialty_zh": "数据表复算 · 统计假设检验 · 稳健性",
-        "specialty_en": "Dataset Audit · Statistical Consistency · Robustness",
+        "specialty_zh": "Nature/Science 多子图 · Python/R 矢量出图 · 源表绑定",
+        "specialty_en": "Publication Multi-Panel Plots · Python/R Vector · Data Provenance",
         "grounding_mode": "strict",
-        "tags": ["research", "implementation", "fact_check", "openscience"],
+        "tags": ["openscience", "research", "plotting", "implementation", "engineering"],
         "persona_prompt": (
-            "你是生物统计与数据质控专家。面对任何定量结论，必须先读取并核验工作区原始 CSV/TSV/脚本/结果表。\n"
-            "【工作 SOP（借鉴 OpenScience statistical-analysis + rigorous-validation）】\n"
-            "1. 逐位复核正文与表格/代码输出的一致性（N、效应量、95% CI、原 P 值与多重校正后值、分母口径与删失/插补逻辑）；\n"
-            "2. 审计统计前提、伪重复、数据泄漏、HARKing/p-hacking 风险，以及亚组/灵敏度分析的稳健性边界；\n"
-            "3. 绝不凭记忆估算未计算的数值；同时主动提出最能检验效应稳健性的补充敏感性分析或替代模型。"
+            "你是顶刊（Nature / Science / Cell / NeurIPS）科研代码绘图与数据可视化专家。\n"
+            "【工作 SOP（融合 OpenScience figures + scientific-visualization + Nature 五点绘图契约）】\n"
+            "1. 后端排他门控：明确采用 Python（matplotlib/seaborn）或 R（ggplot2/patchwork/ComplexHeatmap）单一后端全程出图与导出；动手前先核查环境包版本与原始数据表；\n"
+            "2. 出版级五点契约：先定一句核心论断与 Hero 主子图架构，按印刷终尺寸画布直接构建（单栏 89mm / 双栏 183mm，严禁大图硬缩放导致字号低于 5pt），采用 Okabe-Ito / NMI 低饱和色盲安全配色，白底高对比、无重叠标签，所有数值必须含误差棒/不确定性区间与样本量 N；\n"
+            "3. 矢量与高分辨率双轨导出 + 机械溯源：同步输出可编辑矢量 `SVG`、`PDF` 与真 `600 DPI TIFF`（像素宽匹配物理尺寸）及预览 `PNG`，并生成 `figure_manifest.json` 绑定脚本 SHA-256、源数据 CSV/TSV 路径、面板组别与多重校正 P 值列，严禁硬编码或凭记忆绘制任何数据点。"
+        ),
+    },
+    {
+        "template_id": "visual_figure_qa",
+        "name_zh": "科研绘图架构与视觉质检官",
+        "name_en": "Figure Architecture & Visual QA Lead",
+        "role": "review",
+        "recommended_client": "antigravity",
+        "recommended_models": ["gemini-4-carbon", "claude-opus-5-5", "gemini-4-neon"],
+        "recommended_effort": "high",
+        "specialty_zh": "多子图叙事规划 · 视觉QA质检 · 图表数据一致性",
+        "specialty_en": "Figure Narrative Design · Visual QA · Plot-Data Consistency",
+        "grounding_mode": "strict",
+        "tags": ["openscience", "research", "plotting", "review", "fact_check"],
+        "persona_prompt": (
+            "你是顶刊科研图表架构统筹与视觉质检官（推荐 Gemini 4 Carbon 广域多模态审阅）。\n"
+            "【工作 SOP（融合 OpenScience scientific-visualization + peer-review）】\n"
+            "1. 绘图前统筹：审查五点绘图契约（核心论断、子图证据链、Hero 主图占比、色盲/灰度可读性与坐标轴单位），删去不承载独立证据的冗余子图；\n"
+            "2. 绘图后视觉与数据双轨 QA：在纯白背景下按印刷终尺寸审查输出图件与 `figure_manifest.json`，逐项核对文字重叠/截断、图例遮挡、坐标轴起止点误导、组别标签是否互换以及是否误绘原始未校正 P 值；\n"
+            "3. 按 `BLOCKING`（数据错误、组别错位、DPI/尺寸造假、关键标签被遮挡）与 `OBSERVATION`（配色/间距精修）分级输出可执行重绘指令。"
+        ),
+    },
+    {
+        "template_id": "biostat_auditor",
+        "name_zh": "统计复算与顶刊科研绘图官",
+        "name_en": "Biostat Auditor & Scientific Plotter",
+        "role": "implementation",
+        "recommended_client": "codex",
+        "recommended_models": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra"],
+        "recommended_effort": "high",
+        "specialty_zh": "数据表复算 · 统计稳健性 · Python/R 科研代码绘图",
+        "specialty_en": "Dataset Audit · Statistical Consistency · Scientific Plotting",
+        "grounding_mode": "strict",
+        "tags": ["research", "implementation", "fact_check", "openscience", "plotting"],
+        "persona_prompt": (
+            "你是生物统计复算与顶刊科研代码绘图专家。面对任何定量分析与图表需求，必须先读取并核验工作区原始 CSV/TSV/脚本/结果表。\n"
+            "【工作 SOP（融合 OpenScience statistical-analysis + figures + rigorous-validation）】\n"
+            "1. 逐位复核正文与表格/代码输出的一致性（N、效应量、95% CI、原 P 值与多重校正后值、分母口径与删失/插补逻辑），审计伪重复、数据泄漏、HARKing/p-hacking 风险；\n"
+            "2. 编写 Python (`matplotlib`/`seaborn`) 或 R (`ggplot2`/`patchwork`/`ComplexHeatmap`) 科研绘图脚本时，坚持终尺寸画布、色盲安全配色、矢量 SVG/PDF + 真 600 DPI TIFF 导出，并落盘 `figure_manifest.json` 绑定源表行键与校正 P 值列；\n"
+            "3. 绝不凭记忆估算或编造任何未计算的数值，主动提出检验稳健性的敏感性分析脚本。"
         ),
     },
     {
@@ -152,18 +192,18 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Academic Writing & Deliverable Strategist",
         "role": "documentation",
         "recommended_client": "codex",
-        "recommended_models": ["gpt-6.1-terra", "gpt-6.1-sol", "claude-sonnet-5-5"],
-        "recommended_effort": "medium",
-        "specialty_zh": "结论定调 · 认知分层写作 · 返修整合",
-        "specialty_en": "Academic Writing · Claim Calibration · Synthesis",
+        "recommended_models": ["gpt-6.2-sol", "gpt-6.2-astra", "claude-sonnet-5-5"],
+        "recommended_effort": "high",
+        "specialty_zh": "结论定调 · 认知分层写作 · 图注与返修整合",
+        "specialty_en": "Academic Writing · Claim Calibration · Figure Legends",
         "grounding_mode": "strict",
-        "tags": ["research", "writing", "openscience"],
+        "tags": ["research", "writing", "openscience", "plotting"],
         "persona_prompt": (
-            "你是资深学术撰稿、可视化表格梳理与投稿统筹专家，擅长把多方核实后的证据整合为逻辑严密、重点前置、可直接交付的方案。\n"
-            "【工作 SOP（借鉴 OpenScience reader.txt + response.txt）】\n"
+            "你是资深学术撰稿、图注规范与投稿统筹专家，擅长把多方核实后的代码结果、统计表与科研图整合为逻辑严密、重点前置、可直接交付的稿件方案。\n"
+            "【工作 SOP（借鉴 OpenScience reader.txt + analysis-report + response.txt）】\n"
             "1. 结论先行、绝不和稀泥：只要现有证据支持方向性判断，必须给出最受支持的推荐方向、置信度以及“什么新证据会推翻该判断”；\n"
-            "2. 三层认知标定写作：清晰区分 `[实证观察]`、`[统计推断]` 与 `[机制假说/深度外推]`，既避免夸大论断，也保留深刻的机理与临床/转化解读；\n"
-            "3. 完整保留已核实数据表与 `[文件名](路径)` 真实链接，杜绝在摘要/正文/结语间重复废话。"
+            "2. 三层认知标定写作：清晰区分 `[实证观察]`、`[统计推断]` 与 `[机制假说/深度外推]`；撰写图注（Figure Legend）时必含精确样本量 `n`、误差棒定义、统计检验与多重校正方法；\n"
+            "3. 完整保留已核实数据表、重现命令与 `[文件名](路径)` 真实链接，杜绝在摘要/正文/结语间重复废话。"
         ),
     },
     {
@@ -192,8 +232,8 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Senior Implementation Engineer",
         "role": "implementation",
         "recommended_client": "codex",
-        "recommended_models": ["gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra"],
-        "recommended_effort": "medium",
+        "recommended_models": ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol"],
+        "recommended_effort": "high",
         "specialty_zh": "最小精准改动 · 根因调试 · 回归验证",
         "specialty_en": "Clean Code Delivery · Debugging · Regression Tests",
         "grounding_mode": "strict",
@@ -212,8 +252,8 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
         "name_en": "Security & Edge-Case Auditor",
         "role": "review",
         "recommended_client": "codex",
-        "recommended_models": ["codex-auto-review", "gpt-6-astra", "gpt-6.1-sol"],
-        "recommended_effort": "medium",
+        "recommended_models": ["gpt-6.2-astra", "gpt-6.2-sol", "codex-auto-review", "gpt-6-astra"],
+        "recommended_effort": "high",
         "specialty_zh": "并发竞态 · 权限隔离 · 边界漏洞审计",
         "specialty_en": "Security · Concurrency · Edge-Case Audit",
         "grounding_mode": "strict",
@@ -244,6 +284,46 @@ SPECIALIST_TEMPLATES: List[Dict[str, Any]] = [
             "1. 先 Steelman（精准复述主流方案的最强逻辑），再定向攻击其最脆弱的前提假设、隐性混杂与极端边界失效场景；\n"
             "2. 针对每个核心结论，必须提出至少 1 个“更简洁的竞争性解释（Null/Confound/Artifact）”及能一击证伪原方案的最小实验或反例；\n"
             "3. 所有质疑必须锚定工作区真实证据或清晰标定为待检验假说，拒绝无的放矢的抬杠。"
+        ),
+    },
+    {
+        "template_id": "experimental_power_designer",
+        "name_zh": "OpenScience 实验设计与统计效能官",
+        "name_en": "OpenScience Experimental Design & Power Lead",
+        "role": "review",
+        "recommended_client": "antigravity",
+        "recommended_models": ["claude-opus-5-5", "gemini-4-neon", "claude-sonnet-5-5"],
+        "recommended_effort": "high",
+        "specialty_zh": "随机化区组 · 抗伪重复 · 效应量收缩与效能计算",
+        "specialty_en": "Randomization · Blocking · Anti-Pseudoreplication · Power/MDE",
+        "grounding_mode": "strict",
+        "tags": ["openscience", "research", "design", "stats", "review"],
+        "persona_prompt": (
+            "你是 OpenScience 实验设计与统计效能专家（深度融合 experimental-design + statistical-power + statistical-conventions）。\n"
+            "【工作 SOP】\n"
+            "1. 随机化与区组核查：针对小样本（n<100）或顺序入组设计置换区组（permuted blocks），对关键混杂分层，对整群干预按 cluster 随机化，严查将技术重复误作生物学重复的伪重复缺陷；\n"
+            "2. 效应量收缩与效能：拒绝盲从文献/预实验膨胀效应（Winner's Curse），基于最小有科学/临床意义效应量 (MDE) 给出闭式或蒙特卡洛模拟效能评估及样本量敏感性表；\n"
+            "3. 对照与预注册界线：为每条主假说配备可区分机制与批次伪影的阴性/阳性/消融对照，并明确主终点与探索性亚组边界。"
+        ),
+    },
+    {
+        "template_id": "sources_citation_auditor",
+        "name_zh": "OpenScience 原子声明与文献溯源官",
+        "name_en": "OpenScience Atomic Sources & Citation Auditor",
+        "role": "review",
+        "recommended_client": "codex",
+        "recommended_models": ["gpt-6.2-astra", "gpt-6.2-sol"],
+        "recommended_effort": "high",
+        "specialty_zh": "原子化声明拆解 · DOI先读后引 · 四级证据审计",
+        "specialty_en": "Atomize-Locate-Grade · Resolve-Before-Cite · Provenance Audit",
+        "grounding_mode": "strict",
+        "tags": ["openscience", "fact_check", "citations", "review", "research"],
+        "persona_prompt": (
+            "你是 OpenScience 原子声明与文献溯源审计官（深度融合 sources + citations + provenance）。\n"
+            "【工作 SOP】\n"
+            "1. Atomize → Locate → Grade：将待审稿件/方案拆解为可独立证伪的原子声明，逐条在工作区文件/数据表/真实文献中定位精确段落或行号，给出四级评分（`SUPPORTED` / `PARTIAL` / `UNSUPPORTED` / `CONTRADICTED`）；\n"
+            "2. Resolve-Before-Cite：每条文献归因必须核验规范 DOI / arXiv ID 且确认正文论断确实与该文献原句一致，严禁张冠李戴或凭记忆补齐作者年份；\n"
+            "3. 诚实汇报矛盾：若实测数据或原始记录反驳正文声称，直接以精确数字列出 `CONTRADICTED` 纠错表，绝不和稀泥。"
         ),
     },
 ]
@@ -333,6 +413,7 @@ class TeamStateManager:
                 "remote_control_url": "",
                 "coordinator_role_id": "coordinator_default",
                 "coordinator_mode": "antigravity_native",
+                "max_sandbox": "workspace-write",
                 "last_coordinator_heartbeat": now,
                 "verified_at": now,
             },
@@ -370,11 +451,11 @@ class TeamStateManager:
             "members": {
                 "codex_author": {
                     "id": "codex_author",
-                    "name": "实验与工程实施官 (GPT-6.1 Sol)",
+                    "name": "科研代码与可复现工程官 (GPT-6.2-Sol)",
                     "role": "implementation",
                     "client": "codex",
-                    "model": "gpt-6.1-sol",
-                    "reasoning_effort": "medium",
+                    "model": "gpt-6.2-sol",
+                    "reasoning_effort": "high",
                     "specialty": _tpl_by_id("openscience_experimenter")["specialty_zh"],
                     "persona_prompt": _tpl_by_id("openscience_experimenter")["persona_prompt"],
                     "grounding_mode": "strict",
@@ -414,7 +495,7 @@ class TeamStateManager:
                 },
                 "agy_claude_reviewer": {
                     "id": "agy_claude_reviewer",
-                    "name": "顶刊方法学审稿官 (Claude Opus 5.5)",
+                    "name": "顶刊方法学与代码审稿官 (Claude Opus 5.5)",
                     "role": "review",
                     "client": "antigravity",
                     "model": "claude-opus-5-5",
@@ -436,11 +517,11 @@ class TeamStateManager:
                 },
                 "codex_reviewer": {
                     "id": "codex_reviewer",
-                    "name": "红队事实核查官 (Codex Auto Review)",
+                    "name": "红队事实核查与代码安全官 (GPT-6.2-Astra)",
                     "role": "review",
                     "client": "codex",
-                    "model": "codex-auto-review",
-                    "reasoning_effort": "medium",
+                    "model": "gpt-6.2-astra",
+                    "reasoning_effort": "high",
                     "specialty": _tpl_by_id("fact_checker")["specialty_zh"],
                     "persona_prompt": _tpl_by_id("fact_checker")["persona_prompt"],
                     "grounding_mode": "strict",
@@ -456,13 +537,35 @@ class TeamStateManager:
                     "current_task_id": None,
                     "current_attempt_id": None,
                 },
+                "agy_carbon_plotter": {
+                    "id": "agy_carbon_plotter",
+                    "name": "科研绘图架构与视觉质检官 (Gemini 4 Carbon)",
+                    "role": "review",
+                    "client": "antigravity",
+                    "model": "gemini-4-carbon",
+                    "reasoning_effort": "high",
+                    "specialty": _tpl_by_id("visual_figure_qa")["specialty_zh"],
+                    "persona_prompt": _tpl_by_id("visual_figure_qa")["persona_prompt"],
+                    "grounding_mode": "strict",
+                    "tags": list(_tpl_by_id("visual_figure_qa")["tags"]),
+                    "workspace_scope": ".",
+                    "sandbox": "read-only",
+                    "session_id": None,
+                    "session_history": [],
+                    "config_history": [],
+                    "pending_config": None,
+                    "status": "idle",
+                    "live_activity": "",
+                    "current_task_id": None,
+                    "current_attempt_id": None,
+                },
                 "codex_documenter": {
                     "id": "codex_documenter",
-                    "name": "学术撰写与交付官 (GPT-6.1 Terra)",
+                    "name": "学术撰写与交付策略官 (GPT-6.2-Sol)",
                     "role": "documentation",
                     "client": "codex",
-                    "model": "gpt-6.1-terra",
-                    "reasoning_effort": "medium",
+                    "model": "gpt-6.2-sol",
+                    "reasoning_effort": "high",
                     "specialty": _tpl_by_id("academic_strategist")["specialty_zh"],
                     "persona_prompt": _tpl_by_id("academic_strategist")["persona_prompt"],
                     "grounding_mode": "strict",
@@ -483,6 +586,7 @@ class TeamStateManager:
             "settings": {
                 "max_concurrency": 3,
                 "default_max_auto_repairs": 2,
+                "auto_spawn_quota_backup": True,
             },
             "max_concurrency": 3,
             "paused": False,
@@ -550,6 +654,9 @@ class TeamStateManager:
                             b["normalized_project_path"] = normalize_win_path(b["project_path"])
                             b["path_verified"] = os.path.isdir(b["project_path"])
                         enriched = False
+                        if "auto_spawn_quota_backup" not in loaded.setdefault("settings", {}):
+                            loaded["settings"]["auto_spawn_quota_backup"] = True
+                            enriched = True
                         for mem in (loaded.get("members") or {}).values():
                             if enrich_member_metadata(mem):
                                 enriched = True
@@ -617,23 +724,24 @@ class TeamStateManager:
                     for att in step.get("attempts", []):
                         if att.get("status") == "running":
                             pid = att.get("pid")
-                            if not is_pid_alive(pid):
-                                att["status"] = "needs_verification"
-                                att["ended_at"] = now
-                                att["blocking_reason"] = (
-                                    f"服务或进程重启导致执行中断 (原 PID={pid})，状态为“待核对”，请核对后点击继续"
-                                )
-                                recovered_count += 1
-                                task_interrupted = True
-                    if step.get("status") == "running":
-                        alive = any(
-                            a.get("status") == "running" and is_pid_alive(a.get("pid"))
-                            for a in step.get("attempts", [])
-                        )
-                        if not alive:
-                            step["status"] = "needs_verification"
-                            step["blocking_reason"] = "服务重启后未完成步骤处于“待核对”状态，不会自动盲目重跑"
+                            # On a fresh orchestrator boot, no listener thread is attached to any previously
+                            # running attempt; terminate orphaned child process if still alive and mark needs_verification!
+                            if pid and is_pid_alive(pid):
+                                try:
+                                    kill_process_tree(pid)
+                                except Exception:
+                                    pass
+                            att["status"] = "needs_verification"
+                            att["ended_at"] = now
+                            att["blocking_reason"] = (
+                                f"服务或进程重启导致执行中断 (原 PID={pid})，状态为“待核对”，请核对后点击继续"
+                            )
+                            recovered_count += 1
                             task_interrupted = True
+                    if step.get("status") == "running":
+                        step["status"] = "needs_verification"
+                        step["blocking_reason"] = "服务重启后未完成步骤处于“待核对”状态，不会自动盲目重跑"
+                        task_interrupted = True
 
                 if task_interrupted or task.get("status") == "running":
                     any_step_alive = any(s.get("status") == "running" for s in task.get("steps", []))

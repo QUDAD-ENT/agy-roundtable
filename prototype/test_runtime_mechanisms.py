@@ -154,6 +154,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 title="写范围冲突串行测试",
                 goal="conflict",
                 dispatch_mode="coordinator_auto",
+                sandbox="workspace-write",
                 steps=[
                     {"title": "W1", "member_id": "codex_author", "prompt": "STEP_A", "depends_on": [], "read_only": False, "write_scope": ["Codex-Antigravity-方案/qa/shared"]},
                     {"title": "W2", "member_id": "codex_author_2", "prompt": "STEP_B", "depends_on": [], "read_only": False, "write_scope": ["Codex-Antigravity-方案/qa/shared/sub"]},
@@ -179,6 +180,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 title="不冲突写范围并行测试",
                 goal="parallel",
                 dispatch_mode="coordinator_auto",
+                sandbox="workspace-write",
                 steps=[
                     {"title": "P1", "member_id": "codex_author", "prompt": "PARA_1", "depends_on": [], "read_only": False, "write_scope": ["Codex-Antigravity-方案/qa/dir1"]},
                     {"title": "P2", "member_id": "codex_author_2", "prompt": "PARA_2", "depends_on": [], "read_only": False, "write_scope": ["Codex-Antigravity-方案/qa/dir2"]},
@@ -241,8 +243,8 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
                 ],
             )
             time.sleep(0.1)
-            # Member is working -> switch config with mode='next_round'
-            sw = orch.switch_member_config("codex_author", reasoning_effort="high", mode="next_round", reason="测试下轮生效")
+            # Member is working (default effort='high') -> switch config to 'medium' with mode='next_round'
+            sw = orch.switch_member_config("codex_author", reasoning_effort="medium", mode="next_round", reason="测试下轮生效")
             self.assertEqual(sw["applied"], "next_round")
 
             # Wait for completion
@@ -262,7 +264,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
             self.assertEqual(att["fallback_of_session_id"], "dead-session-000")
             self.assertEqual(att["session_id"], "fresh-replacement-999")
             # Verify pending_config automatically promoted at turn boundary!
-            self.assertEqual(snap["members"]["codex_author"]["reasoning_effort"], "high")
+            self.assertEqual(snap["members"]["codex_author"]["reasoning_effort"], "medium")
             self.assertIsNone(snap["members"]["codex_author"]["pending_config"])
 
             # Now create a NEWER unfinished task on codex_author (paused/needs_ruling) and verify stale-round guard!
@@ -1058,7 +1060,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
             # 3. Model-Family Prompt Dialects + OpenScience 3-Tier Epistemic Calibration + M-MAD Host Synthesis
             self.assertIn('<dialect_calibration model_family="claude">', r1_claude[0])
             self.assertIn("Gemini 旗舰广域综合与假说演化模式", r1_gemini[0])
-            self.assertIn("Codex / GPT 工具先行与机械验收模式", r1_codex[0])
+            self.assertIn("gpt-astra.txt", r1_codex[0])
             self.assertIn("[机制假说/深度外推 Hypothesis]", r1_claude[0])
             synth_prompts = [c["prompt"] for c in captured if "多维仲裁与演化矩阵" in c["prompt"]]
             self.assertEqual(len(synth_prompts), 1)
@@ -1171,6 +1173,618 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
             self.assertEqual(cur2["status"], "failed")
             self.assertIn("WinError 206", cur2["steps"][0]["blocking_reason"])
             self.assertEqual(orch.store.snapshot()["members"]["codex_author"]["status"], "idle")
+        finally:
+            orch.stop_scheduler()
+
+    def test_14_p0_sandbox_trust_root_path_escape_and_capability_routing(self) -> None:
+        from team_state_manager import SPECIALIST_TEMPLATES
+
+        # 1. Verify latest flagship roster: Gemini 4 Carbon present, 13 templates, ZERO gpt-6.1-terra anywhere!
+        self.assertGreaterEqual(len(SPECIALIST_TEMPLATES), 13)
+        for tpl in SPECIALIST_TEMPLATES:
+            for slug in tpl.get("recommended_models") or []:
+                self.assertNotIn("terra", slug.lower(), f"Template {tpl['template_id']} must not reference terra")
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=lambda *a, **k: None),
+            agy_adapter=AgyAdapter(runner_override=lambda *a, **k: None),
+            auto_start_scheduler=False,
+        )
+        try:
+            snap = orch.store.snapshot()
+            self.assertIn("agy_carbon_plotter", snap["members"])
+            self.assertEqual(snap["members"]["agy_carbon_plotter"]["model"], "gemini-4-carbon")
+            for mid, m in snap["members"].items():
+                self.assertNotIn("terra", str(m.get("model", "")).lower(), f"Default member {mid} must not use terra")
+
+            # 2. Hard sandbox trust root: reject danger-full-access across all APIs
+            with self.assertRaises(ValueError):
+                orch.create_task(title="非法权限", goal="test", sandbox="danger-full-access")
+            with self.assertRaises(ValueError):
+                orch.upsert_member("bad_m", "implementation", client="codex", model="gpt-6.2-sol", sandbox="danger-full-access")
+            with self.assertRaises(ValueError):
+                orch.switch_member_config("codex_author", sandbox="danger-full-access")
+
+            # 3. Path-escape guard: reject .. and absolute workspace_scope
+            with self.assertRaises(ValueError):
+                orch.create_task(title="路径越界1", goal="test", workspace_scope="../outside_escape")
+            with self.assertRaises(ValueError):
+                orch.create_task(title="路径越界2", goal="test", workspace_scope=os.path.abspath(os.sep))
+            with self.assertRaises(ValueError):
+                orch.upsert_member("esc_m", "implementation", client="codex", model="gpt-6.2-sol", workspace_scope="../../etc")
+
+            # 4. attach_plan inherits task read-only ceiling (cannot escalate to workspace-write!)
+            ro_task = orch.create_task(
+                title="只读上限",
+                goal="test ceiling",
+                dispatch_mode="coordinator_plan",
+                auto_template="none",
+                sandbox="read-only",
+            )
+            planned = orch.attach_plan(
+                ro_task["id"],
+                steps=[{"member_id": "codex_author", "prompt": "try write", "read_only": False, "sandbox": "workspace-write"}],
+            )
+            self.assertEqual(planned["steps"][0]["sandbox"], "read-only")
+            self.assertTrue(planned["steps"][0]["read_only"])
+
+            # 5. Capability routing guard: requires_shell=True blocked on Antigravity headless nodes!
+            with self.assertRaises(ValueError):
+                orch.create_task(
+                    title="壳能力拦截",
+                    goal="run python",
+                    execution_mode="custom_dag",
+                    steps=[{"member_id": "agy_gemini", "prompt": "run pytest", "requires_shell": True}],
+                )
+            with self.assertRaises(ValueError):
+                orch.create_task(
+                    title="搭积木壳拦截",
+                    goal="run python",
+                    execution_mode="custom_dag",
+                    stages=[[{"member_id": "agy_carbon_plotter", "step_type": "execution", "requires_shell": True}]],
+                )
+            ok_shell_t = orch.create_task(
+                title="Codex可执行Shell",
+                goal="run python",
+                execution_mode="custom_dag",
+                steps=[{"member_id": "codex_author", "prompt": "run pytest", "requires_shell": True}],
+            )
+            self.assertTrue(ok_shell_t["steps"][0]["requires_shell"])
+            with self.assertRaises(ValueError):
+                orch.reassign_step(ok_shell_t["id"], 0, "agy_gemini", reason="invalid reassign")
+        finally:
+            orch.stop_scheduler()
+
+    def test_15_fail_closed_review_decoupled_signoff_and_sidecar_ledger(self) -> None:
+        def fc_runner(prompt, session_id, **kwargs):
+            cfg = kwargs["requested_config"]
+            if "独立审查输出格式契约" in prompt:
+                # Malformed prose without JSON verdict — MUST fail closed to needs_ruling, NEVER ACCEPT!
+                return CodexExecutionResult(
+                    session_id="rev-bad-json",
+                    response_text="Looks totally fine to me, great job!",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id="exec-ledger-1",
+                response_text="代码与统计脚本已执行完成。",
+                partial_text="代码与统计脚本已执行完成。",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=cfg,
+                accepted_config=kwargs["accepted_config"],
+                command_logs=[
+                    {"command": "python run_stats.py", "exit_code": 0, "output_excerpt": "OK " + ("X" * 3000)},
+                    {"command": "python make_fig1.py", "exit_code": 0, "output_excerpt": "Saved fig1.svg"},
+                ],
+                changed_files=[{"path": "scripts/run_stats.py", "kind": "update"}],
+                edit_after_check=True,
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=fc_runner),
+            agy_adapter=AgyAdapter(runner_override=fc_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            t = orch.create_task(
+                title="FailClosed与旁路账本",
+                goal="执行统计并审查",
+                dispatch_mode="coordinator_auto",
+                auto_template="standard_review_loop",
+                research_spec={"mode": "managed_exec", "seed": 42},
+            )
+            deadline = time.time() + 12.0
+            cur = None
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "needs_ruling":
+                    break
+                time.sleep(0.06)
+
+            self.assertIsNotNone(cur)
+            self.assertEqual(cur["status"], "needs_ruling", "Malformed review MUST fail-closed to needs_ruling!")
+            self.assertEqual(cur["steps"][1]["status"], "needs_ruling")
+            self.assertEqual(cur["steps"][0]["repair_count"], 0, "Malformed review must NOT consume repair_count")
+            self.assertEqual(cur["reviews"][-1]["verdict"], "INVALID_FORMAT")
+
+            # Edit-After-Check caused research_signoff to be failed; human ruling override must NEVER turn it into passed!
+            self.assertEqual(cur["research_signoff"]["status"], "failed")
+            after_rule = orch.submit_ruling(t["id"], 1, decision="reject", reason="人工强制放行")
+            self.assertEqual(after_rule["research_signoff"]["status"], "failed")
+            self.assertTrue(after_rule["research_signoff"].get("human_override_noted"))
+
+            # Verify sidecar ledger saved full command_logs while team_state.json only keeps compact summary!
+            att0 = cur["steps"][0]["attempts"][0]
+            self.assertIn("ledger_summary", att0)
+            self.assertEqual(att0["ledger_summary"]["command_count"], 2)
+            self.assertTrue(att0["ledger_summary"]["edit_after_check"])
+            self.assertTrue(os.path.isfile(att0["ledger_summary"]["ledger_path"]))
+            with open(self.state_path, "r", encoding="utf-8") as sf:
+                raw_state_txt = sf.read()
+            self.assertNotIn("X" * 1000, raw_state_txt, "Full command stdout must stay in sidecar JSONL, not team_state.json")
+
+            arts = orch.get_task_artifacts(t["id"])
+            self.assertEqual(len(arts["attempts_ledger"][0]["command_logs"]), 2)
+        finally:
+            orch.stop_scheduler()
+
+    def test_16_lock_free_verifier_script_tamper_readonly_inputs_and_figure_qa(self) -> None:
+        import struct
+        from figure_qa import inspect_tiff, sha256_file, verify_figure_manifest
+        from research_verifier import run_acceptance_checks, snapshot_readonly_inputs
+
+        def _make_minimal_tiff(path: str, width: int, height: int, dpi_x: int, dpi_y: int) -> None:
+            # Pure-stdlib minimal valid little-endian TIFF with ImageWidth, ImageLength, XResolution, YResolution, ResolutionUnit=2 (inch)
+            # Header (8 bytes) + IFD at offset 8: count=5 (2B) + 5*12 (60B) + next_ifd=0 (4B) = 74 bytes -> rationals at 74 & 82
+            entries = [
+                (256, 4, 1, width),       # ImageWidth (LONG)
+                (257, 4, 1, height),      # ImageLength (LONG)
+                (282, 5, 1, 74),          # XResolution (RATIONAL @ 74)
+                (283, 5, 1, 82),          # YResolution (RATIONAL @ 82)
+                (296, 3, 1, 2),           # ResolutionUnit = 2 (inch)
+            ]
+            buf = bytearray(b"II" + struct.pack("<HI", 42, 8))
+            buf += struct.pack("<H", len(entries))
+            for tag, typ, cnt, val in entries:
+                buf += struct.pack("<HHII", tag, typ, cnt, val)
+            buf += struct.pack("<I", 0)
+            buf += struct.pack("<II", dpi_x, 1)
+            buf += struct.pack("<II", dpi_y, 1)
+            with open(path, "wb") as f:
+                f.write(buf)
+
+        def _make_minimal_png(path: str, width: int, height: int) -> None:
+            ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+            with open(path, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + ihdr + b"\x00\x00\x00\x00")
+
+        proj = os.path.join(self.tmp_dir, f"sci_proj_{time.time_ns()}")
+        os.makedirs(os.path.join(proj, "raw"), exist_ok=True)
+        os.makedirs(os.path.join(proj, "scripts"), exist_ok=True)
+        os.makedirs(os.path.join(proj, "figures"), exist_ok=True)
+
+        raw_csv = os.path.join(proj, "raw", "cohort.csv")
+        with open(raw_csv, "w", encoding="utf-8", newline="") as f:
+            f.write("id,group,value\n1,Control,10.0\n2,Control,12.0\n3,Treated,20.0\n4,Treated,22.0\n")
+
+        src_csv = os.path.join(proj, "figures", "fig1_source.csv")
+        with open(src_csv, "w", encoding="utf-8", newline="") as f:
+            f.write("group,n,mean_value,p_raw,p_adj\nControl,24,11.0,0.03,0.08\nTreated,24,21.0,0.03,0.08\n")
+
+        svg_p = os.path.join(proj, "figures", "fig1.svg")
+        with open(svg_p, "w", encoding="utf-8") as f:
+            f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252 180"><path d="M0 0 L10 10"/><text font-size="8pt">Panel A</text></svg>')
+        png_p = os.path.join(proj, "figures", "fig1.png")
+        _make_minimal_png(png_p, 1050, 750)
+        good_tif = os.path.join(proj, "figures", "fig1.tiff")
+        _make_minimal_tiff(good_tif, 2102, 1500, 600, 600)  # 2102 / 600 * 25.4 = 88.98 mm!
+        fake_tif = os.path.join(proj, "figures", "fig1_forged.tiff")
+        _make_minimal_tiff(fake_tif, 200, 150, 600, 600)    # Forged 600 DPI tag -> only 8.47 mm wide!
+
+        tif_meta = inspect_tiff(good_tif)
+        self.assertTrue(tif_meta["ok"])
+        self.assertEqual(tif_meta["dpi_x"], 600.0)
+        self.assertAlmostEqual(tif_meta["physical_width_mm"], 88.98, delta=0.2)
+
+        # 1. Forged 600 DPI TIFF + swapped group labels + raw P vs p_adj misuse -> ALL caught!
+        bad_mf = os.path.join(proj, "figures", "bad_manifest.json")
+        with open(bad_mf, "w", encoding="utf-8") as f:
+            json.dump({
+                "figure_id": "fig1_bad",
+                "target_width_mm": 89.0,
+                "min_dpi": 600,
+                "exports": {"svg": "figures/fig1.svg", "tiff": "figures/fig1_forged.tiff"},
+                "panel_sources": [{
+                    "panel_id": "A",
+                    "source_table": "figures/fig1_source.csv",
+                    "key_col": "group",
+                    "value_col": "mean_value",
+                    "n_col": "n",
+                    "p_col": "p_adj",
+                    "require_adjusted_p": True,
+                    "expected_rows": [
+                        {"key": "Control", "plotted_value": 21.0, "plotted_n": 24, "plotted_p": 0.03},  # SWAPPED value + raw P!
+                        {"key": "Treated", "plotted_value": 11.0, "plotted_n": 24, "plotted_p": 0.03},
+                    ],
+                }],
+            }, f)
+        bad_qa = verify_figure_manifest(bad_mf, proj)
+        self.assertFalse(bad_qa["ok"])
+        joined_b = "\n".join(bad_qa["blocking"])
+        self.assertIn("伪造高 DPI", joined_b)
+        self.assertIn("标签互换", joined_b)
+        self.assertIn("原始 P 值", joined_b)
+
+        # 2. Valid manifest + intact readonly_inputs + hash-locked script -> FULL PASS!
+        good_mf = os.path.join(proj, "figures", "fig1_manifest.json")
+        with open(good_mf, "w", encoding="utf-8") as f:
+            json.dump({
+                "figure_id": "fig1",
+                "title": "Cohort Comparison",
+                "target_width_mm": 89.0,
+                "min_dpi": 600,
+                "exports": {"svg": "figures/fig1.svg", "png": "figures/fig1.png", "tiff": "figures/fig1.tiff"},
+                "panel_sources": [{
+                    "panel_id": "A",
+                    "source_table": "figures/fig1_source.csv",
+                    "key_col": "group",
+                    "value_col": "mean_value",
+                    "n_col": "n",
+                    "p_col": "p_adj",
+                    "require_adjusted_p": True,
+                    "expected_rows": [
+                        {"key": "Control", "plotted_value": 11.0, "plotted_n": 24, "plotted_p": 0.08},
+                        {"key": "Treated", "plotted_value": 21.0, "plotted_n": 24, "plotted_p": 0.08},
+                    ],
+                }],
+            }, f)
+
+        chk_script = os.path.join(proj, "scripts", "check.py")
+        with open(chk_script, "w", encoding="utf-8") as f:
+            f.write("import sys; print('ACCEPTANCE_OK'); sys.exit(0)\n")
+        chk_sha = sha256_file(chk_script)
+
+        before_snap = snapshot_readonly_inputs(proj, ["raw"])
+        rspec = {
+            "mode": "managed_exec",
+            "readonly_inputs": ["raw"],
+            "acceptance_checks": [{"check_id": "unit_check", "script_path": "scripts/check.py", "expected_sha256": chk_sha}],
+            "figure_manifests": ["figures/fig1_manifest.json"],
+        }
+        rep_ok = run_acceptance_checks(proj, rspec, before_inputs_snapshot=before_snap)
+        self.assertTrue(rep_ok["ok"], f"Expected full pass, got blocking: {rep_ok['blocking']}")
+        self.assertEqual(rep_ok["status"], "passed")
+
+        # 3. Tamper check script -> SHA-256 mismatch refuses execution!
+        with open(chk_script, "a", encoding="utf-8") as f:
+            f.write("# tampered\n")
+        rep_tamp_script = run_acceptance_checks(proj, rspec, before_inputs_snapshot=before_snap)
+        self.assertFalse(rep_tamp_script["ok"])
+        self.assertTrue(any("篡改" in b for b in rep_tamp_script["blocking"]))
+
+        # 4. Tamper readonly raw data -> caught by SHA-256 snapshot!
+        with open(raw_csv, "a", encoding="utf-8") as f:
+            f.write("5,Treated,99.0\n")
+        rep_tamp_raw = run_acceptance_checks(proj, {"readonly_inputs": ["raw"]}, before_inputs_snapshot=before_snap)
+        self.assertFalse(rep_tamp_raw["ok"])
+        self.assertTrue(any("原始输入文件被篡改" in b for b in rep_tamp_raw["blocking"]))
+
+    def test_17_http_csrf_raw_file_guard_csv_wide_truncation_and_strict_artifact_api(self) -> None:
+        import threading
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        import serve_sidebar
+
+        proj = os.path.join(self.tmp_dir, f"http_proj_{time.time_ns()}")
+        os.makedirs(os.path.join(proj, "other"), exist_ok=True)
+        os.makedirs(os.path.join(proj, "figures"), exist_ok=True)
+        # Wide CSV: 65 columns x 105 rows (column 25 is p_adj!)
+        cols = [f"c{i}" for i in range(1, 25)] + ["p_adj"] + [f"c{i}" for i in range(26, 66)]
+        wide_csv = os.path.join(proj, "wide_stats.csv")
+        with open(wide_csv, "w", encoding="utf-8", newline="") as f:
+            f.write(",".join(cols) + "\n")
+            for r in range(105):
+                f.write(",".join(f"v{r}_{i}" for i in range(65)) + "\n")
+        dup_csv = os.path.join(proj, "other", "dup.csv")
+        with open(dup_csv, "w", encoding="utf-8") as f:
+            f.write("a,b\n1,2\n")
+        svg_p = os.path.join(proj, "figures", "panel_a.svg")
+        with open(svg_p, "w", encoding="utf-8") as f:
+            f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"><text font-size="7pt">A</text></svg>')
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=lambda *a, **k: None),
+            agy_adapter=AgyAdapter(runner_override=lambda *a, **k: None),
+            auto_start_scheduler=False,
+        )
+        orch.switch_project(proj)
+        task = orch.create_task(title="HTTP测试任务", goal="inspect figures", dispatch_mode="single_member")
+
+        orig_orch = serve_sidebar.ORCHESTRATOR
+        serve_sidebar.ORCHESTRATOR = orch
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), serve_sidebar.SidebarHandler)
+        port = srv.server_address[1]
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        base = f"http://127.0.0.1:{port}"
+        try:
+            # 1. Health check server_rev == 11
+            with urllib.request.urlopen(f"{base}/api/health", timeout=5) as resp:
+                h = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(h["server_rev"], 11)
+
+            # 2. Foreign Origin POST -> 403 CSRF blocked!
+            req_csrf = urllib.request.Request(
+                f"{base}/api/pause",
+                data=b'{"paused":true}',
+                headers={"Origin": "https://evil.attacker.example", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req_csrf, timeout=5)
+            self.assertEqual(cm.exception.code, 403)
+
+            # 3. Non-JSON Content-Type with Origin -> 403 CSRF blocked!
+            req_ct = urllib.request.Request(
+                f"{base}/api/pause",
+                data=b"paused=true",
+                headers={"Origin": base, "Content-Type": "text/plain"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as cm2:
+                urllib.request.urlopen(req_ct, timeout=5)
+            self.assertEqual(cm2.exception.code, 403)
+
+            # 4. Valid loopback JSON POST -> 200
+            req_ok = urllib.request.Request(
+                f"{base}/api/pause",
+                data=b'{"paused":false}',
+                headers={"Origin": base, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req_ok, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+
+            # 5. /api/fs/raw_file outside allowed roots -> 400 blocked!
+            outside_p = os.path.join(os.path.dirname(os.path.abspath(self.tmp_dir)), "outside_secret_probe.txt")
+            with open(outside_p, "w", encoding="utf-8") as f:
+                f.write("secret")
+            try:
+                q_out = urllib.parse.quote(outside_p)
+                with self.assertRaises(urllib.error.HTTPError) as cm3:
+                    urllib.request.urlopen(f"{base}/api/fs/raw_file?path={q_out}", timeout=5)
+                self.assertEqual(cm3.exception.code, 400)
+            finally:
+                if os.path.exists(outside_p):
+                    os.remove(outside_p)
+
+            # 6. Wide CSV preview: 60 cols shown (includes 25th col p_adj!), accurate col_truncated & row_truncated
+            with urllib.request.urlopen(f"{base}/api/fs/preview_file?target=wide_stats.csv&task_id={task['id']}&strict=1", timeout=5) as resp:
+                pv = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(pv["preview_type"], "table")
+                self.assertEqual(pv["total_cols"], 65)
+                self.assertEqual(pv["shown_cols"], 60)
+                self.assertTrue(pv["col_truncated"])
+                self.assertTrue(pv["row_truncated"])
+                self.assertIn("p_adj", pv["rows"][0])
+
+            # 7. strict=1 disables silent basename fallback!
+            with self.assertRaises(urllib.error.HTTPError) as cm4:
+                urllib.request.urlopen(f"{base}/api/fs/preview_file?target=missing_dir/dup.csv&task_id={task['id']}&strict=1", timeout=5)
+            self.assertEqual(cm4.exception.code, 400)
+            with urllib.request.urlopen(f"{base}/api/fs/preview_file?target=missing_dir/dup.csv&task_id={task['id']}", timeout=5) as resp:
+                pv_fb = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(pv_fb["name"], "dup.csv")
+
+            # 8. /api/tasks/artifacts discovers figures/panel_a.svg & wide_stats.csv!
+            with urllib.request.urlopen(f"{base}/api/tasks/artifacts?task_id={task['id']}", timeout=5) as resp:
+                arts = json.loads(resp.read().decode("utf-8"))
+                self.assertTrue(arts["ok"])
+                self.assertTrue(any(fg["stem"] == "panel_a" for fg in arts["figures"]))
+                self.assertTrue(any(tb["name"] == "wide_stats.csv" for tb in arts["tables"]))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            serve_sidebar.ORCHESTRATOR = orig_orch
+            orch.stop_scheduler()
+
+    def test_18_quota_exhaustion_auto_backup_and_manual_role_preserving_backup(self) -> None:
+        seen_models = []
+
+        def quota_runner(prompt, session_id, **kwargs):
+            cfg = kwargs["requested_config"]
+            mdl = cfg.get("model") or ""
+            seen_models.append(mdl)
+            if mdl == "gemini-4-neon":
+                return CodexExecutionResult(
+                    session_id=None,
+                    response_text="",
+                    partial_text="已读取前两份表...",
+                    exit_code=1,
+                    turn_completed=False,
+                    error="HTTP 429 RESOURCE_EXHAUSTED: model quota exceeded for gemini-4-neon",
+                    stderr_lines=["Error: insufficient_quota"],
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            if mdl == "gpt-6.2-sol":
+                return CodexExecutionResult(
+                    session_id=None,
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    error="rate_limit_exceeded: usage limit reached for gpt-6.2-sol",
+                    requested_config=cfg,
+                    accepted_config=kwargs["accepted_config"],
+                )
+            return CodexExecutionResult(
+                session_id=f"bk-sess-{mdl}",
+                response_text=f"由同角色跨模型替补 ({mdl}) 接力完成交付！",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=cfg,
+                accepted_config=kwargs["accepted_config"],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=quota_runner),
+            agy_adapter=AgyAdapter(runner_override=quota_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            orig_pi = orch.store.snapshot()["members"]["agy_gemini"]
+
+            # 1. Proactive manual backup (cross-engine!) inherits 100% role/specialty/persona/tags on a different model!
+            man = orch.spawn_quota_backup_member("agy_gemini", prefer_cross_engine=True, reason="Gemini 4 Neon 额度仅剩 10%")
+            bk_man = man["member"]
+            self.assertFalse(man["reused"])
+            self.assertEqual(bk_man["backup_of"], "agy_gemini")
+            self.assertEqual(bk_man["client"], "codex")
+            self.assertNotIn("terra", bk_man["model"].lower())
+            self.assertEqual(bk_man["role"], orig_pi["role"])
+            self.assertEqual(bk_man["specialty"], orig_pi["specialty"])
+            self.assertEqual(bk_man["persona_prompt"], orig_pi["persona_prompt"])
+            self.assertEqual(bk_man["tags"], orig_pi["tags"])
+            self.assertEqual(bk_man["grounding_mode"], orig_pi["grounding_mode"])
+
+            # Calling again for the exact same (source, client, model) reuses idle backup cleanly!
+            man2 = orch.spawn_quota_backup_member("agy_gemini", new_client=bk_man["client"], new_model=bk_man["model"])
+            self.assertTrue(man2["reused"])
+            self.assertEqual(man2["member"]["id"], bk_man["id"])
+
+            # Selecting the exact same (client, model) as source MUST be rejected!
+            with self.assertRaises(ValueError):
+                orch.spawn_quota_backup_member("agy_gemini", new_client="antigravity", new_model="gemini-4-neon")
+
+            # 2. Automatic quota failover on Antigravity (gemini-4-neon -> different model, same role, auto completes!)
+            t_agy = orch.create_task(title="自动额度替补测试", goal="科研假说整合", execution_mode="single_member", target_member_id="agy_gemini")
+            deadline = time.time() + 12.0
+            cur = None
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_agy["id"])
+                if cur["status"] in ("succeeded", "failed"):
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur["status"], "succeeded", f"Expected auto-failover to succeed, got {cur}")
+            new_mid = cur["steps"][0]["member_id"]
+            self.assertNotEqual(new_mid, "agy_gemini")
+            new_mem = orch.store.snapshot()["members"][new_mid]
+            self.assertEqual(new_mem["backup_of"], "agy_gemini")
+            self.assertEqual(new_mem["specialty"], orig_pi["specialty"])
+            self.assertEqual(new_mem["persona_prompt"], orig_pi["persona_prompt"])
+            self.assertNotEqual(new_mem["model"], "gemini-4-neon")
+            self.assertTrue(any(ev.get("type") == "quota.auto_backup" for ev in cur.get("recent_events", [])))
+
+            # 3. Shell-requiring Codex step (gpt-6.2-sol) hitting rate limit MUST fail over to Codex (gpt-6.2-astra), NEVER Antigravity!
+            t_sh = orch.create_task(
+                title="Shell步骤自动额度替补",
+                goal="run pytest",
+                execution_mode="custom_dag",
+                steps=[{"member_id": "codex_author", "prompt": "run pytest", "requires_shell": True}],
+            )
+            deadline = time.time() + 12.0
+            cur_sh = None
+            while time.time() < deadline:
+                cur_sh = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_sh["id"])
+                if cur_sh["status"] in ("succeeded", "failed"):
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur_sh["status"], "succeeded", f"Expected Codex shell failover to succeed, got {cur_sh}")
+            sh_mid = cur_sh["steps"][0]["member_id"]
+            sh_mem = orch.store.snapshot()["members"][sh_mid]
+            self.assertEqual(sh_mem["client"], "codex")
+            self.assertNotEqual(sh_mem["model"], "gpt-6.2-sol")
+            self.assertNotIn("terra", sh_mem["model"].lower())
+        finally:
+            orch.stop_scheduler()
+
+    def test_19_openscience_playbooks_provenance_dag_and_experiment_tracker(self) -> None:
+        from team_state_manager import SPECIALIST_TEMPLATES
+
+        self.assertGreaterEqual(len(SPECIALIST_TEMPLATES), 15)
+        captured = []
+
+        def os_runner(prompt, session_id, **kwargs):
+            captured.append(prompt)
+            out_txt = (
+                "基线与优化实验已完成。\n"
+                "```experiment_run\n"
+                '{"run_id":"exp_001","is_baseline":true,"hypothesis":"Base Cox","metric_name":"c_index","metric_value":0.742,"status":"baseline"}\n'
+                "```\n"
+                "```experiment_run\n"
+                '{"run_id":"exp_002","hypothesis":"Add spatial interaction","metric_name":"c_index","metric_value":0.786,"status":"keep"}\n'
+                "```\n"
+                "```provenance_record\n"
+                '{"kind":"claim","label":"Spatial term improved C-index by +0.044 (p_adj=0.008)"}\n'
+                "```"
+            )
+            return CodexExecutionResult(
+                session_id="os-prov-s1",
+                response_text=out_txt,
+                partial_text=out_txt,
+                exit_code=0,
+                turn_completed=True,
+                requested_config=kwargs["requested_config"],
+                accepted_config=kwargs["accepted_config"],
+                command_logs=[{"command": "python run_ablation.py", "exit_code": 0, "output_excerpt": "c_index=0.786"}],
+                changed_files=[{"path": "results/ablation.csv", "kind": "add"}],
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=os_runner),
+            agy_adapter=AgyAdapter(runner_override=os_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            # Goal triggers statistical_rigor + publication_figures_schematics automatically!
+            t = orch.create_task(
+                title="OpenScience融合测试",
+                goal="用 ggplot2 绘制队列生存曲线并报告 FDR 校正 P 值与 95% CI",
+                execution_mode="single_member",
+                target_member_id="codex_reviewer",
+            )
+            self.assertIn("statistical_rigor", t["openscience_playbooks"])
+            self.assertIn("publication_figures_schematics", t["openscience_playbooks"])
+
+            deadline = time.time() + 10.0
+            cur = None
+            while time.time() < deadline:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded":
+                    break
+                time.sleep(0.06)
+            self.assertEqual(cur["status"], "succeeded")
+            # Verify OpenScience Playbooks + gpt-astra.txt dialect + science.txt honesty injected into prompt!
+            self.assertTrue(captured)
+            self.assertIn("statistical-conventions", captured[0])
+            self.assertIn("gpt-astra.txt", captured[0])
+            self.assertIn("非破坏性重跑", captured[0])
+
+            # Verify content-addressed Provenance DAG & Experiment Runs (with delta_vs_baseline = +0.044!)
+            prov = orch.get_task_provenance(t["id"])
+            kinds = {n["kind"] for n in prov["nodes"]}
+            self.assertIn("run", kinds)
+            self.assertIn("artifact", kinds)
+            self.assertIn("claim", kinds)
+            self.assertGreaterEqual(prov["edge_count"], 2)
+            exps = prov["experiments"]
+            self.assertEqual(len(exps), 2)
+            self.assertTrue(exps[0]["is_baseline"])
+            self.assertAlmostEqual(exps[1]["delta_vs_baseline"], 0.044, places=4)
         finally:
             orch.stop_scheduler()
 
