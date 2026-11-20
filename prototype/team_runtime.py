@@ -9,6 +9,7 @@ Supports 4 Anthropomorphic Execution Topologies + Live Inter-Agent @Mention Cons
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -19,17 +20,39 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agy_adapter import AgyAdapter
 from codex_adapter import CodexAdapter, CodexExecutionResult, get_runtime_dirs
+from context_engine import (
+    BlobStore,
+    ContextBudgetConfig,
+    build_handoff_checkpoint,
+    classify_turn_error,
+    compile_turn_prompt,
+    estimate_tokens,
+    extract_deterministic_anchors,
+    is_context_overflow_error,
+    mask_observation_blocks,
+    normalize_usage,
+    seal_round_snapshot,
+    select_jit_playbooks,
+)
 from figure_qa import inspect_any_figure, probe_plotting_backend, sha256_file, verify_figure_manifest
+from memory_index import ProjectMemoryIndex, build_structural_repomap
 from openscience_playbooks import auto_select_playbooks, get_playbooks_catalog, render_playbooks_prompt
 from project_discovery import browse_directory, discover_projects, pick_folder_native_dialog
 from provenance_store import TaskProvenanceStore
-from research_verifier import run_acceptance_checks, snapshot_readonly_inputs
+from research_verifier import recompute_signoff_summary, run_acceptance_checks, snapshot_readonly_inputs
 from team_state_manager import (
     SPECIALIST_TEMPLATES,
     STATE_FILE_PATH,
     TeamStateManager,
     enrich_member_metadata,
     normalize_win_path,
+)
+from worktree_manager import (
+    cleanup_worktree,
+    create_step_worktree,
+    detect_git_repo,
+    inspect_worktree_diff,
+    merge_worktree_to_main,
 )
 
 
@@ -73,7 +96,12 @@ _FLAGSHIP_BACKUP_PRIORITY: Dict[str, List[str]] = {
 
 
 def _is_quota_or_rate_limit_error(error_text: Optional[str], stderr_lines: Optional[List[str]] = None) -> bool:
-    """Detect model quota exhaustion, 429 rate-limiting, or capacity errors from CLI output."""
+    """Detect model quota exhaustion, 429 rate-limiting, or capacity errors (strictly AFTER excluding context overflow!)."""
+    if is_context_overflow_error(error_text, stderr_lines):
+        return False
+    kind, _ = classify_turn_error(error_text, stderr_lines)
+    if kind == "quota_rate_limit":
+        return True
     parts = [str(error_text or "")]
     if stderr_lines:
         parts.extend(str(x) for x in stderr_lines[-12:])
@@ -338,6 +366,156 @@ def _smart_clip(text: str, limit: int = 8000) -> str:
     )
 
 
+def _extract_peer_ranking(text: str) -> Optional[Dict[str, Any]]:
+    """Extract optional ```peer_ranking {...}``` Borda ranking JSON from Round 2+ anonymous critique."""
+    if not text:
+        return None
+    m = re.search(r"```peer_ranking\s*(\{.*?\})\s*```", text, flags=re.S | re.I)
+    obj = None
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+        except Exception:
+            obj = None
+    if not isinstance(obj, dict):
+        return None
+    ranking = obj.get("ranking")
+    if not isinstance(ranking, list) or not ranking:
+        return None
+    clean_rank = [str(x).strip() for x in ranking if str(x).strip()]
+    if not clean_rank:
+        return None
+    try:
+        conf = float(obj.get("confidence", 0.75))
+        conf = max(0.0, min(1.0, conf))
+    except Exception:
+        conf = 0.75
+    return {
+        "ranking": clean_rank[:12],
+        "confidence": round(conf, 3),
+        "rationale": str(obj.get("rationale") or "").strip()[:280],
+    }
+
+
+def _compute_borda_scoreboard(task: Dict[str, Any], members: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministically tally Borda Count scores across anonymized Round 2+ peer rankings."""
+    meta = task.get("mode_meta") or {}
+    anon_map: Dict[str, str] = dict(meta.get("anon_map") or {})
+    anon_rev: Dict[str, str] = {v.strip().lower(): k for k, v in anon_map.items()}
+    participants: List[str] = list(meta.get("participants") or list(anon_map.keys()))
+    n_seats = max(2, len(participants))
+
+    points: Dict[str, float] = {mid: 0.0 for mid in participants}
+    first_place: Dict[str, int] = {mid: 0 for mid in participants}
+    votes_received: Dict[str, int] = {mid: 0 for mid in participants}
+    confs: List[float] = []
+
+    ballots = [b for b in (task.get("peer_rankings") or []) if isinstance(b, dict)]
+    for blt in ballots:
+        voter_id = blt.get("voter_id")
+        confs.append(float(blt.get("confidence", 0.75)))
+        seen_in_ballot: set = set()
+        rank_pos = 0
+        for raw_label in blt.get("ranking") or []:
+            lbl = str(raw_label).strip()
+            low = lbl.lower()
+            target_mid = anon_rev.get(low)
+            if not target_mid:
+                # Also tolerate "Seat A" / "A" / direct member_id
+                for albl, mid_k in anon_rev.items():
+                    letter = albl.split()[-1] if albl else ""
+                    if low == letter or low == f"seat {letter}" or low == mid_k.lower():
+                        target_mid = mid_k
+                        break
+            if not target_mid or target_mid not in points or target_mid in seen_in_ballot:
+                continue
+            # Prevent self-voting inflation in Borda tally!
+            if target_mid == voter_id:
+                continue
+            seen_in_ballot.add(target_mid)
+            pts = max(1, n_seats - rank_pos)
+            points[target_mid] += pts
+            votes_received[target_mid] += 1
+            if rank_pos == 0:
+                first_place[target_mid] += 1
+            rank_pos += 1
+
+    rows: List[Dict[str, Any]] = []
+    for mid in participants:
+        m = members.get(mid) or {}
+        rows.append(
+            {
+                "member_id": mid,
+                "name": m.get("name") or mid,
+                "model": m.get("model") or "",
+                "anon_label": anon_map.get(mid, ""),
+                "borda_points": int(points[mid]),
+                "first_place_votes": int(first_place[mid]),
+                "votes_received": int(votes_received[mid]),
+            }
+        )
+    rows.sort(key=lambda r: (-r["borda_points"], -r["first_place_votes"], r["member_id"]))
+    return {
+        "ballots_count": len(ballots),
+        "mean_confidence": round(sum(confs) / len(confs), 3) if confs else 0.0,
+        "anonymous_enabled": bool(meta.get("anonymous_peer_review")),
+        "rows": rows,
+        "winner_member_id": rows[0]["member_id"] if rows and rows[0]["borda_points"] > 0 else None,
+        "updated_at": time.time(),
+    }
+
+
+def _extract_visual_qa_verdict(text: str) -> Dict[str, Any]:
+    """Fail-Closed parser for VLM Visual Figure Critique JSON (PASS | REVISE | INVALID_FORMAT)."""
+    parsed = _extract_json_obj(text)
+    if not isinstance(parsed, dict):
+        return {
+            "verdict": "INVALID_FORMAT",
+            "visual_score": 0.0,
+            "defects": [{"severity": "BLOCKING", "region": "format", "issue": "视觉质检输出缺少合法 JSON verdict", "fix": "请返回 PASS/REVISE JSON"}],
+            "summary": (text or "")[:240],
+        }
+    verdict = str(parsed.get("verdict") or "").strip().upper()
+    if verdict not in ("PASS", "REVISE"):
+        return {
+            "verdict": "INVALID_FORMAT",
+            "visual_score": 0.0,
+            "defects": [{"severity": "BLOCKING", "region": "verdict", "issue": f"非法视觉判定: {verdict}", "fix": "verdict 必须为 PASS 或 REVISE"}],
+            "summary": str(parsed.get("summary") or text[:200]),
+        }
+    try:
+        score = float(parsed.get("visual_score", 8.0 if verdict == "PASS" else 5.0))
+        score = max(0.0, min(10.0, round(score, 2)))
+    except Exception:
+        score = 8.0 if verdict == "PASS" else 5.0
+    raw_defs = parsed.get("defects") if isinstance(parsed.get("defects"), list) else []
+    clean_defs: List[Dict[str, str]] = []
+    has_blocking = False
+    for d in raw_defs[:12]:
+        if isinstance(d, dict):
+            sev = str(d.get("severity") or "MINOR").strip().upper()
+            if sev not in ("BLOCKING", "MINOR"):
+                sev = "BLOCKING" if "block" in sev.lower() else "MINOR"
+            if sev == "BLOCKING":
+                has_blocking = True
+            clean_defs.append(
+                {
+                    "severity": sev,
+                    "region": str(d.get("region") or "figure").strip()[:80],
+                    "issue": str(d.get("issue") or "").strip()[:240],
+                    "fix": str(d.get("fix") or "").strip()[:240],
+                }
+            )
+    if has_blocking:
+        verdict = "REVISE"
+    return {
+        "verdict": verdict,
+        "visual_score": score,
+        "defects": clean_defs,
+        "summary": str(parsed.get("summary") or "").strip()[:300],
+    }
+
+
 class TeamOrchestrator:
     def __init__(
         self,
@@ -355,6 +533,8 @@ class TeamOrchestrator:
         self._running_attempts: Dict[str, Dict[str, Any]] = {}
         self._scheduler_thread: Optional[threading.Thread] = None
         self._plotting_backends_cache: Optional[Tuple[float, Dict[str, Any]]] = None
+        self._figure_cache_lock = threading.RLock()
+        self._figure_inspect_cache: Dict[Tuple[str, int, int], Tuple[Dict[str, Any], str]] = {}
         if auto_start_scheduler:
             self.start_scheduler()
 
@@ -370,13 +550,17 @@ class TeamOrchestrator:
         self._wakeup.set()
         if self._scheduler_thread:
             self._scheduler_thread.join(timeout=2.0)
+        try:
+            self.store.close()
+        except Exception:
+            pass
 
     def touch_coordinator_heartbeat(self, source: str = "antigravity_native") -> None:
         def _upd(st: Dict[str, Any]) -> None:
             st["binding"]["last_coordinator_heartbeat"] = time.time()
             st["binding"]["last_coordinator_source"] = source
 
-        self.store.mutate(_upd)
+        self.store.mutate(_upd, persist="debounced")
 
     def _append_room_chat(
         self,
@@ -522,28 +706,121 @@ class TeamOrchestrator:
         max_concurrency: Optional[int] = None,
         default_max_auto_repairs: Optional[int] = None,
         auto_spawn_quota_backup: Optional[bool] = None,
+        context_budget_chars: Optional[int] = None,
+        context_session_mode: Optional[str] = None,
+        auto_context_rollover: Optional[bool] = None,
+        max_turns_per_session: Optional[int] = None,
+        enable_cross_task_memory: Optional[bool] = None,
+        enable_ast_repomap: Optional[bool] = None,
+        enable_git_worktree_isolation: Optional[bool] = None,
+        task_token_budget: Optional[int] = None,
+        max_sandbox: Optional[str] = None,
+        default_task_sandbox: Optional[str] = None,
+        roundtable_allow_member_writes: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if project_path is not None:
             self.switch_project(project_path)
 
         def _upd(st: Dict[str, Any]) -> Dict[str, Any]:
             b = st["binding"]
+            s = st.setdefault("settings", {})
             if remote_control_url is not None:
                 b["remote_control_url"] = remote_control_url.strip()
+            if max_sandbox is not None:
+                ms_val = str(max_sandbox).strip().lower()
+                if ms_val not in _SANDBOX_RANK:
+                    raise ValueError(f"非法全局文件权限上限 max_sandbox（仅允许 read-only / workspace-write）: {ms_val}")
+                b["max_sandbox"] = ms_val
+                if ms_val == "read-only":
+                    s["default_task_sandbox"] = "read-only"
+            if default_task_sandbox is not None:
+                ds_val = str(default_task_sandbox).strip().lower()
+                if ds_val not in _SANDBOX_RANK:
+                    raise ValueError(f"非法默认任务权限 default_task_sandbox: {ds_val}")
+                b_max = b.get("max_sandbox", "workspace-write")
+                s["default_task_sandbox"] = _effective_sandbox(b_max, ds_val)
+            if roundtable_allow_member_writes is not None:
+                s["roundtable_allow_member_writes"] = bool(roundtable_allow_member_writes)
             if max_concurrency is not None:
                 mc = max(1, min(12, int(max_concurrency)))
                 st["max_concurrency"] = mc
-                st.setdefault("settings", {})["max_concurrency"] = mc
+                s["max_concurrency"] = mc
             if default_max_auto_repairs is not None:
                 mr = max(0, min(5, int(default_max_auto_repairs)))
-                st.setdefault("settings", {})["default_max_auto_repairs"] = mr
+                s["default_max_auto_repairs"] = mr
             if auto_spawn_quota_backup is not None:
-                st.setdefault("settings", {})["auto_spawn_quota_backup"] = bool(auto_spawn_quota_backup)
+                s["auto_spawn_quota_backup"] = bool(auto_spawn_quota_backup)
+            if context_budget_chars is not None:
+                s["context_budget_chars"] = max(12_000, min(160_000, int(context_budget_chars)))
+            if context_session_mode is not None:
+                cm = str(context_session_mode).strip().lower()
+                if cm in ("bounded_native", "stateless_replay"):
+                    s["context_session_mode"] = cm
+            if auto_context_rollover is not None:
+                s["auto_context_rollover"] = bool(auto_context_rollover)
+            if max_turns_per_session is not None:
+                s["max_turns_per_session"] = max(3, min(30, int(max_turns_per_session)))
+            if enable_cross_task_memory is not None:
+                s["enable_cross_task_memory"] = bool(enable_cross_task_memory)
+            if enable_ast_repomap is not None:
+                s["enable_ast_repomap"] = bool(enable_ast_repomap)
+            if enable_git_worktree_isolation is not None:
+                s["enable_git_worktree_isolation"] = bool(enable_git_worktree_isolation)
+            if task_token_budget is not None:
+                tb = int(task_token_budget)
+                s["task_token_budget"] = 0 if tb <= 0 else max(50_000, min(20_000_000, tb))
             return b
 
         res = self.store.mutate(_upd)
         self._wakeup.set()
         return res
+
+    def set_members_sandbox(
+        self,
+        sandbox: str,
+        member_id: Optional[str] = None,
+        client: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Configure file-edit permission (read-only / workspace-write) for a member or an entire engine (e.g. 'codex')."""
+        sb_req = str(sandbox or "").strip().lower()
+        if sb_req not in _SANDBOX_RANK:
+            raise ValueError(f"非法 sandbox 权限（仅允许 read-only / workspace-write）: {sb_req}")
+
+        def _upd(st: Dict[str, Any]) -> Dict[str, Any]:
+            b_max = st.get("binding", {}).get("max_sandbox") or "workspace-write"
+            if sb_req == "workspace-write" and b_max == "read-only":
+                raise ValueError("当前全局文件权限上限已锁定为只读 (max_sandbox=read-only)，请先在设置中解锁全局可写上限")
+            eff_sb = _effective_sandbox(b_max, sb_req)
+            updated: List[str] = []
+            queued: List[str] = []
+            members = st.get("members") or {}
+            targets: List[str] = []
+            if member_id:
+                if member_id not in members:
+                    raise ValueError(f"未找到成员: {member_id}")
+                targets = [member_id]
+            else:
+                want_cl = (client or "codex").strip().lower()
+                targets = [mid for mid, m in members.items() if (m.get("client") or "").lower() == want_cl]
+            for mid in targets:
+                m = members[mid]
+                if m.get("status") == "working":
+                    pc = dict(m.get("pending_config") or {})
+                    pc.setdefault("name", m.get("name"))
+                    pc.setdefault("client", m.get("client"))
+                    pc.setdefault("role", m.get("role"))
+                    pc.setdefault("model", m.get("model"))
+                    pc.setdefault("reasoning_effort", m.get("reasoning_effort"))
+                    pc.setdefault("workspace_scope", m.get("workspace_scope", "."))
+                    pc["sandbox"] = eff_sb
+                    m["pending_config"] = pc
+                    queued.append(mid)
+                else:
+                    m["sandbox"] = eff_sb
+                    updated.append(mid)
+            return {"sandbox": eff_sb, "updated": updated, "queued_next_round": queued}
+
+        return self.store.mutate(_upd)
 
     # ------------------------------------------------------------------
     # Roles & Members Management
@@ -690,8 +967,26 @@ class TeamOrchestrator:
         self._plotting_backends_cache = (now, data)
         return data
 
+    def _cached_inspect_figure(self, abs_p: str, allow_raster_panels: bool = False) -> Tuple[Dict[str, Any], str]:
+        """Thread-safe (abs_path, mtime_ns, size) cache for inspect_any_figure + sha256 to eliminate repeat I/O."""
+        st_stat = os.stat(abs_p)
+        key = (os.path.normcase(os.path.realpath(abs_p)), int(st_stat.st_mtime_ns), int(st_stat.st_size))
+        with self._figure_cache_lock:
+            hit = self._figure_inspect_cache.get(key)
+            if hit is not None:
+                return dict(hit[0]), hit[1]
+        insp = inspect_any_figure(abs_p, allow_raster_panels=allow_raster_panels)
+        digest = sha256_file(abs_p).lower()
+        with self._figure_cache_lock:
+            if len(self._figure_inspect_cache) >= 512:
+                # Evict oldest quarter
+                for old_k in list(self._figure_inspect_cache.keys())[:128]:
+                    self._figure_inspect_cache.pop(old_k, None)
+            self._figure_inspect_cache[key] = (dict(insp), digest)
+        return insp, digest
+
     def get_task_artifacts(self, task_id: str) -> Dict[str, Any]:
-        """P0-5 Version-bound task artifacts, execution ledgers, scientific figure groups & source tables (lock-free)."""
+        """P0-5 Version-bound task artifacts, bounded recursive discovery (depth<=3), LRU inspect cache & exact SHA-256 QA binding."""
         snap = self.store.snapshot()
         task = self._find_task(snap, task_id)
         proj_abs = os.path.realpath(os.path.abspath(task.get("project_path") or snap["binding"]["project_path"]))
@@ -705,11 +1000,18 @@ class TeamOrchestrator:
             except ValueError:
                 return False
 
-        def _to_rel(raw_p: str) -> Optional[str]:
+        def _to_rel(raw_p: str, base_dir: Optional[str] = None) -> Optional[str]:
             if not raw_p or not str(raw_p).strip():
                 return None
             p_str = str(raw_p).strip()
-            cand = os.path.realpath(p_str if os.path.isabs(p_str) else os.path.join(proj_abs, p_str))
+            if os.path.isabs(p_str):
+                cand = os.path.realpath(p_str)
+            elif base_dir:
+                c1 = os.path.realpath(os.path.join(base_dir, p_str))
+                c2 = os.path.realpath(os.path.join(proj_abs, p_str))
+                cand = c1 if (_within_proj(c1) and os.path.isfile(c1)) else c2
+            else:
+                cand = os.path.realpath(os.path.join(proj_abs, p_str))
             if not _within_proj(cand) or not os.path.isfile(cand):
                 return None
             return os.path.relpath(cand, proj_abs).replace("\\", "/")
@@ -756,36 +1058,81 @@ class TeamOrchestrator:
                     }
                 )
 
-        # Collect manifests (declared + changed + top-level / figures / outputs / plots)
+        # Bounded recursive workspace discovery (max_depth=3, starting from workspace_scope + common output roots)
+        skip_dirs = {
+            ".git", "node_modules", "__pycache__", ".venv", "venv", ".codex", ".pytest_cache",
+            "states", "source_snapshot_1618", "evidence_snapshot", "evidence_snapshot_final",
+        }
         manifest_rels: List[str] = []
         seen_mf: set = set()
 
         def _add_mf(rel: Optional[str]) -> None:
-            if rel and rel not in seen_mf:
+            if rel and rel not in seen_mf and len(manifest_rels) < 20:
                 seen_mf.add(rel)
                 manifest_rels.append(rel)
 
         rspec = task.get("research_spec") if isinstance(task.get("research_spec"), dict) else {}
+        explicit_manifest_rels: set = set()
         for m_rel in rspec.get("figure_manifests") or []:
-            _add_mf(_to_rel(str(m_rel)))
+            rm = _to_rel(str(m_rel))
+            if rm:
+                explicit_manifest_rels.add(rm)
+            _add_mf(rm)
         for rel in sorted(changed_rel_set):
             if rel.lower().endswith(".json") and "manifest" in os.path.basename(rel).lower():
                 _add_mf(rel)
-        for sub in ("", "figures", "plots", "outputs", "figs"):
-            dpath = os.path.join(proj_abs, sub) if sub else proj_abs
-            if os.path.isdir(dpath):
-                try:
-                    for fn in sorted(os.listdir(dpath)):
-                        if fn.lower().endswith(".json") and "manifest" in fn.lower():
-                            _add_mf(_to_rel(os.path.join(dpath, fn)))
-                except Exception:
-                    pass
+
+        fig_exts = {".svg", ".pdf", ".png", ".tif", ".tiff", ".jpg", ".jpeg"}
+        tbl_exts = {".csv", ".tsv"}
+        walk_figs: List[str] = []
+        walk_tbls: List[str] = []
+        scan_truncated = False
+        visited_files = 0
+        max_walk_files = 600
+        max_depth = 3
+
+        scope_rel = (task.get("workspace_scope") or ".").strip() or "."
+        try:
+            scan_root = _resolve_workdir(proj_abs, scope_rel)
+        except Exception:
+            scan_root = proj_abs
+
+        if os.path.isdir(scan_root):
+            base_depth = scan_root.rstrip("\\/").count(os.sep)
+            for cur_root, dirs, files in os.walk(scan_root, followlinks=False):
+                cur_depth = cur_root.rstrip("\\/").count(os.sep) - base_depth
+                # Prune noisy/snapshot dirs & cap recursion depth
+                dirs[:] = sorted(
+                    d for d in dirs
+                    if d not in skip_dirs and not d.startswith(".") and cur_depth < max_depth
+                )
+                for fn in sorted(files):
+                    visited_files += 1
+                    if visited_files > max_walk_files:
+                        scan_truncated = True
+                        break
+                    fp = os.path.join(cur_root, fn)
+                    ext = os.path.splitext(fn)[1].lower()
+                    if ext == ".json" and "manifest" in fn.lower():
+                        _add_mf(_to_rel(fp))
+                    elif ext in fig_exts and len(walk_figs) < 80:
+                        r = _to_rel(fp)
+                        if r:
+                            walk_figs.append(r)
+                    elif ext in tbl_exts and len(walk_tbls) < 40:
+                        r = _to_rel(fp)
+                        if r:
+                            walk_tbls.append(r)
+                if scan_truncated:
+                    break
 
         signoff = task.get("research_signoff") if isinstance(task.get("research_signoff"), dict) else None
         qa_by_mf: Dict[str, Dict[str, Any]] = {}
         if signoff:
             for fr in signoff.get("figure_reports") or []:
-                mp = str(fr.get("manifest_path") or "")
+                if not isinstance(fr, dict):
+                    continue
+                mp = str(fr.get("manifest_rel_path") or fr.get("manifest_path") or "")
                 rel_mp = _to_rel(mp) if mp else None
                 if rel_mp:
                     qa_by_mf[rel_mp] = fr
@@ -793,15 +1140,22 @@ class TeamOrchestrator:
         manifests_out: List[Dict[str, Any]] = []
         manifest_fig_meta: Dict[str, Dict[str, Any]] = {}
         manifest_tables: set = set()
-        for m_rel in manifest_rels[:12]:
+        for m_rel in manifest_rels[:20]:
             m_abs = os.path.join(proj_abs, m_rel)
+            m_dir = os.path.dirname(m_abs)
             parsed_m: Dict[str, Any] = {}
             try:
                 with open(m_abs, "r", encoding="utf-8") as mf:
                     parsed_m = json.load(mf)
+                    if not isinstance(parsed_m, dict):
+                        parsed_m = {}
             except Exception:
                 parsed_m = {}
             qa_rep = qa_by_mf.get(m_rel)
+            is_explicit_mf = (m_rel in explicit_manifest_rels) or (qa_rep is not None)
+            has_fig_schema = any(k in parsed_m for k in ("exports", "outputs", "figure_id", "panel_sources", "target_width_mm"))
+            if not is_explicit_mf and not has_fig_schema:
+                continue
             manifests_out.append(
                 {
                     "rel_path": m_rel,
@@ -816,31 +1170,54 @@ class TeamOrchestrator:
                 if isinstance(p_obj, dict):
                     raw_tbl = p_obj.get("source_table") or p_obj.get("source_data")
                     if raw_tbl:
-                        t_rel = _to_rel(str(raw_tbl))
+                        t_rel = _to_rel(str(raw_tbl), base_dir=m_dir)
                         if t_rel:
                             manifest_tables.add(t_rel)
                             if t_rel not in src_tables_m:
                                 src_tables_m.append(t_rel)
+            if parsed_m.get("source_data_path"):
+                t_rel = _to_rel(str(parsed_m["source_data_path"]), base_dir=m_dir)
+                if t_rel:
+                    manifest_tables.add(t_rel)
+                    if t_rel not in src_tables_m:
+                        src_tables_m.append(t_rel)
+
+            # Build exact (project_rel_path -> expected_sha256) map from QA report artifacts first!
+            qa_art_sha_by_rel: Dict[str, str] = {}
+            if isinstance(qa_rep, dict):
+                for art in qa_rep.get("artifacts") or []:
+                    if not isinstance(art, dict):
+                        continue
+                    art_rel = art.get("project_rel_path") or _to_rel(str(art.get("path") or art.get("rel_path") or ""), base_dir=m_dir)
+                    if art_rel and art.get("sha256"):
+                        qa_art_sha_by_rel[art_rel] = str(art["sha256"]).lower()
+
             raw_exp = parsed_m.get("exports") or parsed_m.get("outputs") or {}
-            exp_vals = [x.get("path") for x in raw_exp if isinstance(x, dict)] if isinstance(raw_exp, list) else (
-                [(v.get("path") if isinstance(v, dict) else v) for v in raw_exp.values()] if isinstance(raw_exp, dict) else []
-            )
+            if isinstance(raw_exp, list):
+                exp_vals = [(x.get("path") if isinstance(x, dict) else (x if isinstance(x, str) else "")) for x in raw_exp]
+            elif isinstance(raw_exp, dict):
+                exp_vals = [(v.get("path") if isinstance(v, dict) else (v if isinstance(v, str) else "")) for v in raw_exp.values()]
+            else:
+                exp_vals = []
+
+            bound_rels = list(qa_art_sha_by_rel.keys())
             for f_raw in exp_vals:
                 if not f_raw:
                     continue
-                f_rel = _to_rel(str(f_raw))
-                if f_rel:
-                    manifest_fig_meta[f_rel] = {
-                        "manifest_rel": m_rel,
-                        "figure_id": parsed_m.get("figure_id") or "",
-                        "title": parsed_m.get("title") or "",
-                        "source_tables": src_tables_m,
-                        "qa_ok": qa_rep.get("ok") if isinstance(qa_rep, dict) else None,
-                    }
+                f_rel = _to_rel(str(f_raw), base_dir=m_dir)
+                if f_rel and f_rel not in bound_rels:
+                    bound_rels.append(f_rel)
 
-        # Discover figure files & CSV/TSV tables (changed/manifest first, then workspace figure dirs)
-        fig_exts = {".svg", ".pdf", ".png", ".tif", ".tiff", ".jpg", ".jpeg"}
-        tbl_exts = {".csv", ".tsv"}
+            for f_rel in bound_rels:
+                manifest_fig_meta[f_rel] = {
+                    "manifest_rel": m_rel,
+                    "figure_id": parsed_m.get("figure_id") or "",
+                    "title": parsed_m.get("title") or "",
+                    "source_tables": list(src_tables_m),
+                    "qa_report": qa_rep,
+                    "qa_expected_sha256": qa_art_sha_by_rel.get(f_rel),
+                }
+
         fig_sources: Dict[str, str] = {}
         tbl_sources: Dict[str, str] = {}
 
@@ -854,29 +1231,14 @@ class TeamOrchestrator:
                 fig_sources[rel] = "changed"
             elif ext in tbl_exts and rel not in tbl_sources:
                 tbl_sources[rel] = "changed"
+        for rel in walk_figs:
+            if rel not in fig_sources and len(fig_sources) < 80:
+                fig_sources[rel] = "workspace"
+        for rel in walk_tbls:
+            if rel not in tbl_sources and len(tbl_sources) < 40:
+                tbl_sources[rel] = "workspace"
 
-        # Bounded workspace scan (max 50 figure files + 30 tables across common scientific output dirs)
-        for sub in ("", "figures", "plots", "outputs", "figs", "data", "results"):
-            dpath = os.path.join(proj_abs, sub) if sub else proj_abs
-            if not os.path.isdir(dpath):
-                continue
-            try:
-                for fn in sorted(os.listdir(dpath)):
-                    fp = os.path.join(dpath, fn)
-                    if not os.path.isfile(fp):
-                        continue
-                    ext = os.path.splitext(fn)[1].lower()
-                    rel = _to_rel(fp)
-                    if not rel:
-                        continue
-                    if ext in fig_exts and rel not in fig_sources and len(fig_sources) < 50:
-                        fig_sources[rel] = "workspace"
-                    elif ext in tbl_exts and rel not in tbl_sources and len(tbl_sources) < 30:
-                        tbl_sources[rel] = "workspace"
-            except Exception:
-                pass
-
-        # Group figure files by (dir, stem) so SVG/PDF/PNG/TIFF stay unified in one publication card
+        # Group figure files by (dir, stem) and verify exact disk SHA-256 against QA report!
         groups_map: Dict[str, Dict[str, Any]] = {}
         fmt_order = {"svg": 0, "png": 1, "pdf": 2, "tiff": 3, "tif": 4, "jpg": 5, "jpeg": 6}
         for rel, src_tag in fig_sources.items():
@@ -884,9 +1246,54 @@ class TeamOrchestrator:
             stem_key = os.path.splitext(rel)[0]
             ext_clean = os.path.splitext(rel)[1].lstrip(".").lower()
             fmt_key = "tiff" if ext_clean == "tif" else ext_clean
-            insp = inspect_any_figure(abs_p)
+            insp, disk_sha = self._cached_inspect_figure(abs_p)
             st_stat = os.stat(abs_p)
             mmeta = manifest_fig_meta.get(rel, {})
+            qa_rep = mmeta.get("qa_report")
+            exp_sha = mmeta.get("qa_expected_sha256")
+
+            # Compute honest per-file QA status (ZERO false green PASS on stale or shadowed files!)
+            file_qa_status = "unverified"
+            file_qa_ok: Optional[bool] = None
+            file_blocking: List[str] = list(insp.get("blocking") or [])
+            file_warnings: List[str] = list(insp.get("warnings") or [])
+            if not insp.get("ok") and insp.get("error") and insp.get("error") not in file_blocking:
+                file_blocking.append(str(insp["error"]))
+
+            if isinstance(qa_rep, dict):
+                if exp_sha and exp_sha != disk_sha:
+                    file_qa_status = "stale"
+                    file_qa_ok = None
+                    file_warnings.append("文件磁盘内容 SHA-256 已较上次质检变更，请重新运行图件 QA")
+                elif exp_sha is None and qa_rep.get("artifacts"):
+                    # Manifest report exists, but this specific file wasn't in the verified artifact set!
+                    file_qa_status = "stale"
+                    file_qa_ok = None
+                else:
+                    rep_st = qa_rep.get("status")
+                    if rep_st == "passed":
+                        file_qa_status = "passed"
+                        file_qa_ok = True
+                    elif rep_st == "not_verifiable":
+                        file_qa_status = "not_verifiable"
+                        file_qa_ok = True
+                    else:
+                        file_qa_status = "failed"
+                        file_qa_ok = False
+                    for b in qa_rep.get("blocking") or []:
+                        if b not in file_blocking:
+                            file_blocking.append(b)
+                    for o in qa_rep.get("observations") or []:
+                        if o not in file_warnings:
+                            file_warnings.append(o)
+            else:
+                if file_blocking:
+                    file_qa_status = "failed"
+                    file_qa_ok = False
+                elif file_warnings:
+                    file_qa_status = "warn"
+                    file_qa_ok = None
+
             grp = groups_map.setdefault(
                 stem_key,
                 {
@@ -896,9 +1303,15 @@ class TeamOrchestrator:
                     "title": mmeta.get("title") or os.path.basename(stem_key),
                     "figure_id": mmeta.get("figure_id") or os.path.basename(stem_key),
                     "manifest_rel": mmeta.get("manifest_rel") or "",
-                    "qa_ok": mmeta.get("qa_ok"),
+                    "qa_ok": file_qa_ok,
+                    "qa_status": file_qa_status,
+                    "qa_blocking": [],
+                    "qa_warnings": [],
+                    "checked_artifacts": int(qa_rep.get("checked_artifacts") or 0) if isinstance(qa_rep, dict) else 0,
+                    "checked_panels": int(qa_rep.get("checked_panels") or 0) if isinstance(qa_rep, dict) else 0,
                     "source": src_tag,
                     "source_tables": list(mmeta.get("source_tables") or []),
+                    "candidate_tables": [],
                     "mtime": st_stat.st_mtime,
                     "formats": {},
                 },
@@ -909,27 +1322,41 @@ class TeamOrchestrator:
                 grp["title"] = mmeta["title"]
             if mmeta.get("manifest_rel") and not grp["manifest_rel"]:
                 grp["manifest_rel"] = mmeta["manifest_rel"]
-            if mmeta.get("qa_ok") is not None:
-                grp["qa_ok"] = mmeta["qa_ok"]
+            # Merge group-level QA status by worst severity (failed > stale > not_verifiable > warn > passed > unverified)
+            sev = {"failed": 5, "stale": 4, "not_verifiable": 3, "warn": 2, "passed": 1, "unverified": 0}
+            if sev.get(file_qa_status, 0) > sev.get(grp["qa_status"], 0):
+                grp["qa_status"] = file_qa_status
+                grp["qa_ok"] = file_qa_ok
+            for b in file_blocking:
+                if b not in grp["qa_blocking"]:
+                    grp["qa_blocking"].append(b)
+            for w in file_warnings:
+                if w not in grp["qa_warnings"]:
+                    grp["qa_warnings"].append(w)
             for stbl in mmeta.get("source_tables") or []:
                 if stbl not in grp["source_tables"]:
                     grp["source_tables"].append(stbl)
+            if isinstance(qa_rep, dict):
+                grp["checked_artifacts"] = max(grp["checked_artifacts"], int(qa_rep.get("checked_artifacts") or 0))
+                grp["checked_panels"] = max(grp["checked_panels"], int(qa_rep.get("checked_panels") or 0))
             grp["mtime"] = max(grp["mtime"], st_stat.st_mtime)
             grp["formats"][fmt_key] = {
                 "format": fmt_key,
                 "rel_path": rel,
                 "size": st_stat.st_size,
                 "mtime": st_stat.st_mtime,
+                "sha256": disk_sha,
                 "inspect": insp,
             }
 
-        # Attach matching stem CSV/TSV source tables if not already linked
+        # Distinguish explicitly bound manifest source tables vs filename-similar candidate tables!
         for grp in groups_map.values():
             stem_low = grp["stem"].lower()
             for t_rel in tbl_sources:
                 t_base = os.path.splitext(os.path.basename(t_rel))[0].lower()
                 if (t_base == stem_low or t_base.startswith(stem_low + "_")) and t_rel not in grp["source_tables"]:
-                    grp["source_tables"].append(t_rel)
+                    if t_rel not in grp["candidate_tables"]:
+                        grp["candidate_tables"].append(t_rel)
             grp["format_list"] = sorted(grp["formats"].keys(), key=lambda x: fmt_order.get(x, 99))
 
         src_priority = {"manifest": 0, "changed": 1, "workspace": 2}
@@ -950,6 +1377,7 @@ class TeamOrchestrator:
         return {
             "task_id": task_id,
             "project_path": proj_abs,
+            "scan_truncated": scan_truncated,
             "openscience_playbooks": list(task.get("openscience_playbooks") or []),
             "research_spec": task.get("research_spec"),
             "research_signoff": signoff,
@@ -967,14 +1395,32 @@ class TeamOrchestrator:
         return store.get_summary()
 
     def verify_task_figure(self, task_id: str, manifest_path: str) -> Dict[str, Any]:
-        """Run lock-free publication-grade figure_qa.verify_figure_manifest on a task's manifest."""
+        """
+        Run lock-free publication-grade figure_qa.verify_figure_manifest on a task's manifest
+        and recompute task research_signoff cleanly (fixes P0-c one-way failure lock & recovers needs_ruling!).
+        """
         snap = self.store.snapshot()
         task = self._find_task(snap, task_id)
         proj_abs = os.path.realpath(os.path.abspath(task.get("project_path") or snap["binding"]["project_path"]))
         mf_abs = _resolve_workdir(proj_abs, manifest_path)
         if not os.path.isfile(mf_abs):
             raise ValueError(f"图件契约文件不存在: {manifest_path}")
-        report = verify_figure_manifest(mf_abs, proj_abs)
+        try:
+            report = verify_figure_manifest(mf_abs, proj_abs)
+        except Exception as exc:
+            report = {
+                "ok": False,
+                "status": "failed",
+                "verification_level": "failed",
+                "figure_id": os.path.basename(mf_abs),
+                "manifest_path": mf_abs,
+                "checked_artifacts": 0,
+                "checked_panels": 0,
+                "blocking": [f"figure_qa 内部异常: {type(exc).__name__}: {exc}"],
+                "observations": [],
+                "manual_checks": [],
+                "artifacts": [],
+            }
         report["verified_at"] = time.time()
 
         def _save_qa(st: Dict[str, Any]) -> None:
@@ -982,37 +1428,276 @@ class TeamOrchestrator:
             so = t.get("research_signoff")
             if not isinstance(so, dict):
                 so = {
-                    "ok": bool(report.get("ok")),
-                    "status": "passed" if report.get("ok") else "failed",
+                    "ok": True,
+                    "status": "pending_artifacts",
                     "mode": "manual_figure_qa",
                     "checks": [],
                     "figure_reports": [],
-                    "blocking": list(report.get("blocking") or []),
-                    "observations": list(report.get("observations") or []),
+                    "blocking_items": [],
+                    "blocking": [],
+                    "base_observations": [],
+                    "observations": [],
                     "verified_at": report["verified_at"],
                 }
                 t["research_signoff"] = so
-            reports = [r for r in (so.get("figure_reports") or []) if r.get("manifest_path") != report.get("manifest_path")]
+            target_mp_nc = os.path.normcase(os.path.realpath(mf_abs))
+            reports = [
+                r for r in (so.get("figure_reports") or [])
+                if isinstance(r, dict)
+                and os.path.normcase(os.path.realpath(str(r.get("manifest_path") or ""))) != target_mp_nc
+            ]
             reports.append(report)
             so["figure_reports"] = reports
-            if not report.get("ok"):
-                so["ok"] = False
-                so["status"] = "failed"
-                for b in report.get("blocking") or []:
-                    msg = f"[Figure QA] {b}"
-                    if msg not in so.setdefault("blocking", []):
-                        so["blocking"].append(msg)
+            so["verified_at"] = report["verified_at"]
+            recompute_signoff_summary(so)
+
+            # Recover task/step ONLY when full signoff is genuinely "passed" (NEVER on not_verifiable or pending_artifacts!)
+            recovered = False
+            if so.get("status") == "passed" and t.get("status") == "needs_ruling":
+                b_reason = str(t.get("blocking_reason") or "")
+                if "机械验收未通过" in b_reason or "Figure QA" in b_reason:
+                    for s in t.get("steps") or []:
+                        if s.get("status") == "needs_ruling" and ("机械验收未通过" in str(s.get("blocking_reason") or "") or "Figure QA" in str(s.get("blocking_reason") or "")):
+                            s["status"] = "succeeded"
+                            s["blocking_reason"] = None
+                            recovered = True
+                    if recovered:
+                        self._refresh_task_overall_status_unlocked(st, t)
+
             t["recent_events"].append(
                 {
                     "ts": time.time(),
-                    "type": "figure.qa",
-                    "summary": f"科研图质检 {'通过' if report.get('ok') else '发现阻断项'}: {os.path.basename(mf_abs)}",
+                    "type": "figure.qa.recovered" if recovered else "figure.qa",
+                    "summary": (
+                        f"科研图复检通过并恢复放行: {os.path.basename(mf_abs)}"
+                        if recovered
+                        else f"科研图质检 {report.get('status')}: {os.path.basename(mf_abs)}"
+                    ),
                 }
             )
+            t["recent_events"] = t["recent_events"][-40:]
             t["updated_at"] = time.time()
 
         self.store.mutate(_save_qa)
         return report
+
+    def compact_task_context(self, task_id: str, reset_sessions: bool = True) -> Dict[str, Any]:
+        """
+        Lock-free manual context compaction & optional clean session rollover:
+        Seals an immutable deterministic Round State Snapshot from completed chat history,
+        writes a Checkpoint Handoff Pack to BlobStore, and optionally clears non-running step
+        worker_session_ids so the next followup/turn begins on a fresh KV-clean session!
+        """
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        msgs = list(task.get("chat_room") or [])
+        if not msgs:
+            raise ValueError("当前任务尚无讨论上下文可压缩")
+
+        blob_store = BlobStore(task_id)
+        tmp_dir, _ = get_runtime_dirs()
+        room_md_path = os.path.join(tmp_dir, "team_rooms", f"{task_id}.md")
+        max_stage = max([int(s.get("stage_index") or 0) for s in (task.get("steps") or [])] or [0])
+        sealed = seal_round_snapshot(
+            msgs,
+            visibility_scope="manual_compact",
+            stage_index=max_stage,
+            cutoff_seq=len(msgs),
+            task_meta=task,
+            blob_store=blob_store,
+            round_label="手动压缩快照",
+        )
+        ckpt = build_handoff_checkpoint(
+            task,
+            (task.get("steps") or [{}])[-1],
+            msgs,
+            blob_store,
+            room_md_path,
+            reason="manual_compact",
+            level="L1",
+        )
+
+        def _commit(st: Dict[str, Any]) -> Dict[str, Any]:
+            t = self._find_task(st, task_id)
+            now = time.time()
+            snaps = t.setdefault("round_snapshots", [])
+            if not any(x.get("snapshot_sha256") == sealed["snapshot_sha256"] for x in snaps):
+                snaps.append(sealed)
+                t["round_snapshots"] = snaps[-12:]
+            t["latest_checkpoint"] = {
+                "blob_path": ckpt["blob_path"],
+                "sha256": ckpt["sha256"],
+                "reason": "manual_compact",
+                "anchors_count": ckpt["anchors_count"],
+                "created_at": now,
+            }
+            cleared = 0
+            if reset_sessions:
+                for s in t.get("steps") or []:
+                    if s.get("status") != "running" and s.get("worker_session_id"):
+                        mid = s.get("member_id")
+                        if mid and mid in st.get("members", {}):
+                            st["members"][mid].setdefault("session_history", []).append(s["worker_session_id"])
+                        s["worker_session_id"] = None
+                        s["session_epoch"] = int(s.get("session_epoch") or 0) + 1
+                        cleared += 1
+            cs = t.setdefault("context_stats", {})
+            cs["manual_compactions"] = int(cs.get("manual_compactions") or 0) + 1
+            cs["snapshot_count"] = len(t.get("round_snapshots") or [])
+            cs["snapshots_count"] = len(t.get("round_snapshots") or [])
+            cs["last_compacted_at"] = now
+            t["recent_events"].append({
+                "ts": now,
+                "type": "context.compacted",
+                "summary": f"已手动封存不可变状态卡 ({sealed['anchor_count']} 锚点 / {sealed['blocker_count']} 阻断)"
+                + (f" 并重置 {cleared} 个非运行会话" if cleared else ""),
+            })
+            t["recent_events"] = t["recent_events"][-40:]
+            t["updated_at"] = now
+            return {
+                "snapshot": {k: v for k, v in sealed.items() if k != "rendered_md"},
+                "checkpoint_path": ckpt["blob_path"],
+                "cleared_sessions": cleared,
+                "reset_sessions_count": cleared,
+                "snapshots_count": len(t.get("round_snapshots") or []),
+            }
+
+        res_c = self.store.mutate(_commit)
+        # Lock-free FTS5 indexing of manual snapshot into project memory
+        try:
+            proj_p = task.get("project_path") or snap["binding"]["project_path"]
+            ProjectMemoryIndex(proj_p).upsert_doc(
+                doc_id=f"{task_id}:snap:{sealed['snapshot_sha256'][:12]}",
+                task_id=task_id,
+                kind="snapshot",
+                title=f"{task.get('title', task_id)} · 手动压缩快照",
+                content=sealed["rendered_md"],
+                blob_path=sealed["blob_path"],
+                anchors=extract_deterministic_anchors(sealed["rendered_md"]),
+                stage_index=max_stage,
+            )
+        except Exception:
+            pass
+        return res_c
+
+    def search_project_memory(
+        self,
+        query: str,
+        *,
+        project_path: Optional[str] = None,
+        task_id: Optional[str] = None,
+        limit: int = 8,
+    ) -> Dict[str, Any]:
+        """Search project-scoped SQLite FTS5 + CJK bi-gram memory index (snapshots, blobs, deliverables, rulings)."""
+        snap = self.store.snapshot()
+        proj_p = project_path or snap["binding"]["project_path"]
+        idx = ProjectMemoryIndex(proj_p)
+        hits = idx.search(query, limit=limit, task_id=task_id)
+        return {"query": query, "project_path": proj_p, "hits": hits, "stats": idx.stats()}
+
+    def get_memory_stats(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+        """Return project-scoped FTS5 memory index statistics and Git repository worktree readiness."""
+        snap = self.store.snapshot()
+        proj_p = project_path or snap["binding"]["project_path"]
+        idx = ProjectMemoryIndex(proj_p)
+        return {
+            "project_path": proj_p,
+            "memory": idx.stats(),
+            "git": detect_git_repo(proj_p),
+        }
+
+    def get_task_worktrees(self, task_id: str) -> Dict[str, Any]:
+        """Inspect all isolated Git worktrees and live unified diffs for a task (strictly lock-free)."""
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        proj_p = task.get("project_path") or snap["binding"]["project_path"]
+        items: List[Dict[str, Any]] = []
+        for s in task.get("steps") or []:
+            wt = s.get("worktree_info")
+            if not isinstance(wt, dict) or not wt.get("worktree_path"):
+                continue
+            live_diff = inspect_worktree_diff(wt["worktree_path"], wt.get("base_commit", ""))
+            items.append(
+                {
+                    "step_index": s["step_index"],
+                    "title": s.get("title", ""),
+                    "member_id": s.get("member_id", ""),
+                    "member_name": snap["members"].get(s.get("member_id", ""), {}).get("name", s.get("member_id", "")),
+                    "step_status": s.get("status"),
+                    **wt,
+                    "live_diff": live_diff,
+                }
+            )
+        return {"task_id": task_id, "git": detect_git_repo(proj_p), "worktrees": items}
+
+    def merge_task_worktree(self, task_id: str, step_index: int, cleanup_after: bool = True) -> Dict[str, Any]:
+        """Safely merge an isolated step worktree branch into main repo (conflict-checked, lock-free)."""
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        step = task["steps"][int(step_index)]
+        wt = step.get("worktree_info")
+        if not isinstance(wt, dict) or not wt.get("worktree_path"):
+            raise ValueError(f"步骤 {step_index} 未启用或不存在隔离 Git Worktree")
+        if step.get("status") == "running":
+            raise ValueError("该步骤仍在运行中，请等待完成后再合并")
+
+        msg = f"AGY Roundtable merge {task_id} step #{step_index} ({step.get('title', '')})"
+        merge_res = merge_worktree_to_main(wt["repo_root"], wt["worktree_path"], wt["branch"], commit_message=msg)
+        clean_res = None
+        if cleanup_after:
+            clean_res = cleanup_worktree(wt["repo_root"], wt["worktree_path"], wt["branch"])
+
+        def _mark_merged(st: Dict[str, Any]) -> None:
+            t = self._find_task(st, task_id)
+            s = t["steps"][int(step_index)]
+            if isinstance(s.get("worktree_info"), dict):
+                s["worktree_info"]["status"] = "merged_and_cleaned" if cleanup_after else "merged"
+                s["worktree_info"]["merged_head"] = merge_res.get("new_head")
+                s["worktree_info"]["merged_at"] = time.time()
+            t["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "worktree.merged",
+                    "summary": f"已合并步骤 #{step_index} 隔离分支 {wt['branch']} -> HEAD ({str(merge_res.get('new_head', ''))[:8]})",
+                }
+            )
+            t["recent_events"] = t["recent_events"][-40:]
+            t["updated_at"] = time.time()
+
+        self.store.mutate(_mark_merged)
+        return {"merge": merge_res, "cleanup": clean_res}
+
+    def cleanup_task_worktree(self, task_id: str, step_index: int) -> Dict[str, Any]:
+        """Discard and clean up an isolated step worktree & temporary branch."""
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        step = task["steps"][int(step_index)]
+        wt = step.get("worktree_info")
+        if not isinstance(wt, dict) or not wt.get("worktree_path"):
+            raise ValueError(f"步骤 {step_index} 不存在隔离 Git Worktree")
+        if step.get("status") == "running":
+            raise ValueError("该步骤正在运行中，请先中止再清理 Worktree")
+
+        clean_res = cleanup_worktree(wt["repo_root"], wt["worktree_path"], wt.get("branch", ""))
+
+        def _mark_cleaned(st: Dict[str, Any]) -> None:
+            t = self._find_task(st, task_id)
+            s = t["steps"][int(step_index)]
+            if isinstance(s.get("worktree_info"), dict):
+                s["worktree_info"]["status"] = "cleaned"
+                s["worktree_info"]["cleaned_at"] = time.time()
+            t["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "worktree.cleaned",
+                    "summary": f"已清理步骤 #{step_index} 隔离 Worktree ({wt.get('branch', '')})",
+                }
+            )
+            t["recent_events"] = t["recent_events"][-40:]
+            t["updated_at"] = time.time()
+
+        self.store.mutate(_mark_cleaned)
+        return clean_res
 
     def list_backup_candidates(
         self,
@@ -1789,6 +2474,10 @@ class TeamOrchestrator:
         openscience_playbooks: Optional[List[str]] = None,
         squad_preset: str = "",
         chief_max_members: Optional[int] = None,
+        anonymous_peer_review: bool = False,
+        enable_worktree_isolation: Optional[bool] = None,
+        task_token_budget: Optional[int] = None,
+        allow_member_writes: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if project_path:
             self.switch_project(project_path)
@@ -1832,11 +2521,24 @@ class TeamOrchestrator:
                     raise ValueError("圆桌协作请至少勾选 2 位参会成员")
                 host_id = host_member_id if (host_member_id and host_member_id in st["members"]) else valid_ids[0]
                 rounds = max(1, min(3, int(discussion_rounds or 2)))
+                anon_enabled = bool(anonymous_peer_review)
+                anon_map: Dict[str, str] = {}
+                if anon_enabled:
+                    # Deterministic per-task hash permutation so seat labels (席位 A/B/C...) don't leak model order!
+                    perm_ids = sorted(
+                        valid_ids,
+                        key=lambda x: hashlib.sha256(f"{task_id}:{x}".encode("utf-8")).hexdigest(),
+                    )
+                    for ai, am_id in enumerate(perm_ids):
+                        letter = chr(ord("A") + (ai % 26))
+                        anon_map[am_id] = f"席位 {letter}"
                 mode_meta = {
                     "host_member_id": host_id,
                     "participants": valid_ids,
                     "discussion_rounds": rounds,
                     "enable_host_opening": bool(enable_host_opening),
+                    "anonymous_peer_review": anon_enabled,
+                    "anon_map": anon_map,
                 }
 
                 roster_desc = "、".join(f"@{mid}({st['members'][mid]['name']})" for mid in valid_ids)
@@ -1911,9 +2613,29 @@ class TeamOrchestrator:
                                 "请仔细阅读共享群聊中其他参会队友上一轮的全部发言，并执行严格交叉核验：\n"
                                 f"{role_lens}\n"
                                 "【强制沟通纪律】\n"
-                                "1. 严禁盲目附和或复读队友观点；发现数字偏差、未读先猜、过度外推或怯懦回避解读时，必须直接 `@名字` 点名纠错并附真实证据锚点；\n"
+                                "1. 严禁盲目附和或复读队友观点；发现数字偏差、未读先猜、过度外推或怯懦回避解读时，必须直接 `@名字`（匿名模式下点名 `席位 X`）纠错并附真实证据锚点；\n"
                                 "2. 给出经过质询压力测试后修正并演化的收敛建议。"
                             )
+                            if anon_enabled:
+                                peer_labels = [anon_map[p] for p in valid_ids if p != mid and p in anon_map]
+                                r_prompt += (
+                                    "\n\n【匿名互评与 Borda 共识计票协议（已隐藏所有队友的模型与姓名，消除名望偏见）】\n"
+                                    f"你在本场被匿名化为 `{anon_map.get(mid, '本席')}`，其余待评席位为：{', '.join(peer_labels)}。\n"
+                                    "请仅基于论据扎实度、代码/数据核验质量与假说创新度，在文末附上结构化排序票：\n"
+                                    "```peer_ranking\n"
+                                    f'{{"ranking":{json.dumps(peer_labels, ensure_ascii=False)},"confidence":0.85,"rationale":"简述排名第一席位的核心实证优势"}}\n'
+                                    "```"
+                                )
+                        eff_rt_writes = (
+                            bool(allow_member_writes)
+                            if allow_member_writes is not None
+                            else bool(st.get("settings", {}).get("roundtable_allow_member_writes", False))
+                        )
+                        mem_can_write = (
+                            sandbox == "workspace-write"
+                            and eff_rt_writes
+                            and st.get("members", {}).get(mid, {}).get("sandbox") == "workspace-write"
+                        )
                         built_steps.append(
                             self._make_step(
                                 step_index=idx,
@@ -1925,10 +2647,10 @@ class TeamOrchestrator:
                                 prompt=r_prompt,
                                 depends_on=list(prev_round_indices),
                                 review_of=None,
-                                read_only=True,
-                                write_scope=[],
+                                read_only=not mem_can_write,
+                                write_scope=[scope_default] if mem_can_write else [],
                                 workspace_scope=scope_default,
-                                sandbox="read-only",
+                                sandbox="workspace-write" if mem_can_write else "read-only",
                             )
                         )
                     prev_round_indices = cur_round_indices
@@ -2194,6 +2916,16 @@ class TeamOrchestrator:
                 "mode_meta": mode_meta,
                 "sandbox": sandbox,
                 "workspace_scope": scope_default,
+                "worktree_isolation": (
+                    bool(enable_worktree_isolation)
+                    if enable_worktree_isolation is not None
+                    else bool(st.get("settings", {}).get("enable_git_worktree_isolation", False))
+                ),
+                "task_token_budget": (
+                    max(0, int(task_token_budget))
+                    if task_token_budget is not None
+                    else int(st.get("settings", {}).get("task_token_budget", 0) or 0)
+                ),
                 "auto_template": auto_template,
                 "require_manual_ruling": require_manual_ruling,
                 "max_auto_repairs": repairs_cap,
@@ -2833,7 +3565,15 @@ class TeamOrchestrator:
 
         return self.store.mutate(_post)
 
-    def followup_task(self, task_id: str, prompt: str, step_index: Optional[int] = None) -> Dict[str, Any]:
+    def followup_task(
+        self,
+        task_id: str,
+        prompt: str,
+        step_index: Optional[int] = None,
+        target_member_id: Optional[str] = None,
+        sandbox: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("追问内容不能为空")
@@ -2847,8 +3587,26 @@ class TeamOrchestrator:
             if base_step["status"] == "running":
                 raise ValueError("该步骤正在运行中，请勿重复提交")
 
-            mid = base_step["member_id"]
-            sess = base_step.get("worker_session_id")
+            if target_member_id and target_member_id in st["members"]:
+                mid = target_member_id
+                sess = base_step.get("worker_session_id") if mid == base_step["member_id"] else None
+            else:
+                mid = base_step["member_id"]
+                sess = base_step.get("worker_session_id")
+
+            req_sb = (sandbox or "").strip().lower()
+            max_sb = st["binding"].get("max_sandbox", "workspace-write")
+            if req_sb in _SANDBOX_RANK:
+                eff_sb = _effective_sandbox(max_sb, req_sb)
+            else:
+                eff_sb = _effective_sandbox(max_sb, base_step.get("sandbox", "read-only"))
+            is_ro = eff_sb == "read-only"
+            if not is_ro and st["members"][mid].get("client") == "antigravity":
+                # Antigravity headless cannot execute workspace-write scripts -> prefer Codex plotter if explicitly requesting write
+                codex_ids = [k for k, v in st["members"].items() if v.get("client") == "codex"]
+                if codex_ids:
+                    mid = next((k for k in codex_ids if "plotting" in (st["members"][k].get("tags") or [])), codex_ids[0])
+                    sess = None
 
             for other in st["tasks"]:
                 if other["id"] == task_id:
@@ -2870,24 +3628,39 @@ class TeamOrchestrator:
                             )
 
             new_idx = len(task["steps"])
+            ws_scope = base_step.get("workspace_scope", ".")
+            is_repair_step = base_step.get("status") in ("needs_ruling", "failed", "aborted", "blocked")
             new_step = self._make_step(
                 step_index=new_idx,
-                title=f"续聊追问 #{new_idx}",
+                title=(title or "").strip() or f"续聊追问 #{new_idx}",
                 step_type="execution",
                 stage_index=new_idx,
-                round_label="同会话追问",
+                round_label="视觉修图迭代" if (title and "修图" in title) else ("定向返修" if is_repair_step else "同会话追问"),
                 member_id=mid,
                 prompt=prompt,
                 depends_on=[target_idx],
                 review_of=None,
-                read_only=base_step.get("read_only", True),
-                write_scope=list(base_step.get("write_scope", [])),
-                workspace_scope=base_step.get("workspace_scope", "."),
-                sandbox=base_step.get("sandbox", "read-only"),
+                read_only=is_ro,
+                write_scope=[] if is_ro else (list(base_step.get("write_scope", [])) or [ws_scope]),
+                workspace_scope=ws_scope,
+                sandbox=eff_sb,
                 initial_session_id=sess,
+                requires_shell=not is_ro,
             )
+            if is_repair_step:
+                new_step["repair_of"] = target_idx
+                new_step["allow_dep_statuses"] = ["succeeded", "needs_ruling", "failed", "aborted", "blocked"]
             task["steps"].append(new_step)
-            self._append_room_chat(st, task, sender_id="user", kind="user_interjection", content=prompt, to_member_id=mid, step_index=new_idx, round_label="追问")
+            self._append_room_chat(
+                st,
+                task,
+                sender_id="user",
+                kind="user_interjection",
+                content=prompt,
+                to_member_id=mid,
+                step_index=new_idx,
+                round_label="发回修图" if (title and "修图" in title) else "追问",
+            )
             task["archived"] = False
             st["active_task_id"] = task["id"]
             task["current_step_index"] = new_idx
@@ -2924,6 +3697,12 @@ class TeamOrchestrator:
                 {"id": _new_id("RULE"), "ts": now, "step_index": int(step_index), "decision": decision, "reason": reason, "decided_by": decided_by}
             )
             self._append_room_chat(st, task, sender_id="user", kind="ruling", content=f"裁决 [{decision}]: {reason}", round_label="总管裁决")
+            if decision == "accept" and "预算熔断" in str(task.get("blocking_reason") or ""):
+                task["token_budget_overridden"] = True
+                task["blocking_reason"] = None
+                task["status"] = "queued" if st.get("paused") else "running"
+                task["updated_at"] = now
+                return task
 
             if step.get("review_of") is not None:
                 rev_step = step
@@ -3400,8 +4179,8 @@ class TeamOrchestrator:
             resumed_steps = []
             for s in task["steps"]:
                 if s["status"] in ("aborted", "failed", "needs_verification", "blocked"):
-                    if s["status"] == "failed":
-                        # Clear broken session ID so network/executor failure doesn't replay corrupted conversation state
+                    if s["status"] in ("failed", "needs_verification"):
+                        # Clear broken/overflowed session ID so retry starts cleanly without re-hitting overflow
                         s["worker_session_id"] = None
                     s["status"] = "pending"
                     s["blocking_reason"] = None
@@ -3543,7 +4322,7 @@ class TeamOrchestrator:
 
     def _scheduler_loop(self) -> None:
         while not self._stop_event.is_set():
-            self._wakeup.wait(timeout=0.25)
+            self._wakeup.wait(timeout=1.0)
             self._wakeup.clear()
             if self._stop_event.is_set():
                 break
@@ -3554,6 +4333,61 @@ class TeamOrchestrator:
 
     def _schedule_tick(self) -> None:
         with self._sched_lock:
+            # Fast zero-copy pre-check: NEVER deep-copy or fsync team_state.json when idle or no step is ready!
+            def _has_schedulable_work(st: Dict[str, Any]) -> bool:
+                if st.get("paused"):
+                    return False
+                max_conc = int(st.get("max_concurrency", 3))
+                if len(self._running_attempts) >= max_conc:
+                    return False
+                busy_members = {mid for mid, m in st.get("members", {}).items() if m.get("status") == "working"}
+                busy_sessions = {info["session_id"] for info in self._running_attempts.values() if info.get("session_id")}
+                active_writes = [
+                    (info["project_root"], info["write_scope"], bool(info.get("worktree_isolated", False)))
+                    for info in self._running_attempts.values()
+                    if not info.get("read_only", True)
+                ]
+                for task in st.get("tasks", []):
+                    if task.get("status") not in ("running", "queued"):
+                        continue
+                    tok_cap = int(task.get("task_token_budget") or 0)
+                    tok_used = int((task.get("context_stats") or {}).get("total_input_tokens") or 0)
+                    if tok_cap > 0 and tok_used >= tok_cap and not task.get("token_budget_overridden"):
+                        return True
+                    proj_root = task.get("project_path") or st["binding"]["project_path"]
+                    task_wt_iso = bool(task.get("worktree_isolation", False))
+                    steps = task.get("steps", [])
+                    for step in steps:
+                        if step.get("status") != "pending":
+                            continue
+                        allow_st = set(step.get("allow_dep_statuses") or ["succeeded"])
+                        if step.get("repair_of") is not None:
+                            allow_st.update(("succeeded", "needs_ruling", "failed", "aborted", "blocked"))
+                        if not all(0 <= d < len(steps) and steps[d].get("status") in allow_st for d in step.get("depends_on", [])):
+                            continue
+                        mid = step["member_id"]
+                        mem = st.get("members", {}).get(mid)
+                        if not mem or mem.get("client") not in SUPPORTED_CLIENTS or mid in busy_members:
+                            continue
+                        sess = step.get("worker_session_id")
+                        if sess and sess in busy_sessions:
+                            continue
+                        step_wt_iso = bool(task_wt_iso and not step.get("read_only", True) and step.get("sandbox") == "workspace-write")
+                        if not step.get("read_only", True):
+                            cand_scope = step.get("write_scope") or []
+                            if any(
+                                (not (step_wt_iso and aw_wt))
+                                and normalize_win_path(proj_root) == normalize_win_path(pr)
+                                and _scopes_overlap(cand_scope, ws, proj_root)
+                                for pr, ws, aw_wt in active_writes
+                            ):
+                                continue
+                        return True
+                return False
+
+            if not self.store.read(_has_schedulable_work):
+                return
+
             to_launch: List[Tuple[str, int, str]] = []
 
             def _pick_candidates(st: Dict[str, Any]) -> None:
@@ -3566,8 +4400,8 @@ class TeamOrchestrator:
 
                 busy_members = {mid for mid, m in st["members"].items() if m.get("status") == "working"}
                 busy_sessions = {info["session_id"] for info in self._running_attempts.values() if info.get("session_id")}
-                active_writes: List[Tuple[str, List[str]]] = [
-                    (info["project_root"], info["write_scope"])
+                active_writes: List[Tuple[str, List[str], bool]] = [
+                    (info["project_root"], info["write_scope"], bool(info.get("worktree_isolated", False)))
                     for info in self._running_attempts.values()
                     if not info.get("read_only", True)
                 ]
@@ -3575,15 +4409,34 @@ class TeamOrchestrator:
                 for task in st.get("tasks", []):
                     if task.get("status") not in ("running", "queued"):
                         continue
+                    # Pillar 5: Per-task Token Budget Hard Ceiling (pauses cleanly in needs_ruling before runaway spend!)
+                    tok_cap = int(task.get("task_token_budget") or 0)
+                    tok_used = int((task.get("context_stats") or {}).get("total_input_tokens") or 0)
+                    if tok_cap > 0 and tok_used >= tok_cap and not task.get("token_budget_overridden"):
+                        task["status"] = "needs_ruling"
+                        task["blocking_reason"] = (
+                            f"任务累计输入 Token ({tok_used:,}) 已达预算上限 ({tok_cap:,})，已触发预算熔断暂停派发，请裁决放行或精简收敛。"
+                        )
+                        task["recent_events"].append(
+                            {"ts": time.time(), "type": "budget.token_cap_hit", "summary": task["blocking_reason"][:150]}
+                        )
+                        task["recent_events"] = task["recent_events"][-40:]
+                        task["updated_at"] = time.time()
+                        continue
+
                     proj_root = task.get("project_path") or st["binding"]["project_path"]
+                    task_wt_iso = bool(task.get("worktree_isolation", False))
                     steps = task.get("steps", [])
                     for step in steps:
                         if active_count >= max_conc:
                             return
                         if step.get("status") != "pending":
                             continue
+                        allow_st = set(step.get("allow_dep_statuses") or ["succeeded"])
+                        if step.get("repair_of") is not None:
+                            allow_st.update(("succeeded", "needs_ruling", "failed", "aborted", "blocked"))
                         deps_ok = all(
-                            0 <= d < len(steps) and steps[d].get("status") == "succeeded"
+                            0 <= d < len(steps) and steps[d].get("status") in allow_st
                             for d in step.get("depends_on", [])
                         )
                         if not deps_ok:
@@ -3598,12 +4451,14 @@ class TeamOrchestrator:
                         sess = step.get("worker_session_id")
                         if sess and sess in busy_sessions:
                             continue
+                        step_wt_iso = bool(task_wt_iso and not step.get("read_only", True) and step.get("sandbox") == "workspace-write")
                         if not step.get("read_only", True):
                             cand_scope = step.get("write_scope") or []
                             conflict = any(
-                                normalize_win_path(proj_root) == normalize_win_path(pr)
+                                (not (step_wt_iso and aw_wt))
+                                and normalize_win_path(proj_root) == normalize_win_path(pr)
                                 and _scopes_overlap(cand_scope, ws, proj_root)
-                                for pr, ws in active_writes
+                                for pr, ws, aw_wt in active_writes
                             )
                             if conflict:
                                 continue
@@ -3654,7 +4509,7 @@ class TeamOrchestrator:
                         if sess:
                             busy_sessions.add(sess)
                         if not step.get("read_only", True):
-                            active_writes.append((proj_root, step.get("write_scope") or []))
+                            active_writes.append((proj_root, step.get("write_scope") or [], step_wt_iso))
 
                         self._running_attempts[att_id] = {
                             "task_id": task["id"],
@@ -3664,6 +4519,7 @@ class TeamOrchestrator:
                             "project_root": proj_root,
                             "read_only": step.get("read_only", True),
                             "write_scope": step.get("write_scope") or [],
+                            "worktree_isolated": step_wt_iso,
                         }
                         active_count += 1
                         to_launch.append((task["id"], step["step_index"], att_id))
@@ -3678,11 +4534,88 @@ class TeamOrchestrator:
                     daemon=True,
                 ).start()
 
-    def _build_step_prompt(self, st: Dict[str, Any], task: Dict[str, Any], step: Dict[str, Any], work_dir: str) -> str:
-        if step.get("pending_user_answer"):
-            return step["pending_user_answer"]
+    def _visible_messages_for_step(self, task: Dict[str, Any], step: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
+        """Compute Blind Round 1 visibility-filtered chat messages + optional Anonymous Peer Review masking."""
+        is_blind_r1 = (
+            task.get("execution_mode") == "roundtable"
+            and step.get("step_type") == "discussion"
+            and int(step.get("stage_index") or 0) == 1
+        )
+        room_msgs = list(task.get("chat_room") or [])
+        if is_blind_r1:
+            visible_msgs = [
+                cm
+                for cm in room_msgs
+                if cm.get("kind") in ("user_goal", "user_interjection", "user_choice", "ruling")
+                or (cm.get("step_index") == 0 and (task.get("mode_meta") or {}).get("enable_host_opening"))
+                or (cm.get("sender_id") == step["member_id"] and cm.get("step_index") == step["step_index"])
+            ]
+            return visible_msgs, True
 
+        # Pillar 5: Anonymous Peer Review seat masking during Round 2+ cross-critique (unmasked in synthesis!)
+        meta = task.get("mode_meta") or {}
+        anon_map = meta.get("anon_map") if isinstance(meta.get("anon_map"), dict) else {}
+        if (
+            meta.get("anonymous_peer_review")
+            and anon_map
+            and step.get("step_type") == "discussion"
+            and int(step.get("stage_index") or 0) >= 2
+        ):
+            masked_msgs: List[Dict[str, Any]] = []
+            for cm in room_msgs:
+                cp = dict(cm)
+                sid = cp.get("sender_id")
+                if sid in anon_map:
+                    lbl = anon_map[sid]
+                    cp["sender_name"] = f"{lbl} (你自己)" if sid == step["member_id"] else lbl
+                tid_to = cp.get("to_member_id")
+                if tid_to in anon_map:
+                    cp["to_member_name"] = anon_map[tid_to]
+                masked_msgs.append(cp)
+            return masked_msgs, False
+
+        return room_msgs, False
+
+    def _compile_step_turn(
+        self,
+        st: Dict[str, Any],
+        task: Dict[str, Any],
+        step: Dict[str, Any],
+        work_dir: str,
+        *,
+        session_id: Optional[str] = None,
+        compression_level: str = "L0",
+        force_full_prompt: bool = False,
+        extra_handoff_md: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Compile Three-Zone KV-Cache Prefix-Stable prompt with Four-Tier Hard Budget Governance (v5.3).
+        Preserves pending_user_answer passthrough, Blind R1 isolation, and all 22 existing test contracts.
+        """
+        cfg = ContextBudgetConfig.from_settings(st.get("settings"))
+        blob_store = BlobStore(str(task.get("id") or "task"))
         mem = st["members"][step["member_id"]]
+
+        if step.get("pending_user_answer"):
+            pua = str(step["pending_user_answer"])
+            return {
+                "prompt": pua,
+                "prefix_sha256": "pua_passthrough",
+                "is_delta": True,
+                "compression_level": "L0",
+                "prompt_chars": len(pua),
+                "est_tokens": max(1, len(pua) // 2),
+                "budget_chars": cfg.max_prompt_chars,
+                "budget_decision": "send",
+                "rollover_reason": None,
+                "chat_cursor_id": str((task.get("chat_room") or [{}])[-1].get("id") or ""),
+                "masked_blocks": 0,
+                "used_snapshots": 0,
+                "omitted_refs": [],
+                "window_tokens": 200_000,
+                "window_source": "passthrough",
+            }
+
         role_obj = st["roles"].get(mem["role"], {})
         specialty = (mem.get("specialty") or "").strip()
         persona_prompt = (mem.get("persona_prompt") or "").strip()
@@ -3694,19 +4627,18 @@ class TeamOrchestrator:
         if role_obj.get("description"):
             id_line += f" — {role_obj.get('description', '')}"
 
-        parts: List[str] = [
+        # ===== ZONE A: Byte-Frozen Static Prefix (KV-Cache Friendly!) =====
+        zone_a_blocks: List[str] = [
             f"【当前项目工作目录】{work_dir}",
             id_line,
         ]
         if persona_prompt:
-            parts.append(f"【专家专属视角与核查清单】\n{persona_prompt}")
-
+            zone_a_blocks.append(f"【专家专属视角与核查清单】\n{persona_prompt}")
         dialect_block = _build_model_family_tuning(mem.get("client", "codex"), mem.get("model", ""))
         if dialect_block:
-            parts.append(dialect_block)
-
+            zone_a_blocks.append(dialect_block)
         if grounding_mode == "strict":
-            parts.append(
+            zone_a_blocks.append(
                 "【OpenScience 证据核证、科学诚实与反幻觉规约 (Strict Grounding + science.txt)】\n"
                 "1. 事实层零编造与科学诚实：严禁虚构工作区不存在的文件路径、代码行号、数据样本量、统计值(P值/CI/HR)、文献作者或 DOI；引用项目内任何数字、表格结论或代码实现必须先读后引，并用 `[文件名](真实路径)`（代码附 `#L起始-L结束`）标出锚点；若实证数据反驳预设假说或用户预期，必须以精确数字坦诚报告而非迎合预期；\n"
                 "2. 非破坏性重跑与数据直绘：严禁覆盖或删除原始数据与既有结果目录（重跑写入新目录或版本化文件名）；统计图必须直接由脚本从实测数据绘制，AI 生成位图绝不可作为实验证据；\n"
@@ -3719,85 +4651,139 @@ class TeamOrchestrator:
                 "6. 末尾附简短【证据溯源与外推假说台账】（列出本条直接核验过的真实文件/命令，以及关键外推假说及其证伪条件/待外部核实项）。"
             )
         else:
-            parts.append(
+            zone_a_blocks.append(
                 "【证据规范 (Balanced Grounding)】\n"
                 "引用项目文件与数据时请优先读取真实文件并用 `[文件名](路径)` 标注来源；鼓励给出机理与前瞻推演，但未实证项须注明 `[推断/假说]` 与验证路径，切勿编造具体数据或文献。"
             )
-        pb_block = render_playbooks_prompt(task.get("openscience_playbooks"))
-        if pb_block:
-            parts.append(pb_block)
         if step.get("read_only", True):
-            parts.append("【权限边界】当前为只读模式 (read-only)：可读取检查项目内文件，不得修改或删除文件。")
+            zone_a_blocks.append("【权限边界】当前为只读模式 (read-only)：可读取检查项目内文件，不得修改或删除文件。")
 
-        # Inject Shared Team Chat Room transcript (up to 8,000 chars per message so tables & evidence are never cut!)
-        # Enforce True Blind Round 1 isolation in roundtable mode so fast Round 1 peers do not anchor slower siblings!
-        is_blind_r1 = (
-            task.get("execution_mode") == "roundtable"
-            and step.get("step_type") == "discussion"
-            and int(step.get("stage_index") or 0) == 1
+        # ===== ZONE B: Semi-Static JIT Playbooks + Figure Contract + Immutable Sealed Snapshots =====
+        stype = step.get("step_type", "execution")
+        is_rev = step.get("review_of") is not None
+        fc = (task.get("research_spec") or {}).get("figure_contract") if isinstance(task.get("research_spec"), dict) else None
+        has_fc = isinstance(fc, dict) and bool(fc)
+        jit_pbs = select_jit_playbooks(
+            task.get("openscience_playbooks"),
+            step_type=stype,
+            sandbox=str(step.get("sandbox") or task.get("sandbox") or "read-only"),
+            has_figure_contract=has_fc,
+            is_review=is_rev,
         )
-        room_msgs = task.get("chat_room") or []
-        if is_blind_r1:
-            # Strictly seal Blind Round 1: exclude sibling drafts, directed peer consults, AND
-            # this member's own mention_reply written while assisting a sibling Round 1 step!
-            visible_msgs = [
-                cm
-                for cm in room_msgs
-                if cm.get("kind") in ("user_goal", "user_interjection", "user_choice", "ruling")
-                or (cm.get("step_index") == 0 and (task.get("mode_meta") or {}).get("enable_host_opening"))
-                or (cm.get("sender_id") == step["member_id"] and cm.get("step_index") == step["step_index"])
+        zone_b_static: List[str] = []
+        pb_block = render_playbooks_prompt(jit_pbs)
+        if pb_block:
+            zone_b_static.append(pb_block)
+
+        if has_fc and stype not in ("opening", "chief_plan"):
+            be = str(fc.get("backend") or "python").strip().lower()
+            be_rule = (
+                "Python (matplotlib / seaborn)，强制设置 `mpl.rcParams['svg.fonttype']='none'` 与 `mpl.rcParams['pdf.fonttype']=42`，严禁混用 R 代绘"
+                if be == "python"
+                else "R (ggplot2 / patchwork / ComplexHeatmap)，使用 `svglite` / `cairo_pdf` / `ragg::agg_tiff`，严禁混用 Python 代绘"
+            )
+            tw = fc.get("target_width_mm") or 89
+            jname = fc.get("journal_preset") or "Nature"
+            mf_pt = fc.get("min_font_pt") or 6.0
+            pal = fc.get("palette") or "Okabe-Ito"
+            fmts = ", ".join(fc.get("required_formats") or fc.get("formats") or ["svg", "pdf", "png", "tiff"])
+            claim = str(fc.get("core_claim") or "").strip()
+            drawio_note = (
+                "- 可编辑机制图导出：同时写出标准 `.drawio` (mxGraph XML) 源文件与矢量 SVG/PDF，支持在 Draw.io 中二次编辑。\n"
+                if (str(fc.get("figure_type") or "").lower() == "schematic" or fc.get("export_drawio"))
+                else ""
+            )
+            zone_b_static.append(
+                "【科研出图契约 (Publication Figure Contract · 必须严格遵守)】\n"
+                f"- 排他后端：{be_rule}\n"
+                f"- 版面与字体：目标刊物 {jname}，物理终印宽 `{tw} mm`，纯白底板 `#FFFFFF`，终稿有效字号 `>= {mf_pt} pt`，配色方案 `{pal}`\n"
+                f"- 导出格式包：`{fmts}`（PNG >= 300 DPI，TIFF >= 600 DPI 且像素宽匹配物理毫米）\n"
+                + (f"- 核心科学论断 (Hero Claim)：{claim}\n" if claim else "")
+                + drawio_note
+                + "- 机械验收契约：脚本输出图件同时必须写出 `figure_manifest.json`（含 `figure_id`, `target_width_mm`, `min_dpi`, `script_path`, `script_sha256`, `source_data_path`, `source_data_sha256`, `exports`, `panel_sources`），以便 `figure_qa.py` 自动机械核验。"
+            )
+
+        visible_msgs, is_blind_r1 = self._visible_messages_for_step(task, step)
+
+        # Pillar 2: Cross-Task SQLite FTS5 Memory Recall + Pure-Stdlib AST Structural RepoMap (fresh sessions only!)
+        # Strictly skip cross-task recall during Blind Round 1 to guarantee zero anchoring bias!
+        settings_map = st.get("settings") if isinstance(st.get("settings"), dict) else {}
+        if not session_id and compression_level == "L0" and stype not in ("visual_qa",):
+            if not is_blind_r1 and settings_map.get("enable_cross_task_memory", True):
+                try:
+                    proj_mem_root = task.get("project_path") or st["binding"]["project_path"]
+                    recalled = ProjectMemoryIndex(proj_mem_root).recall_cross_task_memory(
+                        str(task.get("goal") or ""),
+                        str(task.get("id") or ""),
+                        max_chars=1500,
+                        limit=3,
+                    )
+                    if recalled:
+                        zone_b_static.append(recalled)
+                except Exception:
+                    pass
+            # Inject AST RepoMap into Codex fresh sessions (Antigravity already injects it in Zone C!)
+            if mem.get("client") == "codex" and settings_map.get("enable_ast_repomap", True):
+                try:
+                    focus_toks = re.findall(r"[A-Za-z0-9_]{3,32}", str(task.get("goal") or ""))[:8]
+                    rmap = build_structural_repomap(work_dir, max_chars=1600, focus_terms=focus_toks)
+                    if rmap:
+                        zone_b_static.append(rmap)
+                except Exception:
+                    pass
+
+        # Pillar 5: Inject deterministic Borda Count scoreboard into final Host Synthesis when available!
+        if stype == "synthesis" and isinstance(task.get("borda_scoreboard"), dict) and (task["borda_scoreboard"].get("ballots_count") or 0) > 0:
+            bs = task["borda_scoreboard"]
+            b_rows = [
+                f"- {r['name']} ({r.get('anon_label') or r['member_id']}): {r['borda_points']} 分 (首推 {r['first_place_votes']} 票)"
+                for r in (bs.get("rows") or [])
             ]
-        else:
-            visible_msgs = room_msgs
+            zone_b_static.append(
+                f"【匿名互评 Borda 共识计票结果（已揭晓真实席位 · 共 {bs['ballots_count']} 份有效选票 · 平均置信度 {bs['mean_confidence']}）】\n"
+                + "\n".join(b_rows)
+            )
 
         tmp_dir, _ = get_runtime_dirs()
         room_md_path = os.path.join(tmp_dir, "team_rooms", f"{task.get('id', 'task')}.md")
-        if len(visible_msgs) > 1:
-            recent_slice = visible_msgs[-16:]
-            total_raw = sum(len(cm.get("content") or "") for cm in recent_slice)
-            transcript_lines = []
-            for i_cm, cm in enumerate(recent_slice):
-                to_tag = f" @{cm['to_member_name']}" if cm.get("to_member_name") else ""
-                # Keep the most recent round at lossless 8,000 chars; gently trim older rounds only when
-                # total transcript exceeds 26,000 chars (full verbatim transcript always lives in room_md_path)
-                is_recent_turn = (len(recent_slice) - i_cm) <= 4
-                per_msg_limit = 8000 if (is_recent_turn or total_raw <= 26000) else 3200
-                transcript_lines.append(
-                    f"[{cm.get('round_label') or cm['kind']}] {cm['sender_name']}{to_tag}：\n{_smart_clip(cm['content'], per_msg_limit)}"
-                )
-            hdr = (
-                "【本轮可见上下文（Blind Round 1 隔离视图，不包含同轮其他席位草稿）】\n"
-                if is_blind_r1
-                else f"【团队共享群聊记录（完整纪要文件：{room_md_path}）】\n"
-            )
-            parts.append(hdr + "\n---\n".join(transcript_lines))
-        elif step.get("depends_on") and not is_blind_r1:
+
+        dep_fallback = ""
+        if len(visible_msgs) <= 1 and step.get("depends_on") and not is_blind_r1:
             dep_blocks = []
             for d_idx in step["depends_on"]:
-                d_step = task["steps"][d_idx]
-                dep_blocks.append(
-                    f"--- 前序步骤 {d_idx} ({d_step['title']} / {st['members'].get(d_step['member_id'], {}).get('name', d_step['member_id'])}) 成果 ---\n{d_step.get('latest_result_text', '')}"
-                )
-            parts.append("\n".join(dep_blocks))
+                if 0 <= d_idx < len(task.get("steps") or []):
+                    d_step = task["steps"][d_idx]
+                    dep_blocks.append(
+                        f"--- 前序步骤 {d_idx} ({d_step['title']} / {st['members'].get(d_step['member_id'], {}).get('name', d_step['member_id'])}) 成果 ---\n{d_step.get('latest_result_text', '')}"
+                    )
+            dep_fallback = "\n".join(dep_blocks)
 
+        handoff_parts: List[str] = []
+        if extra_handoff_md and extra_handoff_md.strip():
+            handoff_parts.append(extra_handoff_md.strip())
         if step.get("handoff_context"):
             hc = step["handoff_context"]
-            parts.append(
+            handoff_parts.append(
                 "【改派交接摘要】\n"
                 f"- 原负责人：{hc.get('reassigned_from')} → 现负责人：{hc.get('reassigned_to')}（原因：{hc.get('reason')}）\n"
                 f"- 已完成步骤：{json.dumps(hc.get('completed_steps', []), ensure_ascii=False)}\n"
                 f"- 前序产物：{json.dumps(hc.get('prior_outputs', []), ensure_ascii=False)}\n"
                 f"- 待解决问题：{json.dumps(hc.get('open_issues_and_evidence', []), ensure_ascii=False)}"
             )
+        handoff_block = "\n\n".join(handoff_parts)
+        step_prompt_block = step["pending_repair_brief"] if step.get("pending_repair_brief") else f"【本步任务】\n{step['prompt']}"
 
-        if step.get("pending_repair_brief"):
-            parts.append(step["pending_repair_brief"])
-        else:
-            parts.append(f"【本步任务】\n{step['prompt']}")
-
-        stype = step.get("step_type", "execution")
-        if step.get("review_of") is not None:
-            parts.append(
+        # ===== JIT Output Protocol Contracts (Zero-bloat per step_type!) =====
+        protocol_blocks: List[str] = []
+        if stype == "visual_qa":
+            protocol_blocks.append(
+                "【VLM 科研图件视觉质检输出格式契约 (Fail-Closed JSON)】\n"
+                "请使用 read_file 亲自查看渲染生成的 PNG/SVG 图件，重点检查：文字/图例/散点是否遮挡重叠、字号可读性、配色对比与留白均衡、是否直观支撑核心论断。\n"
+                "严格输出如下 JSON 对象（可置于 ```json 代码块中）：\n"
+                '{"verdict":"PASS 或 REVISE","visual_score":8.5,"defects":[{"severity":"BLOCKING 或 MINOR","region":"面板/区域","issue":"具体视觉缺陷","fix":"可直接修改绘图脚本的精确建议"}],"summary":"一句话视觉评价"}'
+            )
+        elif is_rev:
+            protocol_blocks.append(
                 "【独立审查输出格式契约】\n"
                 "请严格核对被审查步骤的实际输出证据，仅输出如下 JSON 对象：\n"
                 '{"verdict": "ACCEPT 或 REJECT", "problem": "具体问题（通过填为空字符串）", '
@@ -3805,7 +4791,6 @@ class TeamOrchestrator:
                 '"expected_fix": "限定原范围的具体修复要求", "scope_expanded": false}'
             )
         elif stype != "chief_plan":
-            # Distinguish seated participants vs external standby specialists!
             seated_ids = set((task.get("mode_meta") or {}).get("participants") or [])
             in_room_peers = []
             standby_peers = []
@@ -3818,11 +4803,11 @@ class TeamOrchestrator:
                 else:
                     standby_peers.append(desc)
 
-            if (in_room_peers or standby_peers) and stype in ("execution", "discussion", "synthesis"):
+            if (in_room_peers or standby_peers) and stype in ("execution", "discussion", "synthesis") and int(step.get("consult_count") or 0) < 3:
                 roster_block = f"本场在席队友：{', '.join(in_room_peers) if in_room_peers else '无'}"
-                if standby_peers:
+                if standby_peers and compression_level == "L0":
                     roster_block += f"\n场外支援专员（未参加本场圆桌发言，仅可请教具体技术/文献核查，切勿向其索要本场发言记录）：{', '.join(standby_peers)}"
-                parts.append(
+                protocol_blocks.append(
                     "【团队内部 @ 结构化核验协商协议（可选）】\n"
                     f"{roster_block}\n"
                     "注意：上方共享群聊记录已包含队友的完整发言，无需为索要聊天记录而提问。仅当需要某位队友结合其专长独立核验某条关键声明、数据表或代码边界时，可在末尾附上结构化代码块唤醒TA答复：\n"
@@ -3830,15 +4815,45 @@ class TeamOrchestrator:
                     '{"to":"队友id","claim_to_verify":"待核验的核心声明或数值（可选）","evidence_needed":"希望读取核对的具体文件或口径（可选）","question":"具体请教或要求协助核对的问题"}\n'
                     "```"
                 )
-            parts.append(
-                "【向人类负责人提问确认协议（可选）】\n"
-                "严禁调用内置 ask_question 弹窗工具。仅当存在必须由人类负责人拍板的方向选择时，在末尾附上如下提问块暂停等待点选：\n"
-                "```team_questions\n"
-                '{"questions":[{"id":"q1","question":"需要确认的问题","multi_select":false,"options":["(推荐) 方案A","方案B"]}]}\n'
-                "```"
-            )
+            if stype not in ("fact_check", "opening"):
+                protocol_blocks.append(
+                    "【向人类负责人提问确认协议（可选）】\n"
+                    "严禁调用内置 ask_question 弹窗工具。仅当存在必须由人类负责人拍板的方向选择时，在末尾附上如下提问块暂停等待点选：\n"
+                    "```team_questions\n"
+                    '{"questions":[{"id":"q1","question":"需要确认的问题","multi_select":false,"options":["(推荐) 方案A","方案B"]}]}\n'
+                    "```"
+                )
 
-        return "\n\n".join(parts)
+        sess_metrics_map = task.get("session_metrics") if isinstance(task.get("session_metrics"), dict) else {}
+        sess_metric = sess_metrics_map.get(session_id) if session_id else None
+        cur_stage = int(step.get("stage_index") or 0)
+        sealed_snaps = [] if is_blind_r1 else list(task.get("round_snapshots") or [])
+
+        return compile_turn_prompt(
+            zone_a_blocks=zone_a_blocks,
+            zone_b_static_blocks=zone_b_static,
+            sealed_snapshots=sealed_snaps,
+            visible_msgs=visible_msgs,
+            is_blind_r1=is_blind_r1,
+            current_stage_index=cur_stage,
+            step_prompt_block=step_prompt_block,
+            handoff_block=handoff_block,
+            protocol_blocks=protocol_blocks,
+            room_md_path=room_md_path,
+            blob_store=blob_store,
+            session_id=session_id,
+            session_metric=sess_metric,
+            model_slug=mem.get("model"),
+            cfg=cfg,
+            compression_level=compression_level,
+            force_full_prompt=force_full_prompt,
+            dep_fallback_block=dep_fallback,
+        )
+
+    def _build_step_prompt(self, st: Dict[str, Any], task: Dict[str, Any], step: Dict[str, Any], work_dir: str) -> str:
+        """Backward-compatible prompt builder delegating to v5.3 Three-Zone Context Compiler."""
+        plan = self._compile_step_turn(st, task, step, work_dir, session_id=None, compression_level="L0", force_full_prompt=True)
+        return plan["prompt"]
 
     def _invoke_member_turn(
         self,
@@ -3928,25 +4943,190 @@ class TeamOrchestrator:
                 self._finalize_attempt(task_id, step_index, attempt_id, blocked_res, False, None)
                 return
 
+            # Pillar 4: Optional Native Git Worktree Isolation for writable steps (strictly outside state lock!)
+            wt_info: Optional[Dict[str, Any]] = None
+            if (
+                task.get("worktree_isolation")
+                and sandbox_arg == "workspace-write"
+                and not step.get("read_only", True)
+            ):
+                existing_wt = step.get("worktree_info") if isinstance(step.get("worktree_info"), dict) else None
+                if existing_wt and existing_wt.get("worktree_path") and os.path.isdir(existing_wt["worktree_path"]):
+                    wt_info = dict(existing_wt)
+                    work_dir = wt_info.get("effective_work_dir") or wt_info["worktree_path"]
+                else:
+                    git_det = detect_git_repo(work_dir)
+                    if git_det.get("is_git"):
+                        try:
+                            wt_info = create_step_worktree(work_dir, task_id, step_index, step["member_id"])
+                            work_dir = wt_info["effective_work_dir"]
+                            def _save_wt_start(st: Dict[str, Any]) -> None:
+                                t = self._find_task(st, task_id)
+                                t["steps"][step_index]["worktree_info"] = dict(wt_info)
+                                t["recent_events"].append(
+                                    {"ts": time.time(), "type": "worktree.created", "summary": f"步骤 {step_index} 已分配隔离 Git Worktree ({wt_info['branch']})"}
+                                )
+                                t["recent_events"] = t["recent_events"][-40:]
+                            self.store.mutate(_save_wt_start)
+                        except Exception:
+                            wt_info = None
+
             # P0-3 Lock-Free pre-execution SHA-256 snapshot of readonly_inputs (strictly outside state lock!)
             research_spec = task.get("research_spec") if isinstance(task.get("research_spec"), dict) else None
             before_inputs: Dict[str, str] = {}
             if research_spec and research_spec.get("readonly_inputs"):
                 before_inputs = snapshot_readonly_inputs(work_dir, list(research_spec.get("readonly_inputs") or []))
 
-            prompt_text = self._build_step_prompt(snap, task, step, work_dir)
-            sess_to_use = step.get("worker_session_id")
+            # v5.3 Context Engine: Three-Zone KV-Cache Prefix-Stable Compilation + Hard Budget Governance
+            ctx_cfg = ContextBudgetConfig.from_settings(snap.get("settings"))
+            blob_store = BlobStore(task_id)
+            tmp_dir_ctx, _ = get_runtime_dirs()
+            room_md_path = os.path.join(tmp_dir_ctx, "team_rooms", f"{task_id}.md")
+
+            sess_to_use = None if ctx_cfg.session_mode == "stateless_replay" else step.get("worker_session_id")
             agy_proj_id = snap["binding"].get("project_agy_map", {}).get(normalize_win_path(work_dir)) or (
                 snap["binding"].get("antigravity_project_id")
                 if normalize_win_path(work_dir) == normalize_win_path(snap["binding"]["project_path"]) and snap["binding"].get("antigravity_project_id")
                 else None
             )
 
+            turn_plan = self._compile_step_turn(
+                snap, task, step, work_dir, session_id=sess_to_use, compression_level="L0"
+            )
+            used_fallback = False
+            fallback_of: Optional[str] = None
+            rollover_events: List[Dict[str, Any]] = []
+            archived_session_ids: List[str] = []
+
+            # Hard budget ceiling guard: NEVER invoke CLI when P0 alone exceeds ceiling!
+            if turn_plan.get("budget_decision") == "budget_blocked":
+                b_reason = "; ".join(turn_plan.get("omitted_refs") or ["P0 必选任务指令超过硬上下文预算上限"])
+                blocked_res = CodexExecutionResult(
+                    session_id=sess_to_use,
+                    response_text="",
+                    partial_text="",
+                    exit_code=1,
+                    turn_completed=False,
+                    context_overflow=True,
+                    error_kind="context_length_exceeded",
+                    error=f"硬预算阻断 (budget_blocked): {b_reason}",
+                    requested_config={},
+                    accepted_config={},
+                )
+                self._finalize_attempt(
+                    task_id,
+                    step_index,
+                    attempt_id,
+                    blocked_res,
+                    False,
+                    None,
+                    turn_plan=turn_plan,
+                    rollover_events=rollover_events,
+                )
+                return
+
+            # Proactive Watermark Rollover (M1): retire aging session before hitting CLI context ceiling!
+            if sess_to_use and turn_plan.get("budget_decision") == "proactive_rollover":
+                ro_reason = str(turn_plan.get("rollover_reason") or "token_watermark")
+                archived_session_ids.append(sess_to_use)
+                fallback_of = sess_to_use
+                used_fallback = True
+                vis_now, _ = self._visible_messages_for_step(task, step)
+                ckpt = build_handoff_checkpoint(
+                    task,
+                    step,
+                    vis_now,
+                    blob_store,
+                    room_md_path,
+                    reason=ro_reason,
+                    level="L1",
+                )
+                rollover_events.append(
+                    {
+                        "kind": "proactive",
+                        "from_session_id": sess_to_use,
+                        "reason": ro_reason,
+                        "level": "L0",
+                        "checkpoint_path": ckpt["blob_path"],
+                        "ts": time.time(),
+                    }
+                )
+                sess_to_use = None
+                turn_plan = self._compile_step_turn(
+                    snap,
+                    task,
+                    step,
+                    work_dir,
+                    session_id=None,
+                    compression_level="L0",
+                    force_full_prompt=True,
+                    extra_handoff_md=ckpt["checkpoint_md"],
+                )
+
+            prompt_text = turn_plan["prompt"]
+            prompt_ledger_path = ""
+            try:
+                p_meta = blob_store.put_text(prompt_text, subdir="prompts", ext=".md")
+                prompt_ledger_path = p_meta["path"]
+            except Exception:
+                prompt_ledger_path = ""
+
+            def _make_telemetry(plan: Dict[str, Any], ro_list: List[Dict[str, Any]], p_path: str) -> Dict[str, Any]:
+                return {
+                    "prefix_sha256": plan.get("prefix_sha256"),
+                    "is_delta": bool(plan.get("is_delta", False)),
+                    "compression_level": plan.get("compression_level", "L0"),
+                    "prompt_chars": int(plan.get("prompt_chars", 0)),
+                    "est_tokens": int(plan.get("est_tokens", 0)),
+                    "budget_chars": int(plan.get("budget_chars", 0)),
+                    "masked_blocks": int(plan.get("masked_blocks", 0)),
+                    "used_snapshots": int(plan.get("used_snapshots", 0)),
+                    "omitted_refs": list(plan.get("omitted_refs") or [])[:8],
+                    "window_tokens": int(plan.get("window_tokens", 200_000)),
+                    "window_source": plan.get("window_source", "default"),
+                    "session_mode": ctx_cfg.session_mode,
+                    "rollover_count": len(ro_list),
+                    "rollover_events": list(ro_list),
+                    "prompt_ledger_path": p_path,
+                }
+
             def _save_prompt(st: Dict[str, Any]) -> None:
                 t = self._find_task(st, task_id)
-                t["steps"][step_index]["attempts"][-1]["prompt_sent"] = prompt_text
+                att_ref = next((a for a in t["steps"][step_index]["attempts"] if a["attempt_id"] == attempt_id), t["steps"][step_index]["attempts"][-1])
+                att_ref["prompt_sent"] = (
+                    prompt_text[:4000] + (f"\n…[完整 Prompt ({len(prompt_text)} chars) 见 {prompt_ledger_path}]" if len(prompt_text) > 4000 else "")
+                )
+                att_ref["prompt_ledger_path"] = prompt_ledger_path
+                att_ref["context_telemetry"] = _make_telemetry(turn_plan, rollover_events, prompt_ledger_path)
+                if archived_session_ids:
+                    hist = st["members"][step["member_id"]].setdefault("session_history", [])
+                    for sid in archived_session_ids:
+                        if sid and sid not in hist:
+                            hist.append(sid)
+                    t["steps"][step_index]["session_epoch"] = int(t["steps"][step_index].get("session_epoch") or 0) + len(rollover_events)
+                    t["recent_events"].append(
+                        {
+                            "ts": time.time(),
+                            "type": "context.rollover",
+                            "summary": f"步骤 {step_index} ({mem['name']}) 触发预防性无缝换乘新会话 ({rollover_events[-1]['reason']})",
+                        }
+                    )
+                    t["recent_events"] = t["recent_events"][-40:]
 
             self.store.mutate(_save_prompt)
+
+            def _is_attempt_still_active() -> bool:
+                def _chk(st: Dict[str, Any]) -> bool:
+                    c_task = self._find_task(st, task_id)
+                    c_step = c_task["steps"][step_index]
+                    if c_step.get("status") != "running" or c_step.get("member_id") != step["member_id"]:
+                        return False
+                    c_att = next((a for a in c_step.get("attempts", []) if a.get("attempt_id") == attempt_id), None)
+                    return bool(c_att and c_att.get("status") not in ("aborted", "cancelled"))
+                try:
+                    return bool(self.store.read(_chk))
+                except Exception:
+                    return False
 
             def _on_start(pid: int) -> None:
                 def _upd_pid(st: Dict[str, Any]) -> None:
@@ -3958,75 +5138,217 @@ class TeamOrchestrator:
                     )
                     t["recent_events"] = t["recent_events"][-40:]
 
-                self.store.mutate(_upd_pid)
+                self.store.mutate(_upd_pid, persist="debounced")
 
             last_partial_flush = {"ts": 0.0}
 
             def _on_partial_text(txt: str) -> None:
                 now = time.time()
-                if now - last_partial_flush["ts"] < 0.35:
+                if now - last_partial_flush["ts"] < 0.65:
                     return
                 last_partial_flush["ts"] = now
+                capped = txt[-4000:] if len(txt) > 4000 else txt
 
                 def _upd_p(st: Dict[str, Any]) -> None:
                     t = self._find_task(st, task_id)
                     att = next(a for a in t["steps"][step_index]["attempts"] if a["attempt_id"] == attempt_id)
-                    att["partial_text"] = txt
+                    att["partial_text"] = capped
                     t["updated_at"] = now
 
-                self.store.mutate(_upd_p)
+                self.store.mutate(_upd_p, persist="debounced")
 
             def _on_event(ev: Dict[str, Any]) -> None:
                 def _upd_ev(st: Dict[str, Any]) -> None:
                     t = self._find_task(st, task_id)
                     s = t["steps"][step_index]
                     att = next(a for a in s["attempts"] if a["attempt_id"] == attempt_id)
-                    att["events_summary"].append(ev)
-                    att["events_summary"] = att["events_summary"][-30:]
+                    ev_type = ev.get("type", "event")
+                    if ev_type != "thinking.heartbeat":
+                        att["events_summary"].append(ev)
+                        att["events_summary"] = att["events_summary"][-30:]
                     if ev.get("session_id"):
                         att["session_id"] = ev["session_id"]
                         s["worker_session_id"] = ev["session_id"]
                     if ev.get("activity_label") and st["members"].get(step["member_id"], {}).get("status") == "working":
                         st["members"][step["member_id"]]["live_activity"] = ev["activity_label"]
-                    t["recent_events"].append(
-                        {"ts": ev.get("ts", time.time()), "type": ev.get("type", "event"), "summary": f"[{mem['name']}] {ev.get('summary', '')}"}
-                    )
-                    t["recent_events"] = t["recent_events"][-40:]
+                    # Replace consecutive thinking.heartbeat tail instead of flooding recent_events
+                    if ev_type == "thinking.heartbeat" and t["recent_events"] and t["recent_events"][-1].get("type") == "thinking.heartbeat" and mem["name"] in str(t["recent_events"][-1].get("summary", "")):
+                        t["recent_events"][-1] = {
+                            "ts": ev.get("ts", time.time()),
+                            "type": ev_type,
+                            "summary": f"[{mem['name']}] {ev.get('summary', '')}",
+                        }
+                    else:
+                        t["recent_events"].append(
+                            {"ts": ev.get("ts", time.time()), "type": ev_type, "summary": f"[{mem['name']}] {ev.get('summary', '')}"}
+                        )
+                        t["recent_events"] = t["recent_events"][-40:]
                     t["updated_at"] = time.time()
 
-                self.store.mutate(_upd_ev)
+                self.store.mutate(_upd_ev, persist="debounced")
 
+            step_exec_started_at = time.time()
             is_light = step.get("step_type") in ("opening", "chief_plan")
             res = self._invoke_member_turn(
                 mem, prompt_text, sess_to_use, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
             )
 
-            used_fallback = False
-            fallback_of = None
+            # Reactive Context-Overflow Rollover: monotonic L0 -> L1 -> L2 (hard cap 2 retries) + write-side-effect safety gate!
+            is_ovf = bool(getattr(res, "context_overflow", False)) or is_context_overflow_error(
+                res.error, res.stderr_lines, getattr(res, "raw_events", None)
+            )
+            if is_ovf and not res.aborted and not res.policy_blocked:
+                res.context_overflow = True
+                res.error_kind = "context_length_exceeded"
+                se_state = str(getattr(res, "side_effect_state", "none") or "none")
+                has_mutated_risk = (sandbox_arg != "read-only") and (
+                    se_state == "unknown_mutation" or bool(getattr(res, "changed_files", None))
+                )
+                if has_mutated_risk:
+                    res.side_effect_state = "unknown_mutation"
+                    try:
+                        vis_m_mut, _ = self._visible_messages_for_step(task, step)
+                        ckpt_mut = build_handoff_checkpoint(
+                            task, step, vis_m_mut, blob_store, room_md_path, reason="overflow_with_mutation", level="L1"
+                        )
+                        res.error = (
+                            f"上下文超限且工作区可能已发生写入变更 (side_effect={se_state})，"
+                            f"为防止重复副作用已暂停自动重放并保存检查点 {ckpt_mut['blob_path']}，请核查工作区后继续或重置。"
+                        )
+                    except Exception:
+                        pass
+                elif ctx_cfg.auto_rollover:
+                    for next_lvl in ("L1", "L2"):
+                        if not _is_attempt_still_active():
+                            break
+                        if sess_to_use and sess_to_use not in archived_session_ids:
+                            archived_session_ids.append(sess_to_use)
+                        if sess_to_use:
+                            fallback_of = fallback_of or sess_to_use
+                        used_fallback = True
+                        sess_to_use = None
+
+                        cur_snap_ro = self.store.snapshot()
+                        cur_task_ro = self._find_task(cur_snap_ro, task_id)
+                        cur_step_ro = cur_task_ro["steps"][step_index]
+                        vis_ro, _ = self._visible_messages_for_step(cur_task_ro, cur_step_ro)
+                        ckpt_ro = build_handoff_checkpoint(
+                            cur_task_ro,
+                            cur_step_ro,
+                            vis_ro,
+                            blob_store,
+                            room_md_path,
+                            reason=f"reactive_overflow_{next_lvl}",
+                            level=next_lvl,
+                        )
+                        next_plan = self._compile_step_turn(
+                            cur_snap_ro,
+                            cur_task_ro,
+                            cur_step_ro,
+                            work_dir,
+                            session_id=None,
+                            compression_level=next_lvl,
+                            force_full_prompt=True,
+                            extra_handoff_md=ckpt_ro["checkpoint_md"],
+                        )
+                        if next_plan.get("budget_decision") == "budget_blocked":
+                            turn_plan = next_plan
+                            res.error = f"上下文超限且降级至 {next_lvl} 仍触发硬预算阻断: {'; '.join(next_plan.get('omitted_refs') or [])}"
+                            break
+
+                        turn_plan = next_plan
+                        prompt_text = turn_plan["prompt"]
+                        try:
+                            prompt_ledger_path = blob_store.put_text(prompt_text, subdir="prompts", ext=".md")["path"]
+                        except Exception:
+                            pass
+                        rollover_events.append(
+                            {
+                                "kind": "reactive_overflow",
+                                "from_session_id": fallback_of,
+                                "reason": f"context_length_exceeded -> {next_lvl}",
+                                "level": next_lvl,
+                                "checkpoint_path": ckpt_ro["blob_path"],
+                                "ts": time.time(),
+                            }
+                        )
+
+                        def _log_reactive_ro(st: Dict[str, Any]) -> None:
+                            t = self._find_task(st, task_id)
+                            t["steps"][step_index]["session_epoch"] = int(t["steps"][step_index].get("session_epoch") or 0) + 1
+                            t["recent_events"].append(
+                                {
+                                    "ts": time.time(),
+                                    "type": "context.rollover",
+                                    "summary": f"步骤 {step_index} ({mem['name']}) 上下文超限，自动压缩至 {next_lvl} 并无损换乘新会话重试",
+                                }
+                            )
+                            t["recent_events"] = t["recent_events"][-40:]
+
+                        self.store.mutate(_log_reactive_ro)
+                        res = self._invoke_member_turn(
+                            mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
+                        )
+                        still_ovf = bool(getattr(res, "context_overflow", False)) or is_context_overflow_error(
+                            res.error, res.stderr_lines, getattr(res, "raw_events", None)
+                        )
+                        if not still_ovf:
+                            break
+                        res.context_overflow = True
+                        res.error_kind = "context_length_exceeded"
+                        se2 = str(getattr(res, "side_effect_state", "none") or "none")
+                        if (sandbox_arg != "read-only") and (se2 == "unknown_mutation" or bool(getattr(res, "changed_files", None))):
+                            res.side_effect_state = "unknown_mutation"
+                            break
+
+            # Existing session_not_found fallback (replaces raw prior_texts[-2:] dump with Checkpoint Handoff Pack!)
             if (
                 sess_to_use
                 and not res.aborted
                 and not res.policy_blocked
+                and not getattr(res, "context_overflow", False)
+                and not _is_quota_or_rate_limit_error(res.error, res.stderr_lines)
                 and (res.session_not_found or (res.exit_code != 0 and not res.turn_completed))
+                and _is_attempt_still_active()
             ):
                 fallback_of = sess_to_use
                 used_fallback = True
-                prior_texts = [
-                    a.get("result_text") or a.get("partial_text") or ""
-                    for a in step.get("attempts", [])[:-1]
-                    if a.get("result_text") or a.get("partial_text")
-                ]
-                handoff_prompt = (
-                    f"【替代会话交接说明（非原会话恢复，原会话 {fallback_of} 不可用）】\n"
-                    f"历史轮次摘要：{json.dumps(prior_texts[-2:], ensure_ascii=False)}\n\n"
-                    f"{prompt_text}"
+                if sess_to_use not in archived_session_ids:
+                    archived_session_ids.append(sess_to_use)
+                sess_to_use = None
+                vis_snf, _ = self._visible_messages_for_step(task, step)
+                ckpt_snf = build_handoff_checkpoint(
+                    task, step, vis_snf, blob_store, room_md_path, reason="session_not_found", level="L1"
                 )
+                rollover_events.append(
+                    {
+                        "kind": "session_not_found_fallback",
+                        "from_session_id": fallback_of,
+                        "reason": "session_not_found",
+                        "level": "L1",
+                        "checkpoint_path": ckpt_snf["blob_path"],
+                        "ts": time.time(),
+                    }
+                )
+                snf_plan = self._compile_step_turn(
+                    snap,
+                    task,
+                    step,
+                    work_dir,
+                    session_id=None,
+                    compression_level="L1",
+                    force_full_prompt=True,
+                    extra_handoff_md=ckpt_snf["checkpoint_md"],
+                )
+                turn_plan = snf_plan
+                prompt_text = snf_plan["prompt"]
                 res = self._invoke_member_turn(
-                    mem, handoff_prompt, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text
+                    mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
                 )
 
-            # Live Peer @Mention Consultation Loop (up to 3 consultations per step!)
+            # Live Peer @Mention Consultation Loop (up to 3 consultations per step, deduped + reply-capped!)
             consult_loops = 0
+            seen_consult_keys: set = set()
             while res.final_status == "succeeded" and consult_loops < 3:
                 cur_snap = self.store.snapshot()
                 consult_req, cleaned_before_consult = _extract_team_consult(
@@ -4034,11 +5356,20 @@ class TeamOrchestrator:
                 )
                 if not consult_req:
                     break
-                consult_loops += 1
                 peer_id = consult_req["to"]
                 peer_q = consult_req["question"]
                 peer_claim = consult_req.get("claim_to_verify", "")
                 peer_ev_need = consult_req.get("evidence_needed", "")
+                ckey = (
+                    step["member_id"],
+                    peer_id,
+                    hashlib.sha256((peer_claim or "").strip().encode("utf-8")).hexdigest()[:12],
+                    hashlib.sha256((peer_q or "").strip().encode("utf-8")).hexdigest()[:12],
+                )
+                if ckey in seen_consult_keys:
+                    break
+                seen_consult_keys.add(ckey)
+                consult_loops += 1
                 peer_mem = cur_snap["members"][peer_id]
                 peer_role_name = cur_snap.get("roles", {}).get(peer_mem.get("role", ""), {}).get("name", "专员")
 
@@ -4126,9 +5457,19 @@ class TeamOrchestrator:
 
                 self.store.mutate(_log_reply)
 
+                # Cap injected peer reply to <= 3,500 chars while preserving anchors & full BlobStore pointer!
+                injected_peer = peer_reply
+                if len(injected_peer) > 3500:
+                    pr_blob = blob_store.put_text(peer_reply, subdir="consults", ext=".md")
+                    pr_masked, _ = mask_observation_blocks(peer_reply, blob_store, min_code_lines=16, min_table_lines=14, min_block_chars=700)
+                    injected_peer = pr_masked[:3100] + f"\n…[完整协商回复已落盘：{pr_blob['path']} · 完整群聊见 {room_md_path}]"
+
+                base_re_ctx = ""
+                if not res.session_id:
+                    base_re_ctx = (prompt_text[:12000] + "\n…[上下文已截断，完整 Prompt 见 " + prompt_ledger_path + "]\n\n") if len(prompt_text) > 12000 else f"{prompt_text}\n\n"
                 followup_to_caller = (
-                    (f"{prompt_text}\n\n" if not res.session_id else "")
-                    + f"【收到队友 @{peer_mem['name']} 的协商回复】\n{peer_reply}\n\n"
+                    base_re_ctx
+                    + f"【收到队友 @{peer_mem['name']} 的协商回复】\n{injected_peer}\n\n"
                     + "请结合该反馈直接完成你的本步最终交付（不要重复发起相同提问）。"
                 )
                 res = self._invoke_member_turn(
@@ -4174,21 +5515,116 @@ class TeamOrchestrator:
                     "ledger_path": ledger_path,
                 }
 
-            # P0-3 Lock-Free Mechanical Acceptance Checks & Figure QA (STRICTLY OUTSIDE TeamStateManager._lock!)
+            # P0-3 Lock-Free Mechanical Acceptance Checks & Advisory Auto-Figure-QA (STRICTLY OUTSIDE TeamStateManager._lock!)
+            # 3-layer exception isolation: QA failure NEVER destroys a succeeded specialist's response_text `res`!
             verif_report: Optional[Dict[str, Any]] = None
             if (
-                research_spec
-                and res.final_status == "succeeded"
+                res.final_status == "succeeded"
                 and step.get("step_type") in ("execution", "synthesis")
                 and step.get("review_of") is None
             ):
-                verif_report = run_acceptance_checks(
-                    work_dir=work_dir,
-                    research_spec=research_spec,
-                    before_inputs_snapshot=before_inputs,
-                    command_logs=cmd_logs,
-                    edit_after_check=edit_after,
-                )
+                def _collect_step_manifests() -> List[str]:
+                    def _looks_like_fig_mf(fp_abs: str) -> bool:
+                        try:
+                            with open(fp_abs, "r", encoding="utf-8") as mf_f:
+                                obj = json.load(mf_f)
+                            return isinstance(obj, dict) and any(
+                                k in obj for k in ("exports", "outputs", "figure_id", "panel_sources", "target_width_mm")
+                            )
+                        except Exception:
+                            return False
+
+                    found: List[str] = []
+                    wd_real = os.path.realpath(work_dir)
+                    for cf in chg_files:
+                        cp = str(cf.get("path") or "").strip().replace("\\", "/")
+                        if cp.lower().endswith(".json") and "manifest" in os.path.basename(cp).lower():
+                            cand_abs = os.path.realpath(os.path.join(wd_real, cp))
+                            if cp not in found and _looks_like_fig_mf(cand_abs):
+                                found.append(cp)
+                    # Also detect manifests written directly by plotting scripts via shell (bounded depth-3, fresh mtime)
+                    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache"}
+                    try:
+                        if os.path.isdir(wd_real):
+                            for cur_r, subdirs, fns in os.walk(wd_real):
+                                rel_d = os.path.relpath(cur_r, wd_real)
+                                depth = 0 if rel_d == "." else rel_d.count(os.sep) + 1
+                                subdirs[:] = [d for d in subdirs if d not in skip_dirs and not d.startswith(".")] if depth < 3 else []
+                                for fn in fns:
+                                    if fn.lower().endswith(".json") and "manifest" in fn.lower():
+                                        fp = os.path.join(cur_r, fn)
+                                        try:
+                                            if os.path.getmtime(fp) >= step_exec_started_at - 2.0 and _looks_like_fig_mf(fp):
+                                                rel_p = os.path.relpath(fp, wd_real).replace("\\", "/")
+                                                if rel_p not in found:
+                                                    found.append(rel_p)
+                                        except OSError:
+                                            pass
+                                    if len(found) >= 8:
+                                        break
+                                if len(found) >= 8:
+                                    break
+                    except Exception:
+                        pass
+                    return found[:8]
+
+                if research_spec:
+                    # Merge any newly created/modified manifests in this step if figure_contract requested auto-discovery
+                    eff_spec = dict(research_spec)
+                    if eff_spec.get("figure_contract") and not eff_spec.get("figure_manifests"):
+                        auto_mfs = _collect_step_manifests()
+                        if auto_mfs:
+                            eff_spec["figure_manifests"] = auto_mfs
+                    try:
+                        verif_report = run_acceptance_checks(
+                            work_dir=work_dir,
+                            research_spec=eff_spec,
+                            before_inputs_snapshot=before_inputs,
+                            command_logs=cmd_logs,
+                            edit_after_check=edit_after,
+                        )
+                    except Exception as qa_exc:
+                        verif_report = {
+                            "ok": False,
+                            "status": "error",
+                            "mode": eff_spec.get("mode", "managed_exec"),
+                            "blocking_items": [{"source": "verifier_error", "object_id": "run_acceptance_checks", "message": f"验收引擎异常: {type(qa_exc).__name__}: {qa_exc}"}],
+                            "blocking": [f"验收引擎异常: {type(qa_exc).__name__}: {qa_exc}"],
+                            "observations": [],
+                            "checks": [],
+                            "figure_reports": [],
+                            "verified_at": time.time(),
+                        }
+                elif sandbox_arg == "workspace-write":
+                    # P0-d Advisory Auto-Figure-QA fallback for ordinary writable UI plotting tasks (strictly non-blocking!)
+                    disc_mfs = _collect_step_manifests()
+                    if disc_mfs:
+                        try:
+                            verif_report = run_acceptance_checks(
+                                work_dir=work_dir,
+                                research_spec={
+                                    "mode": "auto_figure_advisory",
+                                    "advisory": True,
+                                    "block_on_failed_signoff": False,
+                                    "figure_manifests": disc_mfs[:8],
+                                },
+                                before_inputs_snapshot=before_inputs,
+                                command_logs=cmd_logs,
+                                edit_after_check=edit_after,
+                            )
+                        except Exception as qa_exc:
+                            verif_report = {
+                                "ok": False,
+                                "status": "error",
+                                "mode": "auto_figure_advisory",
+                                "advisory": True,
+                                "blocking_items": [{"source": "verifier_error", "object_id": "auto_figure_advisory", "message": f"自动图件质检异常: {type(qa_exc).__name__}: {qa_exc}"}],
+                                "blocking": [f"自动图件质检异常: {type(qa_exc).__name__}: {qa_exc}"],
+                                "observations": [],
+                                "checks": [],
+                                "figure_reports": [],
+                                "verified_at": time.time(),
+                            }
 
             # OpenScience Content-Addressed Provenance DAG & Experiment Runs (STRICTLY OUTSIDE state lock!)
             try:
@@ -4214,6 +5650,25 @@ class TeamOrchestrator:
             except Exception:
                 pass
 
+            # Pillar 4: Lock-free Git Worktree diff inspection & patch offload
+            if wt_info and wt_info.get("worktree_path"):
+                try:
+                    wdiff = inspect_worktree_diff(wt_info["worktree_path"], wt_info.get("base_commit", ""))
+                    diff_blob_path = ""
+                    if wdiff.get("diff_text"):
+                        diff_blob_path = blob_store.put_text(wdiff["diff_text"], subdir="worktree_diffs", ext=".diff")["path"]
+                    wt_info = {
+                        **wt_info,
+                        "has_changes": bool(wdiff.get("has_changes")),
+                        "changed_files": list(wdiff.get("changed_files") or [])[:40],
+                        "diff_stat": str(wdiff.get("diff_stat") or "")[:1200],
+                        "commits_ahead": int(wdiff.get("commits_ahead") or 0),
+                        "diff_blob_path": diff_blob_path,
+                        "inspected_at": time.time(),
+                    }
+                except Exception:
+                    pass
+
             self._finalize_attempt(
                 task_id,
                 step_index,
@@ -4223,7 +5678,37 @@ class TeamOrchestrator:
                 fallback_of,
                 ledger_summary=ledger_summary,
                 verif_report=verif_report,
+                turn_plan=turn_plan,
+                rollover_events=rollover_events,
+                prompt_ledger_path=prompt_ledger_path,
+                archived_session_ids=archived_session_ids,
+                worktree_info=wt_info,
             )
+            if res.final_status == "succeeded":
+                try:
+                    self._maybe_seal_completed_stage_snapshot(task_id, step_index)
+                except Exception:
+                    pass
+                # Pillar 2: Lock-free SQLite FTS5 indexing of completed deliverable/audit/visual_qa into project memory!
+                try:
+                    stype_ix = str(step.get("step_type") or "execution")
+                    if stype_ix in ("execution", "synthesis", "fact_check", "visual_qa") and (res.response_text or "").strip():
+                        mem_kind = (
+                            "fact_check" if stype_ix == "fact_check"
+                            else ("visual_qa" if stype_ix == "visual_qa" else "deliverable")
+                        )
+                        ProjectMemoryIndex(proj_root).upsert_doc(
+                            doc_id=f"{task_id}:step:{step_index}:{attempt_id}",
+                            task_id=task_id,
+                            kind=mem_kind,
+                            title=f"{task.get('title', task_id)} · {step.get('title', f'Step {step_index}')}",
+                            content=res.response_text or "",
+                            blob_path=room_md_path,
+                            anchors=extract_deterministic_anchors(res.response_text or ""),
+                            stage_index=int(step.get("stage_index") or 0),
+                        )
+                except Exception:
+                    pass
         except Exception as exc:
             # Never leave a step permanently stuck in "running" or a member stuck in "working" on OS/adapter errors!
             try:
@@ -4244,6 +5729,86 @@ class TeamOrchestrator:
             with self._sched_lock:
                 self._running_attempts.pop(attempt_id, None)
             self._wakeup.set()
+
+    def _maybe_seal_completed_stage_snapshot(self, task_id: str, completed_step_index: int) -> Optional[Dict[str, Any]]:
+        """
+        Lock-free automatic sealing of an IMMUTABLE Round State Snapshot once every step in a stage
+        has succeeded and downstream stages remain. Runs strictly outside TeamStateManager._lock!
+        """
+        snap = self.store.snapshot()
+        task = self._find_task(snap, task_id)
+        steps = task.get("steps") or []
+        if not (0 <= completed_step_index < len(steps)):
+            return None
+        cur_step = steps[completed_step_index]
+        stage_idx = int(cur_step.get("stage_index") or 0)
+
+        stage_steps = [s for s in steps if int(s.get("stage_index") or 0) == stage_idx]
+        if not stage_steps or not all(s.get("status") == "succeeded" for s in stage_steps):
+            return None
+        has_later_stage = any(int(s.get("stage_index") or 0) > stage_idx for s in steps)
+        if not has_later_stage:
+            return None
+
+        existing_snaps = task.get("round_snapshots") or []
+        if any(int(sn.get("stage_index", -1)) == stage_idx for sn in existing_snaps):
+            return None
+
+        stage_step_idxs = {int(s["step_index"]) for s in stage_steps}
+        chat_room = task.get("chat_room") or []
+        stage_events = [
+            m for m in chat_room
+            if m.get("step_index") in stage_step_idxs or (stage_idx == 0 and m.get("kind") == "user_goal")
+        ]
+        if not stage_events:
+            return None
+
+        r_label = str(cur_step.get("round_label") or f"Stage {stage_idx}")
+        sealed = seal_round_snapshot(
+            stage_events,
+            visibility_scope=f"stage_{stage_idx}_all",
+            stage_index=stage_idx,
+            cutoff_seq=len(chat_room),
+            task_meta=task,
+            blob_store=BlobStore(task_id),
+            round_label=r_label,
+        )
+
+        def _commit_snap(st: Dict[str, Any]) -> None:
+            t = self._find_task(st, task_id)
+            snaps = t.setdefault("round_snapshots", [])
+            if any(int(sn.get("stage_index", -1)) == stage_idx for sn in snaps):
+                return
+            snaps.append(sealed)
+            cs = t.setdefault("context_stats", {})
+            cs["snapshot_count"] = len(snaps)
+            cs["updated_at"] = time.time()
+            t["recent_events"].append(
+                {
+                    "ts": time.time(),
+                    "type": "context.snapshot_sealed",
+                    "summary": f"已封存不可变轮次状态卡 Stage {stage_idx} ({r_label}) · 锁定 {sealed.get('anchor_count', 0)} 条证据锚点 / {sealed.get('blocker_count', 0)} 项阻断",
+                }
+            )
+            t["recent_events"] = t["recent_events"][-40:]
+
+        self.store.mutate(_commit_snap)
+        # Pillar 2: Lock-free FTS5 indexing of newly sealed immutable snapshot
+        try:
+            proj_p = task.get("project_path") or snap["binding"]["project_path"]
+            ProjectMemoryIndex(proj_p).upsert_doc(
+                doc_id=f"{task_id}:snap:stage{stage_idx}:{sealed['snapshot_sha256'][:10]}",
+                task_id=task_id,
+                kind="snapshot",
+                title=f"{task.get('title', task_id)} · Stage {stage_idx} ({r_label})",
+                content=sealed["rendered_md"],
+                blob_path=sealed["blob_path"],
+                anchors=extract_deterministic_anchors(sealed["rendered_md"]),
+                stage_index=stage_idx,
+            )
+        except Exception:
+            pass
+        return sealed
 
     def _expand_chief_plan_unlocked(self, st: Dict[str, Any], task: Dict[str, Any], chief_step: Dict[str, Any], raw_text: str) -> None:
         parsed = _extract_json_obj(raw_text) or {}
@@ -4358,24 +5923,73 @@ class TeamOrchestrator:
         fallback_of: Optional[str],
         ledger_summary: Optional[Dict[str, Any]] = None,
         verif_report: Optional[Dict[str, Any]] = None,
+        turn_plan: Optional[Dict[str, Any]] = None,
+        rollover_events: Optional[List[Dict[str, Any]]] = None,
+        prompt_ledger_path: str = "",
+        archived_session_ids: Optional[List[str]] = None,
+        worktree_info: Optional[Dict[str, Any]] = None,
     ) -> None:
-        # Pre-compute quota-exhaustion backup candidate OUTSIDE TeamStateManager._lock!
-        # Supports up to 2 cascading hops while never retrying a model that already hit 429 on this step!
+        # Normalize token & KV-cache usage outside lock
+        is_ctx_overflow = bool(getattr(res, "context_overflow", False)) or is_context_overflow_error(
+            res.error, res.stderr_lines, getattr(res, "raw_events", None)
+        )
+        if is_ctx_overflow:
+            res.context_overflow = True
+            res.error_kind = "context_length_exceeded"
+        norm_usage = normalize_usage(
+            getattr(res, "usage", None),
+            prompt_chars=int((turn_plan or {}).get("prompt_chars") or 0),
+            response_chars=len(res.response_text or res.partial_text or ""),
+        )
+        usage_src = "cli_reported" if norm_usage.get("has_provider_usage") else "estimated"
+        norm_usage["usage_source"] = usage_src
+
+        # Pre-compute resilient auto-failover backup candidate OUTSIDE TeamStateManager._lock!
+        # Covers: (1) Quota / 429 rate-limit, (2) watchdog_idle_timeout stall,
+        #         (3) Codex Windows read-only shell policy block (prefer cross-engine Antigravity read_file!).
+        # Priority rule: NEVER misroute context_length_exceeded or hard security violations (exit_code==2) to failover!
         quota_failover_candidate: Optional[Dict[str, Any]] = None
-        if res.final_status not in ("succeeded", "aborted", "blocked") and _is_quota_or_rate_limit_error(res.error, res.stderr_lines):
+        failover_trigger_kind: Optional[str] = None
+        is_quota_err = (
+            res.final_status not in ("succeeded", "aborted", "blocked")
+            and not is_ctx_overflow
+            and _is_quota_or_rate_limit_error(res.error, res.stderr_lines)
+        )
+        is_watchdog_stall = (
+            res.final_status not in ("succeeded", "aborted", "blocked")
+            and not is_ctx_overflow
+            and "watchdog_idle_timeout" in str(res.error or "").lower()
+        )
+        is_codex_ro_shell_block = (
+            res.final_status == "blocked"
+            and bool(res.policy_blocked)
+            and res.exit_code != 2
+            and ("策略拒绝" in str(res.blocking_reason or "") or "blocked by policy" in str(res.blocking_reason or "").lower())
+        )
+        if is_quota_err or is_watchdog_stall or is_codex_ro_shell_block:
             try:
                 pre_snap = self.store.snapshot()
                 if pre_snap.get("settings", {}).get("auto_spawn_quota_backup", True):
                     pre_task = self._find_task(pre_snap, task_id)
                     pre_step = pre_task["steps"][step_index]
-                    if int(pre_step.get("quota_failover_count", 0)) < 2:
+                    pre_src = pre_snap.get("members", {}).get(pre_step["member_id"], {})
+                    # For Codex read-only policy block, only auto-failover if step is truly read-only on codex
+                    allow_this_failover = (
+                        is_quota_err
+                        or is_watchdog_stall
+                        or (is_codex_ro_shell_block and bool(pre_step.get("read_only", True)) and pre_src.get("client") == "codex")
+                    )
+                    if allow_this_failover and int(pre_step.get("quota_failover_count", 0)) < 2:
+                        failover_trigger_kind = (
+                            "quota" if is_quota_err else ("codex_ro_policy" if is_codex_ro_shell_block else "watchdog_stall")
+                        )
                         req_sh = bool(pre_step.get("requires_shell", False))
-                        pre_src = pre_snap.get("members", {}).get(pre_step["member_id"], {})
+                        prefer_cross = bool(is_codex_ro_shell_block and not req_sh)
                         exhausted = set(pre_step.get("exhausted_quota_models") or [])
                         if pre_src.get("model"):
                             exhausted.add(f"{pre_src.get('client')}:{pre_src.get('model')}".lower())
                         qb = pre_src.get("quota_backup") if isinstance(pre_src.get("quota_backup"), dict) else None
-                        if qb:
+                        if qb and not prefer_cross:
                             b_mid = qb.get("member_id")
                             if qb.get("mode") == "member" and b_mid and b_mid in pre_snap.get("members", {}):
                                 bm = pre_snap["members"][b_mid]
@@ -4401,8 +6015,11 @@ class TeamOrchestrator:
                             cinfo = self.list_backup_candidates(
                                 pre_step["member_id"],
                                 require_same_client=req_sh,
+                                prefer_cross_engine=prefer_cross,
                             )
                             for cand in cinfo.get("candidates") or []:
+                                if prefer_cross and cand.get("client") != "antigravity":
+                                    continue
                                 ckey = f"{cand['client']}:{cand['model']}".lower()
                                 if ckey not in exhausted:
                                     quota_failover_candidate = cand
@@ -4427,8 +6044,41 @@ class TeamOrchestrator:
             att["status"] = res.final_status
             att["blocking_reason"] = res.blocking_reason or res.error
             att["ended_at"] = now
+            att["usage"] = norm_usage
+            att["error_kind"] = getattr(res, "error_kind", None)
+            att["side_effect_state"] = getattr(res, "side_effect_state", "none")
+            att["context_overflow"] = bool(is_ctx_overflow)
+            if prompt_ledger_path:
+                att["prompt_ledger_path"] = prompt_ledger_path
             if ledger_summary is not None:
                 att["ledger_summary"] = ledger_summary
+            if worktree_info is not None:
+                step["worktree_info"] = dict(worktree_info)
+
+            # v5.3 Context Telemetry & Session Metrics Persistence
+            ro_list = list(rollover_events or [])
+            tp = turn_plan if isinstance(turn_plan, dict) else {}
+            prev_tel = att.get("context_telemetry") if isinstance(att.get("context_telemetry"), dict) else {}
+            att["context_telemetry"] = {
+                **prev_tel,
+                "prefix_sha256": tp.get("prefix_sha256", prev_tel.get("prefix_sha256")),
+                "is_delta": bool(tp.get("is_delta", prev_tel.get("is_delta", False))),
+                "compression_level": tp.get("compression_level", prev_tel.get("compression_level", "L0")),
+                "prompt_chars": int(tp.get("prompt_chars", prev_tel.get("prompt_chars", 0))),
+                "est_tokens": int(tp.get("est_tokens", prev_tel.get("est_tokens", 0))),
+                "budget_chars": int(tp.get("budget_chars", prev_tel.get("budget_chars", 0))),
+                "masked_blocks": int(tp.get("masked_blocks", prev_tel.get("masked_blocks", 0))),
+                "used_snapshots": int(tp.get("used_snapshots", prev_tel.get("used_snapshots", 0))),
+                "rollover_count": len(ro_list),
+                "rollover_events": ro_list,
+                "usage": norm_usage,
+            }
+
+            if archived_session_ids:
+                hist_m = mem.setdefault("session_history", [])
+                for asid in archived_session_ids:
+                    if asid and asid not in hist_m:
+                        hist_m.append(asid)
 
             if res.session_id:
                 old_mem_sess = mem.get("session_id")
@@ -4436,6 +6086,82 @@ class TeamOrchestrator:
                     mem.setdefault("session_history", []).append(old_mem_sess)
                 mem["session_id"] = res.session_id
                 step["worker_session_id"] = res.session_id
+
+                # Update per-session rolling telemetry for Proactive Watermark & Delta Frame tracking
+                smap = task.setdefault("session_metrics", {})
+                sm = smap.get(res.session_id) if isinstance(smap.get(res.session_id), dict) else {}
+                prev_est_cum = int(sm.get("estimated_cumulative_tokens") or 0)
+                in_tok = int(norm_usage["input_tokens"] if norm_usage.get("input_tokens") is not None else (norm_usage.get("estimated_input_tokens") or 0))
+                peak_tok = int(norm_usage["peak_context_tokens"] if norm_usage.get("peak_context_tokens") is not None else in_tok)
+                cached_tok = int(norm_usage.get("cached_input_tokens") or 0)
+                out_tok = int(norm_usage["output_tokens"] if norm_usage.get("output_tokens") is not None else (norm_usage.get("estimated_output_tokens") or 0))
+                if norm_usage.get("usage_source") == "cli_reported" and peak_tok > 0:
+                    est_cum = max(peak_tok + out_tok, prev_est_cum + out_tok)
+                else:
+                    est_cum = prev_est_cum + in_tok + out_tok
+                sm.update(
+                    {
+                        "session_id": res.session_id,
+                        "member_id": step["member_id"],
+                        "model": mem.get("model"),
+                        "turns": int(sm.get("turns") or 0) + 1,
+                        "last_input_tokens": in_tok,
+                        "last_peak_context_tokens": peak_tok,
+                        "last_internal_api_calls": int(norm_usage.get("internal_api_calls") or 1),
+                        "last_cached_input_tokens": cached_tok,
+                        "last_output_tokens": out_tok,
+                        "cache_hit_ratio": float(norm_usage.get("cache_hit_ratio") or 0.0),
+                        "total_input_tokens": int(sm.get("total_input_tokens") or 0) + in_tok,
+                        "total_cached_input_tokens": int(sm.get("total_cached_input_tokens") or 0) + cached_tok,
+                        "total_output_tokens": int(sm.get("total_output_tokens") or 0) + out_tok,
+                        "estimated_cumulative_tokens": est_cum,
+                        "usage_source": norm_usage.get("usage_source", "estimated"),
+                        "prefix_sha256": tp.get("prefix_sha256") or sm.get("prefix_sha256"),
+                        "session_epoch": int(step.get("session_epoch") or 0),
+                        "rollover_count": int(sm.get("rollover_count") or 0) + len(ro_list),
+                        "updated_at": now,
+                    }
+                )
+                smap[res.session_id] = sm
+
+            # Update task-level aggregated Context Engine telemetry
+            cs = task.setdefault("context_stats", {})
+            eff_in_tok = int(norm_usage["input_tokens"] if norm_usage.get("input_tokens") is not None else (norm_usage.get("estimated_input_tokens") or 0))
+            eff_peak_tok = int(norm_usage["peak_context_tokens"] if norm_usage.get("peak_context_tokens") is not None else eff_in_tok)
+            eff_cached_tok = int(norm_usage.get("cached_input_tokens") or 0)
+            eff_out_tok = int(norm_usage["output_tokens"] if norm_usage.get("output_tokens") is not None else (norm_usage.get("estimated_output_tokens") or 0))
+            tot_in = int(cs.get("total_input_tokens") or 0) + eff_in_tok
+            tot_cached = int(cs.get("total_cached_input_tokens") or 0) + eff_cached_tok
+            tot_out = int(cs.get("total_output_tokens") or 0) + eff_out_tok
+            cs["max_peak_context_tokens"] = max(int(cs.get("max_peak_context_tokens") or 0), eff_peak_tok)
+            cs.update(
+                {
+                    "total_input_tokens": tot_in,
+                    "total_cached_input_tokens": tot_cached,
+                    "total_output_tokens": tot_out,
+                    "cache_hit_ratio": round(tot_cached / tot_in, 4) if tot_in > 0 else 0.0,
+                    "usage_source": (
+                        "cli_reported"
+                        if (norm_usage.get("usage_source") == "cli_reported" or cs.get("usage_source") == "cli_reported")
+                        else "estimated"
+                    ),
+                    "rollover_count": int(cs.get("rollover_count") or 0) + len(ro_list),
+                    "delta_turns": int(cs.get("delta_turns") or 0) + (1 if tp.get("is_delta") else 0),
+                    "masked_blocks_total": int(cs.get("masked_blocks_total") or 0) + int(tp.get("masked_blocks") or 0),
+                    "snapshot_count": len(task.get("round_snapshots") or []),
+                    "last_prompt_chars": int(tp.get("prompt_chars") or cs.get("last_prompt_chars") or 0),
+                    "last_budget_chars": int(tp.get("budget_chars") or cs.get("last_budget_chars") or 0),
+                    "last_compression_level": tp.get("compression_level") or cs.get("last_compression_level") or "L0",
+                    "session_mode": st.get("settings", {}).get("context_session_mode", "bounded_native"),
+                    "updated_at": now,
+                }
+            )
+
+            def _sync_session_cursor() -> None:
+                if res.session_id and isinstance(task.get("session_metrics", {}).get(res.session_id), dict):
+                    last_cid = str((task.get("chat_room") or [{}])[-1].get("id") or tp.get("chat_cursor_id") or "")
+                    if last_cid:
+                        task["session_metrics"][res.session_id]["last_synced_msg_id"] = last_cid
 
             mem["status"] = "idle"
             mem["live_activity"] = ""
@@ -4477,7 +6203,11 @@ class TeamOrchestrator:
                 task["updated_at"] = now
                 return
 
-            if res.final_status == "blocked":
+            if res.final_status == "blocked" and not (
+                failover_trigger_kind == "codex_ro_policy"
+                and quota_failover_candidate
+                and int(step.get("quota_failover_count", 0)) < 2
+            ):
                 step["status"] = "blocked"
                 step["blocking_reason"] = res.blocking_reason or "策略拦截 (blocked by policy)"
                 task["status"] = "blocked"
@@ -4486,6 +6216,30 @@ class TeamOrchestrator:
                 return
 
             if res.final_status != "succeeded":
+                if is_ctx_overflow:
+                    # Priority 1: Context overflow NEVER triggers quota 429 model swap!
+                    se_s = str(getattr(res, "side_effect_state", "none") or "none")
+                    if se_s == "unknown_mutation":
+                        step["status"] = "needs_verification"
+                        step["blocking_reason"] = res.error or "上下文超限且工作区可能存在未确认写入，已暂停自动重放，请核查后继续"
+                        task["status"] = "needs_verification"
+                        task["blocking_reason"] = f"步骤 {step_index} 需人工核查变更：{step['blocking_reason']}"
+                    else:
+                        step["status"] = "needs_ruling"
+                        step["blocking_reason"] = res.error or "上下文超限（已达最大压缩换乘重试上限或触发硬预算阻断），请精简目标或点击封存换新会话"
+                        task["status"] = "needs_ruling"
+                        task["blocking_reason"] = f"步骤 {step_index} 上下文预算阻断：{step['blocking_reason']}"
+                    task["recent_events"].append(
+                        {
+                            "ts": now,
+                            "type": "context.overflow_stop",
+                            "summary": f"步骤 {step_index} 上下文超限停机 ({step['status']})：{step['blocking_reason'][:140]}",
+                        }
+                    )
+                    task["recent_events"] = task["recent_events"][-40:]
+                    task["updated_at"] = now
+                    return
+
                 if quota_failover_candidate and int(step.get("quota_failover_count", 0)) < 2:
                     # Auto-spawn (or reuse idle / bound) same-role different-model backup specialist & hand off seamlessly!
                     src_id = step["member_id"]
@@ -4567,13 +6321,25 @@ class TeamOrchestrator:
                         meta_f["participants"] = [bk_id if p == src_id else p for p in meta_f["participants"]]
                     if meta_f.get("host_member_id") == src_id:
                         meta_f["host_member_id"] = bk_id
+                    if failover_trigger_kind == "codex_ro_policy":
+                        fo_reason_short = "Codex 只读沙箱策略受阻（自动跨引擎切换原生文件读取替补）"
+                        fo_event_type = "failover.codex_ro_policy"
+                        fo_round_lbl = "只读沙箱自动切替补"
+                    elif failover_trigger_kind == "watchdog_stall":
+                        fo_reason_short = "长时静默触发看门狗超时保护（自动切换替补接力）"
+                        fo_event_type = "failover.watchdog_stall"
+                        fo_round_lbl = "超时自动切替补"
+                    else:
+                        fo_reason_short = "遇到额度/限流受阻，自动由同角色跨模型替补接力继续"
+                        fo_event_type = "quota.auto_backup"
+                        fo_round_lbl = "额度自动替补"
                     step["handoff_context"] = {
                         "reassigned_from": f"{src_m.get('name')} ({src_m.get('model')})",
                         "reassigned_to": f"{bk_name} ({ch_cl}/{ch_md})",
-                        "reason": f"原模型 {src_m.get('model')} 遇到额度/限流受阻，自动由同角色跨模型替补接力继续",
+                        "reason": f"原模型 {src_m.get('model')} {fo_reason_short}",
                         "completed_steps": [s["step_index"] for s in task["steps"] if s["status"] == "succeeded"],
                         "prior_outputs": [(res.partial_text or "")[:1000]] if res.partial_text else [],
-                        "open_issues_and_evidence": [str(res.error or "quota/rate_limit")[:200]],
+                        "open_issues_and_evidence": [str(res.blocking_reason or res.error or failover_trigger_kind or "quota/rate_limit")[:200]],
                     }
                     step["status"] = "pending"
                     step["blocking_reason"] = None
@@ -4582,8 +6348,8 @@ class TeamOrchestrator:
                     task["recent_events"].append(
                         {
                             "ts": now,
-                            "type": "quota.auto_backup",
-                            "summary": f"检测到 {src_m.get('model')} 额度/限流受阻，已自动补充同角色替补 {bk_name} ({ch_cl}/{ch_md}) 接力续跑步骤 {step_index}",
+                            "type": fo_event_type,
+                            "summary": f"检测到 {src_m.get('model')} {fo_reason_short}，已自动补充替补 {bk_name} ({ch_cl}/{ch_md}) 接力续跑步骤 {step_index}",
                         }
                     )
                     task["recent_events"] = task["recent_events"][-40:]
@@ -4592,10 +6358,10 @@ class TeamOrchestrator:
                         task,
                         sender_id="user",
                         kind="handoff",
-                        content=f"检测到 {src_m.get('name')} ({src_m.get('model')}) 额度/限流受阻，系统已自动补充同角色跨模型替补 **{bk_name}** ({ch_cl}/{ch_md}) 接力继续当前节点。",
+                        content=f"检测到 {src_m.get('name')} ({src_m.get('model')}) {fo_reason_short}，系统已自动切换同角色替补 **{bk_name}** ({ch_cl}/{ch_md}) 接力继续当前节点。",
                         to_member_id=bk_id,
                         step_index=step_index,
-                        round_label="额度自动替补",
+                        round_label=fo_round_lbl,
                     )
                     task["updated_at"] = now
                     return
@@ -4610,11 +6376,102 @@ class TeamOrchestrator:
             step["latest_result_text"] = res.response_text
             step["accepted_attempt_id"] = attempt_id
 
-            # P0-3 Persist decoupled lock-free mechanical acceptance & figure QA signoff
+            # P0-3 + BLK-5 Merge decoupled lock-free mechanical acceptance & figure QA signoff (never erase prior figure_reports!)
             if verif_report is not None:
                 vcopy = dict(verif_report)
                 vcopy["attempt_id"] = attempt_id
                 vcopy["step_index"] = step_index
+                prev_so = task.get("research_signoff") if isinstance(task.get("research_signoff"), dict) else None
+                if prev_so:
+                    merged_so = dict(prev_so)
+                    merged_so["attempt_id"] = attempt_id
+                    merged_so["step_index"] = step_index
+                    merged_so["verified_at"] = vcopy.get("verified_at", now)
+                    if vcopy.get("mode"):
+                        merged_so["mode"] = vcopy["mode"]
+                    merged_so["block_on_failed_signoff"] = bool(
+                        prev_so.get("block_on_failed_signoff")
+                        or vcopy.get("block_on_failed_signoff")
+                        or (task.get("research_spec") or {}).get("block_on_failed_signoff", False)
+                    )
+                    # Merge figure_reports keyed by normalized manifest_path
+                    fig_by_key: Dict[str, Dict[str, Any]] = {}
+                    fig_order: List[str] = []
+                    for src_list in (prev_so.get("figure_reports") or [], vcopy.get("figure_reports") or []):
+                        for fr in src_list:
+                            if not isinstance(fr, dict):
+                                continue
+                            fk = os.path.normcase(str(fr.get("manifest_path") or fr.get("figure_id") or "").replace("\\", "/"))
+                            if not fk:
+                                fk = f"anon_{len(fig_order)}"
+                            if fk not in fig_by_key:
+                                fig_order.append(fk)
+                            fig_by_key[fk] = fr
+                    merged_so["figure_reports"] = [fig_by_key[k] for k in fig_order]
+
+                    # Merge checks keyed by check_id
+                    chk_by_id: Dict[str, Dict[str, Any]] = {}
+                    chk_order: List[str] = []
+                    new_passed_cids: set = set()
+                    for idx_c, chk in enumerate(prev_so.get("checks") or []):
+                        if not isinstance(chk, dict):
+                            continue
+                        ck = str(chk.get("check_id") or chk.get("id") or f"prev_{idx_c}")
+                        chk_order.append(ck)
+                        chk_by_id[ck] = chk
+                    for idx_c, chk in enumerate(vcopy.get("checks") or []):
+                        if not isinstance(chk, dict):
+                            continue
+                        ck = str(chk.get("check_id") or chk.get("id") or f"cur_{idx_c}")
+                        if ck not in chk_by_id:
+                            chk_order.append(ck)
+                        chk_by_id[ck] = chk
+                        if chk.get("ok"):
+                            new_passed_cids.add(ck)
+                    merged_so["checks"] = [chk_by_id[k] for k in chk_order]
+
+                    # Merge non-figure blocking items (retaining prior unresolved non-fig blockers unless newly passed)
+                    merged_bi: List[Dict[str, Any]] = []
+                    seen_bi: set = set()
+                    for it in prev_so.get("blocking_items") or []:
+                        if not isinstance(it, dict) or it.get("source") == "figure_qa":
+                            continue
+                        if str(it.get("object_id") or "") in new_passed_cids:
+                            continue
+                        sig = (it.get("source"), it.get("object_id"), it.get("message"))
+                        if sig not in seen_bi:
+                            seen_bi.add(sig)
+                            merged_bi.append(it)
+                    for it in vcopy.get("blocking_items") or []:
+                        if not isinstance(it, dict) or it.get("source") == "figure_qa":
+                            continue
+                        sig = (it.get("source"), it.get("object_id"), it.get("message"))
+                        if sig not in seen_bi:
+                            seen_bi.add(sig)
+                            merged_bi.append(it)
+                    merged_so["blocking_items"] = merged_bi
+
+                    # Union discovered_figure_manifests & base_observations
+                    disc_union: List[str] = []
+                    for dm in list(prev_so.get("discovered_figure_manifests") or []) + list(vcopy.get("discovered_figure_manifests") or []):
+                        if dm and dm not in disc_union:
+                            disc_union.append(dm)
+                    merged_so["discovered_figure_manifests"] = disc_union
+                    merged_so["base_observations"] = list(
+                        dict.fromkeys(
+                            [o for o in (prev_so.get("base_observations") or []) if o]
+                            + [o for o in (vcopy.get("base_observations") or []) if o]
+                        )
+                    )
+                    if vcopy.get("status") == "error":
+                        recompute_signoff_summary(merged_so)
+                        merged_so["status"] = "error"
+                        merged_so["ok"] = False
+                        merged_so["can_release"] = False
+                    else:
+                        recompute_signoff_summary(merged_so)
+                    vcopy = merged_so
+
                 task["research_signoff"] = vcopy
                 task["recent_events"].append(
                     {
@@ -4623,25 +6480,135 @@ class TeamOrchestrator:
                         "summary": (
                             f"科研机械验收通过 ({len(vcopy.get('checks', []))} 项检查 / {len(vcopy.get('figure_reports', []))} 份图件契约)"
                             if vcopy.get("ok")
-                            else f"科研机械验收拦截：{'; '.join((vcopy.get('blocking') or [])[:2])[:160]}"
+                            else f"科研机械验收拦截 ({vcopy.get('status')}): {'; '.join((vcopy.get('blocking') or [])[:2])[:160]}"
                         ),
                     }
                 )
                 task["recent_events"] = task["recent_events"][-40:]
                 if not vcopy.get("ok") and (task.get("research_spec") or {}).get("block_on_failed_signoff", False):
-                    b_msg = "; ".join((vcopy.get("blocking") or [])[:3])
+                    b_msg = "; ".join((vcopy.get("blocking") or [])[:3]) or f"status={vcopy.get('status')}"
                     step["status"] = "needs_ruling"
                     step["blocking_reason"] = f"机械验收未通过（已拦截签发）：{b_msg}"
                     task["status"] = "needs_ruling"
                     task["blocking_reason"] = f"步骤 {step_index} 科研机械验收未通过：{b_msg}"
+                    _sync_session_cursor()
                     task["updated_at"] = now
                     return
+
+            # Pillar 3: Automated Dual-Gate VLM Visual Critique & Bounded Self-Repair Loop!
+            if step.get("step_type") == "visual_qa":
+                vqa = _extract_visual_qa_verdict(res.response_text)
+                v_round = int(step.get("visual_qa_round") or 1)
+                fc_cur = (task.get("research_spec") or {}).get("figure_contract") if isinstance(task.get("research_spec"), dict) else {}
+                max_v_rep = max(1, min(3, int((fc_cur or {}).get("max_visual_repairs") or 2)))
+                v_rec = {
+                    "id": _new_id("VQA"),
+                    "ts": now,
+                    "step_index": step_index,
+                    "target_step_index": step.get("visual_target_step_index"),
+                    "critic_id": step["member_id"],
+                    "critic_name": mem.get("name") or step["member_id"],
+                    "critic_model": mem.get("model") or "",
+                    "round": v_round,
+                    "figure_paths": list(step.get("visual_figure_paths") or []),
+                    "manifest_path": step.get("visual_manifest_path") or "",
+                    **vqa,
+                }
+                task.setdefault("visual_qa_reports", []).append(v_rec)
+                def_lines = [
+                    f"- [{d['severity']}] ({d['region']}) {d['issue']} → 修复建议：{d['fix']}"
+                    for d in vqa.get("defects") or []
+                ]
+                v_chat = (
+                    f"✅ VLM 视觉质检通过 (评分 {vqa['visual_score']}/10)：{vqa['summary']}"
+                    if vqa["verdict"] == "PASS"
+                    else f"🎨 VLM 视觉质检打回 [{vqa['verdict']} · 评分 {vqa['visual_score']}/10]：{vqa['summary']}"
+                    + ("\n" + "\n".join(def_lines) if def_lines else "")
+                )
+                self._append_room_chat(
+                    st,
+                    task,
+                    sender_id=step["member_id"],
+                    kind="review",
+                    content=v_chat,
+                    to_member_id=step.get("visual_target_member_id"),
+                    step_index=step_index,
+                    round_label=f"第{v_round}轮 VLM 视觉质检",
+                )
+                task["recent_events"].append(
+                    {
+                        "ts": now,
+                        "type": "figure.visual_qa",
+                        "summary": f"第 {v_round} 轮 VLM 视觉质检 {vqa['verdict']} ({vqa['visual_score']}/10)",
+                    }
+                )
+                task["recent_events"] = task["recent_events"][-40:]
+
+                if vqa["verdict"] == "PASS":
+                    step["status"] = "succeeded"
+                    step["blocking_reason"] = None
+                    _sync_session_cursor()
+                    self._refresh_task_overall_status_unlocked(st, task)
+                    task["updated_at"] = now
+                    return
+                if vqa["verdict"] == "REVISE" and v_round < max_v_rep and step.get("visual_target_member_id") in st["members"]:
+                    step["status"] = "succeeded"
+                    step["blocking_reason"] = None
+                    tgt_mid = step["visual_target_member_id"]
+                    new_fix_idx = len(task["steps"])
+                    sc_fix = step.get("workspace_scope") or task.get("workspace_scope") or "."
+                    fix_step = self._make_step(
+                        step_index=new_fix_idx,
+                        title=f"VLM 视觉反馈自动修图 (#{v_round})",
+                        step_type="execution",
+                        stage_index=new_fix_idx,
+                        round_label=f"视觉自动返修 #{v_round}",
+                        member_id=tgt_mid,
+                        prompt=(
+                            f"【第 {v_round}/{max_v_rep} 轮 VLM 自动视觉挑错返修指令】\n"
+                            f"质检官 {mem.get('name')} 评分 {vqa['visual_score']}/10，判定 REVISE。\n"
+                            f"涉及图件：{', '.join(v_rec['figure_paths'])}\n"
+                            + (f"Manifest：{v_rec['manifest_path']}\n" if v_rec["manifest_path"] else "")
+                            + "必须解决的视觉缺陷：\n"
+                            + ("\n".join(def_lines) if def_lines else f"- {vqa['summary']}")
+                            + "\n\n请直接修改绘图脚本、重新运行导出全部格式并更新 `figure_manifest.json`，确保机械 QA 与视觉质量同时达标。"
+                        ),
+                        depends_on=[step_index],
+                        review_of=None,
+                        read_only=False,
+                        write_scope=[sc_fix],
+                        workspace_scope=sc_fix,
+                        sandbox="workspace-write",
+                        requires_shell=True,
+                    )
+                    fix_step["visual_qa_round"] = v_round
+                    task["steps"].append(fix_step)
+                    task["current_step_index"] = new_fix_idx
+                    task["status"] = "queued" if st.get("paused") else "running"
+                    task["blocking_reason"] = None
+                    _sync_session_cursor()
+                    task["updated_at"] = now
+                    return
+
+                # Fail-Closed on INVALID_FORMAT or max visual repair rounds exceeded!
+                step["status"] = "needs_ruling"
+                step["blocking_reason"] = (
+                    f"VLM 视觉质检输出格式非法 ({vqa['summary'][:120]})"
+                    if vqa["verdict"] == "INVALID_FORMAT"
+                    else f"已达最大 VLM 视觉自动返修上限 ({max_v_rep} 轮)，当前评分 {vqa['visual_score']}/10，等待人工拍板"
+                )
+                task["status"] = "needs_ruling"
+                task["blocking_reason"] = step["blocking_reason"]
+                _sync_session_cursor()
+                task["updated_at"] = now
+                return
 
             # Chief Dynamic Plan Expansion!
             if step.get("step_type") == "chief_plan":
                 step["status"] = "succeeded"
                 step["blocking_reason"] = None
                 self._expand_chief_plan_unlocked(st, task, step, res.response_text)
+                _sync_session_cursor()
                 self._refresh_task_overall_status_unlocked(st, task)
                 task["updated_at"] = now
                 return
@@ -4798,6 +6765,14 @@ class TeamOrchestrator:
                 step["pending_questions"] = None
                 step["blocking_reason"] = None
                 task["pending_questions"] = None
+                # BLK-6: if this step was a followup repair of a needs_ruling step and signoff is now passed (or absent), unlock target step!
+                if step.get("repair_of") is not None:
+                    so_cur = task.get("research_signoff") if isinstance(task.get("research_signoff"), dict) else None
+                    if (so_cur is None) or (so_cur.get("status") == "passed"):
+                        rep_idx = int(step["repair_of"])
+                        if 0 <= rep_idx < len(task["steps"]) and task["steps"][rep_idx].get("status") == "needs_ruling":
+                            task["steps"][rep_idx]["status"] = "succeeded"
+                            task["steps"][rep_idx]["blocking_reason"] = None
                 stype_done = step.get("step_type")
                 if stype_done == "fact_check":
                     chat_kind = "fact_check"
@@ -4830,6 +6805,108 @@ class TeamOrchestrator:
                     }
                 )
 
+                # Pillar 5: Parse Borda Peer Ranking ballot in Anonymous Roundtable Round 2+
+                if (
+                    stype_done == "discussion"
+                    and (task.get("mode_meta") or {}).get("anonymous_peer_review")
+                    and int(step.get("stage_index") or 0) >= 2
+                ):
+                    ballot = _extract_peer_ranking(res.response_text)
+                    if ballot:
+                        pr_list = task.setdefault("peer_rankings", [])
+                        pr_list = [b for b in pr_list if not (b.get("step_index") == step_index and b.get("voter_id") == step["member_id"])]
+                        pr_list.append(
+                            {
+                                "step_index": step_index,
+                                "stage_index": int(step.get("stage_index") or 0),
+                                "voter_id": step["member_id"],
+                                "ts": now,
+                                **ballot,
+                            }
+                        )
+                        task["peer_rankings"] = pr_list
+                        task["borda_scoreboard"] = _compute_borda_scoreboard(task, st["members"])
+
+                # Pillar 3: Auto-dispatch VLM Visual Critique (Gate 2) right after Mechanical Gate 1 on writable plotting steps!
+                fc_auto = (task.get("research_spec") or {}).get("figure_contract") if isinstance(task.get("research_spec"), dict) else None
+                if (
+                    isinstance(fc_auto, dict)
+                    and fc_auto.get("auto_visual_qa")
+                    and stype_done == "execution"
+                    and step.get("sandbox") == "workspace-write"
+                    and not step.get("visual_qa_dispatched")
+                ):
+                    max_v_rep = max(1, min(3, int(fc_auto.get("max_visual_repairs") or 2)))
+                    cur_v_round = int(step.get("visual_qa_round") or 0)
+                    so_now = task.get("research_signoff") if isinstance(task.get("research_signoff"), dict) else None
+                    fig_reps = [fr for fr in ((so_now or {}).get("figure_reports") or []) if isinstance(fr, dict)]
+                    fig_paths_v: List[str] = []
+                    mf_rel_v = ""
+                    for fr in fig_reps:
+                        if not mf_rel_v and fr.get("manifest_path"):
+                            mf_rel_v = str(fr.get("manifest_path"))
+                        for art in fr.get("artifacts") or []:
+                            ap = str(art.get("path") or "")
+                            if ap and os.path.splitext(ap)[1].lower() in (".png", ".svg", ".jpg", ".jpeg") and ap not in fig_paths_v:
+                                fig_paths_v.append(ap)
+                    if fig_paths_v and cur_v_round < max_v_rep:
+                        # Prefer dedicated multimodal visual figure QA specialist (never the plotter itself!)
+                        critic_id = None
+                        if "agy_carbon_plotter" in st["members"] and "agy_carbon_plotter" != step["member_id"]:
+                            critic_id = "agy_carbon_plotter"
+                        else:
+                            for cid, cm in st["members"].items():
+                                if cid != step["member_id"] and cm.get("client") == "antigravity" and ("plotting" in (cm.get("tags") or []) or "visual" in (cm.get("tags") or [])):
+                                    critic_id = cid
+                                    break
+                            if not critic_id:
+                                critic_id = next(
+                                    (cid for cid, cm in st["members"].items() if cid != step["member_id"] and cm.get("client") in SUPPORTED_CLIENTS),
+                                    None,
+                                )
+                        if critic_id:
+                            step["visual_qa_dispatched"] = True
+                            v_idx = len(task["steps"])
+                            next_v_round = cur_v_round + 1
+                            sc_v = step.get("workspace_scope") or task.get("workspace_scope") or "."
+                            claim_v = str(fc_auto.get("core_claim") or task.get("goal") or "")[:300]
+                            v_step = self._make_step(
+                                step_index=v_idx,
+                                title=f"VLM 科研图视觉质检 (#{next_v_round})",
+                                step_type="visual_qa",
+                                stage_index=v_idx,
+                                round_label=f"VLM 视觉闭环 #{next_v_round}",
+                                member_id=critic_id,
+                                prompt=(
+                                    f"请使用 read_file 直接检视以下已通过机械 QA 校验的科研图件，执行顶刊出版级视觉挑刺：\n"
+                                    f"- 待检图件路径：\n" + "\n".join(f"  * {fp}" for fp in fig_paths_v[:4]) + "\n"
+                                    + (f"- 对应 Manifest：{mf_rel_v}\n" if mf_rel_v else "")
+                                    + f"- 核心科学论断 (Hero Claim)：{claim_v}\n\n"
+                                    "请逐项核查：文字/图例/散点是否遮挡重叠、刻度与标签字号是否清晰、多面板对齐与留白是否均衡、配色是否色盲友好。"
+                                ),
+                                depends_on=[step_index],
+                                review_of=None,
+                                read_only=True,
+                                write_scope=[],
+                                workspace_scope=sc_v,
+                                sandbox="read-only",
+                            )
+                            v_step["visual_qa_round"] = next_v_round
+                            v_step["visual_target_member_id"] = step["member_id"]
+                            v_step["visual_target_step_index"] = step_index
+                            v_step["visual_figure_paths"] = fig_paths_v[:4]
+                            v_step["visual_manifest_path"] = mf_rel_v
+                            task["steps"].append(v_step)
+                            task["recent_events"].append(
+                                {
+                                    "ts": now,
+                                    "type": "figure.visual_qa.dispatched",
+                                    "summary": f"已自动派发第 {next_v_round} 轮 VLM 视觉质检 ({st['members'][critic_id]['name']})",
+                                }
+                            )
+                            task["recent_events"] = task["recent_events"][-40:]
+
+            _sync_session_cursor()
             self._refresh_task_overall_status_unlocked(st, task)
             task["updated_at"] = now
 
@@ -4845,7 +6922,7 @@ class TeamOrchestrator:
             synth = [s for s in steps if s.get("step_type") == "synthesis" and s.get("latest_result_text")]
             exec_steps = [
                 s for s in steps
-                if s.get("review_of") is None and s.get("step_type") != "fact_check" and s.get("latest_result_text")
+                if s.get("review_of") is None and s.get("step_type") not in ("fact_check", "visual_qa") and s.get("latest_result_text")
             ]
             chosen = synth[-1] if synth else (exec_steps[-1] if exec_steps else steps[-1])
             task["summary"] = chosen.get("latest_result_text", "")
@@ -4854,6 +6931,8 @@ class TeamOrchestrator:
             )
         elif any(s["status"] == "awaiting_user" for s in steps):
             task["status"] = "awaiting_user"
+        elif any(s["status"] == "needs_verification" for s in steps):
+            task["status"] = "needs_verification"
         elif any(s["status"] == "needs_ruling" for s in steps):
             task["status"] = "needs_ruling"
         elif any(s["status"] == "blocked" for s in steps):

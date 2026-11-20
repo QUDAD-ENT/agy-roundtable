@@ -1,0 +1,27 @@
+{
+  "version": "5.5.0",
+  "server_rev": 19,
+  "release_date": "2026-11-20",
+  "repo": "QUDAD-ENT/agy-roundtable",
+  "release_url": "https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.5.0",
+  "title_zh": "AGY Roundtable v5.5.0 — 长上下文压缩、SQLite FTS5、VLM 自动审图、Worktree 并行写盘、极致流畅度与零弹窗",
+  "title_en": "AGY Roundtable v5.5.0 — Long-Context Compression, SQLite FTS5, VLM Figure QA, Git Worktree & Zero-Freeze Runtime",
+  "highlights_zh": [
+    "长上下文压缩引擎（v5.3/v5.4）：三区 KV-Cache 稳定前缀、观测块外置折叠、不可变轮次状态卡、单次峰值水位校准与超限无损换乘",
+    "跨任务 SQLite FTS5 中英双语全文检索 + 纯标准库 AST 代码结构图谱（RepoMap）",
+    "顶刊科研绘图双门禁：PNG/TIFF/SVG/CSV 反伪造校验 + 自动 VLM 视觉看图自修闭环（最多 2 轮）+ .drawio 导出",
+    "Git Worktree 并行隔离写盘与冲突安全合并、可选匿名互评 + Borda 计票、单任务 Token 硬熔断",
+    "极致流畅度与调用韧性：线性 O(N) 零 ReDoS Markdown 解析 + LRU 缓存、/api/state?slim=1 + 304/gzip（-96% 流量）、零空闲刷盘、动态推理超时与思考心跳、只读策略受阻自动跨引擎切替补",
+    "Codex 可配置改文件权限（全局上限 / 成员卡片一键切换 / 批量授权 / 圆桌可写开关）与 Windows 全链路零黑框弹窗",
+    "内置版本更新自动检测弹窗：每次发布新版本自动提醒老版本并标注当前/最新版本"
+  ],
+  "highlights_en": [
+    "Long-context compression engine: KV-cache stable 3-zone prefix, observation masking, immutable round snapshots, peak occupancy calibration & lossless rollover",
+    "Cross-task bilingual SQLite FTS5 memory index & pure-stdlib AST Structural RepoMap",
+    "Dual-gate publication Figure QA: pure-stdlib PNG/TIFF/SVG/CSV anti-fabrication checks + automated VLM visual critique & bounded self-repair loop + editable .drawio export",
+    "Native Git Worktree parallel write isolation & safe merge, optional anonymous peer review with Borda voting, and per-task token budget cap",
+    "Zero-freeze & resilient calling: linear O(N) zero-ReDoS Markdown + LRU cache, slim 304/gzip state polling (-96% payload), zero idle disk writes, effort-aware idle watchdog & thinking heartbeats",
+    "Configurable Codex file-edit permissions (global ceiling, 1-click member pills, batch toggle, roundtable write opt-in) & Win32 zero-popup subprocesses",
+    "Automatic update notification modal alerting older installations & cached browser tabs whenever a new version ships"
+  ]
+}

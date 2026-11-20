@@ -80,8 +80,8 @@ OPENSCIENCE_PLAYBOOKS: List[Dict[str, Any]] = [
         ],
         "prompt_block": (
             "【OpenScience 融合规约 · 顶刊科研绘图与示意图 (figures + scientific-visualization + schematics)】\n"
-            "1. 实测数据直绘（零伪造）：所有统计图必须由独立可复现脚本（Python matplotlib/seaborn 或 R ggplot2/patchwork/ComplexHeatmap）直接从冻结 Source Data CSV/TSV 绘制，AI 生成位图绝不可充当实验证据；\n"
-            "2. 投稿级几何与三格式导出：锁定目标版面（Nature 单栏 89mm / 双栏 183mm）、纯白底板、≥6–7pt 终稿字号、色盲友好配色（Okabe-Ito / viridis），同源脚本同步导出矢量 `SVG`（禁栅格陷阱）+ `PNG`（300 DPI）+ `TIFF`（600 DPI 且像素宽匹配物理毫米），并输出 `figure_manifest.json` 供 `figure_qa.py` 机械核验；\n"
+            "1. 后端排他与实测数据直绘（零伪造）：明确采用单一后端（Python matplotlib/seaborn 或 R ggplot2/patchwork/ComplexHeatmap）全程出图与导出，严禁跨语言代绘；所有统计图必须由独立固定种子脚本直接读取冻结 Source Data CSV/TSV 绘制，AI 生成位图绝不可充当实验证据；\n"
+            "2. 投稿级几何、可编辑字体与三格式导出：按终印版宽直接建画布（Nature 89/183mm · Science 55/120/184mm · Cell 85/114/174mm）、纯白底板 (#FFFFFF)、终稿有效字号 ≥6pt、色盲友好配色（Okabe-Ito / viridis）；Python 强制设 `rcParams['svg.fonttype']='none'` 与 `rcParams['pdf.fonttype']=42`（R 用 `svglite` + `cairo_pdf` + `ragg::agg_tiff`）确保文字可编辑不转曲；同步导出 `SVG` + `PNG` (300 DPI) + `TIFF` (600 DPI 且像素宽匹配物理毫米)，并写出含 `exports`、`script_path`、`source_data_path`、`panel_sources` 的 `figure_manifest.json` 供 `figure_qa.py` 机械核验；\n"
             "3. 示意图与机理图规范（schematics）：组件标签须与正文逐字一致，流向统一（左→右或上→下），仅用单一强调色突出核心贡献，标准组件用中性灰，虚线区分反馈/假说路径。"
         ),
     },

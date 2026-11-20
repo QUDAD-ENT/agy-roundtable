@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
-from codex_adapter import get_runtime_dirs
+from codex_adapter import get_runtime_dirs, hidden_subprocess_kwargs
 
 PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BASE_URL = os.environ.get("TEAM_RUNTIME_URL", "http://127.0.0.1:8765")
@@ -88,7 +88,8 @@ class TeamRuntimeClient:
             "stderr": log_f,
         }
         if os.name == "nt":
-            popen_kwargs["creationflags"] = CREATE_NO_WINDOW | DETACHED_PROCESS
+            # CRITICAL: Use CREATE_NO_WINDOW (NEVER DETACHED_PROCESS!) + SW_HIDE so grandchildren inherit a hidden console and NEVER flash black CMD windows!
+            popen_kwargs.update(hidden_subprocess_kwargs(new_process_group=True))
         else:
             popen_kwargs["start_new_session"] = True
         subprocess.Popen([py_exe, server_py], **popen_kwargs)

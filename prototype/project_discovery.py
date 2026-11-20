@@ -141,6 +141,9 @@ def pick_folder_native_dialog(initial_dir: Optional[str] = None) -> Dict[str, An
         "$res = $dlg.ShowDialog($f); "
         "if ($res -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dlg.SelectedPath }"
     )
+    _si = subprocess.STARTUPINFO()
+    _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _si.wShowWindow = 0
     p = subprocess.run(
         ["powershell.exe", "-NoProfile", "-STA", "-Command", ps_code],
         capture_output=True,
@@ -148,6 +151,7 @@ def pick_folder_native_dialog(initial_dir: Optional[str] = None) -> Dict[str, An
         encoding="utf-8",
         errors="replace",
         creationflags=CREATE_NO_WINDOW,
+        startupinfo=_si,
         timeout=120,
     )
     chosen = (p.stdout or "").strip()

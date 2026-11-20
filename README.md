@@ -3,11 +3,23 @@
 **Anthropomorphic Multi-Agent Collaboration Studio for Google Antigravity CLI & OpenAI Codex CLI**  
 **面向 Google Antigravity CLI 与 OpenAI Codex CLI 的双端拟人化多智能体圆桌协作工坊**
 
+[![Release: v5.5.0](https://img.shields.io/badge/Release-v5.5.0-indigo.svg)](https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.5.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![UI: Bilingual EN / 中文](https://img.shields.io/badge/UI-English%20%7C%20%E4%B8%AD%E6%96%87-blue.svg)](#bilingual-interface--%E4%B8%AD%E8%8B%B1%E5%8F%8C%E8%AF%AD%E7%95%8C%E9%9D%A2)
 [![Companion: Agy Console](https://img.shields.io/badge/Companion-dneo9527--ctrl%2Fagy--console-purple.svg)](https://github.com/dneo9527-ctrl/agy-console)
 
 [English](#english-overview) · [中文说明](#%E4%B8%AD%E6%96%87%E8%AF%B4%E6%98%8E) · [Associated Project: Agy Console](https://github.com/dneo9527-ctrl/agy-console)
+
+---
+
+## ✨ What's New in v5.5.0 | v5.5.0 深度升级亮点
+
+- **🧠 Long-Context Compression Engine (`context_engine.py`)**: 3-zone KV-Cache stable prefix + externalized observation masking + immutable round snapshots (`newest-first` retention with Pinned Historical Anchor Ledger) + calibrated single-call peak occupancy vs billing tokens + automatic lossless session rollover (`L0 → L1 → L2`).
+- **🔎 Cross-Task SQLite FTS5 Memory & AST RepoMap (`memory_index.py`)**: Pure-stdlib bilingual (English + CJK bi-gram) SQLite FTS5 BM25 memory index across tasks/snapshots/blobs (strictly skipped during Blind Round 1) + pure-stdlib AST Structural RepoMap (Python `ast` + JS/TS/HTML/R + import centrality).
+- **🎨 Dual-Gate Publication Figure QA + Automated VLM Critique Loop (`figure_qa.py`)**: Pure-stdlib PNG/TIFF/SVG/PDF/CSV anti-fabrication gate + automatic multimodal VLM visual critique (`PASS | REVISE`) & bounded self-repair loop (max 2 rounds) + optional editable `.drawio` export.
+- **🌿 Native Git Worktree Parallel Isolation (`worktree_manager.py`)**: Opt-in parallel write isolation for overlapping scopes, live unified diff inspection, dirty-repo guard, conflict-safe `--no-ff` merge with auto-rollback, and branch cleanup.
+- **🗳️ Anonymous Peer Review (Borda Voting) & Per-Task Token Cap**: Optional anonymized seat masking (`Seat A/B/C`) with deterministic Borda consensus scoreboard + hard token ceiling pausing cleanly in `needs_ruling`.
+- **⚡ Zero-Freeze UI, Resilient Calling, Configurable Codex Write Permissions & Zero Windows Console Popups**: Linear $O(N)$ zero-ReDoS Markdown parser + LRU cache, `/api/state?slim=1&since_rev=N` (`304 Not Modified` + `gzip`, **-96% payload**), zero idle disk writes, effort-aware idle timeouts (`240s–600s`) + live thinking heartbeats, automatic cross-engine failover on stall/read-only shell block, 1-click configurable Codex `workspace-write` permissions, Win32 hidden subprocesses (`CREATE_NO_WINDOW` + `SW_HIDE`), and **automatic update notification popups alerting older installations & cached tabs whenever a new version ships**.
 
 ---
 

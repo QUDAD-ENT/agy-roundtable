@@ -6,6 +6,7 @@ Multi-threaded HTTP Server & REST API v3 for Dual-Client (Codex + Antigravity)
 from __future__ import annotations
 
 import csv
+import gzip
 import io
 import json
 import mimetypes
@@ -13,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import urllib.parse
 import webbrowser
 import xml.etree.ElementTree as ET
@@ -24,12 +26,19 @@ PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROTO_DIR not in sys.path:
     sys.path.insert(0, PROTO_DIR)
 
-from codex_adapter import CREATE_NO_WINDOW, get_runtime_dirs
+from codex_adapter import CREATE_NO_WINDOW, get_runtime_dirs, hidden_subprocess_kwargs
 from figure_qa import inspect_any_figure
 from team_runtime import TeamOrchestrator
+from version_checker import check_for_updates, get_local_version_info
 
 PORT = int(os.environ.get("TEAM_SIDEBAR_PORT", "8765"))
 ORCHESTRATOR = TeamOrchestrator()
+_LOCAL_VER = get_local_version_info()
+APP_VERSION = str(_LOCAL_VER.get("version") or "5.5.0")
+SERVER_REV = int(_LOCAL_VER.get("server_rev") or 19)
+
+_STATE_CACHE_LOCK = threading.Lock()
+_STATE_HTTP_CACHE: Dict[Tuple[int, bool, Optional[str]], Tuple[bytes, bytes]] = {}
 
 
 def _focus_antigravity_window() -> Dict[str, Any]:
@@ -43,8 +52,8 @@ def _focus_antigravity_window() -> Dict[str, Any]:
             ["powershell.exe", "-NoProfile", "-Command", ps_script],
             capture_output=True,
             text=True,
-            creationflags=CREATE_NO_WINDOW,
             timeout=4,
+            **hidden_subprocess_kwargs(),
         )
         activated = "true" in (p.stdout or "").lower()
         return {
@@ -55,16 +64,23 @@ def _focus_antigravity_window() -> Dict[str, Any]:
         return {"window_activated": False, "note": str(exc)}
 
 
-def _is_allowed_raw_file_path(abs_p: str) -> bool:
-    """P0-0 Root Allowlist for /api/fs/raw_file: restrict strictly to active project, task project roots & runtime dirs."""
+def _is_allowed_raw_file_path(abs_p: str, task_id: Optional[str] = None) -> bool:
+    """P0-0 Root Allowlist for /api/fs/raw_file: restrict strictly to task's project root (when task_id given) or active workspace & runtime dirs."""
     target_nc = os.path.normcase(os.path.realpath(os.path.abspath(abs_p)))
     snap = ORCHESTRATOR.store.snapshot()
     allowed_roots: List[str] = []
-    if snap.get("binding", {}).get("project_path"):
-        allowed_roots.append(snap["binding"]["project_path"])
-    for t in snap.get("tasks", []):
-        if t.get("project_path"):
-            allowed_roots.append(t["project_path"])
+    if task_id:
+        t_found = next((t for t in snap.get("tasks", []) if t.get("id") == task_id), None)
+        if t_found and t_found.get("project_path"):
+            allowed_roots.append(t_found["project_path"])
+        elif snap.get("binding", {}).get("project_path"):
+            allowed_roots.append(snap["binding"]["project_path"])
+    else:
+        if snap.get("binding", {}).get("project_path"):
+            allowed_roots.append(snap["binding"]["project_path"])
+        for t in snap.get("tasks", []):
+            if t.get("project_path"):
+                allowed_roots.append(t["project_path"])
     try:
         tmp_dir, _ = get_runtime_dirs()
         allowed_roots.append(tmp_dir)
@@ -420,14 +436,35 @@ class SidebarHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         pass
 
-    def _send_json(self, status_code: int, payload: Dict[str, Any]) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    def _accepts_gzip(self) -> bool:
+        return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
+    def _send_raw_bytes(
+        self,
+        status_code: int,
+        raw_body: bytes,
+        content_type: str,
+        gz_body: Optional[bytes] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> None:
+        use_gz = self._accepts_gzip() and (gz_body is not None or len(raw_body) > 2048)
+        payload = (gz_body if gz_body is not None else gzip.compress(raw_body, compresslevel=4)) if use_gz else raw_body
         self.send_response(status_code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
+        if use_gz:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        if extra_headers:
+            for hk, hv in extra_headers.items():
+                self.send_header(hk, hv)
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(payload)
+
+    def _send_json(self, status_code: int, payload: Dict[str, Any], extra_headers: Optional[Dict[str, str]] = None) -> None:
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self._send_raw_bytes(status_code, body, "application/json; charset=utf-8", extra_headers=extra_headers)
 
     def _check_local_post_security(self) -> Optional[str]:
         """P0-0 Local CSRF / Host / Origin / Content-Type guard for loopback write endpoints."""
@@ -466,16 +503,91 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 html_path = os.path.join(PROTO_DIR, "sidebar_panel.html")
                 with open(html_path, "rb") as f:
                     content = f.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(content)))
+                self._send_raw_bytes(200, content, "text/html; charset=utf-8")
+            elif route == "/favicon.ico":
+                self.send_response(204)
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.send_header("Content-Length", "0")
                 self.end_headers()
-                self.wfile.write(content)
             elif route == "/api/health":
-                self._send_json(200, {"ok": True, "pid": os.getpid(), "schema_version": 4, "server_rev": 13})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "pid": os.getpid(),
+                        "schema_version": 4,
+                        "app_version": APP_VERSION,
+                        "server_rev": SERVER_REV,
+                        "state_rev": ORCHESTRATOR.store.get_rev(),
+                        "repo": _LOCAL_VER.get("repo", ""),
+                    },
+                )
+            elif route == "/api/version/check":
+                force = qs.get("force", ["0"])[0] in ("1", "true", "yes")
+                self._send_json(200, check_for_updates(force=force))
+            elif route == "/api/memory/search":
+                q = qs.get("q", [""])[0]
+                tid = qs.get("task_id", [None])[0]
+                lim = int(qs.get("limit", ["8"])[0] or "8")
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.search_project_memory(q, task_id=tid, limit=lim)})
+            elif route == "/api/memory/stats":
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.get_memory_stats()})
+            elif route == "/api/tasks/worktrees":
+                tid = qs.get("task_id", [""])[0]
+                if not tid:
+                    raise ValueError("缺少 task_id 参数")
+                self._send_json(200, {"ok": True, **ORCHESTRATOR.get_task_worktrees(tid)})
             elif route == "/api/state":
-                self._send_json(200, ORCHESTRATOR.store.snapshot())
+                slim = qs.get("slim", ["0"])[0] in ("1", "true", "yes")
+                focus_id = (qs.get("focus_task_id", [""])[0] or "").strip() or None
+                since_raw = (qs.get("since_rev", [""])[0] or "").strip()
+                cur_rev = ORCHESTRATOR.store.get_rev()
+                etag = f'"rev-{cur_rev}-{"s" if slim else "f"}-{focus_id or "auto"}"'
+                inm = (self.headers.get("If-None-Match") or "").strip()
+                if (since_raw.isdigit() and int(since_raw) == cur_rev) or (inm and inm == etag):
+                    self.send_response(304)
+                    self.send_header("ETag", etag)
+                    self.send_header("X-State-Rev", str(cur_rev))
+                    self.send_header("X-App-Version", APP_VERSION)
+                    self.send_header("X-Server-Rev", str(SERVER_REV))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+
+                cache_key = (cur_rev, slim, focus_id)
+                cached_pair: Optional[Tuple[bytes, bytes]] = None
+                with _STATE_CACHE_LOCK:
+                    cached_pair = _STATE_HTTP_CACHE.get(cache_key)
+                if cached_pair is None:
+                    if slim:
+                        eff_rev, payload = ORCHESTRATOR.store.slim_snapshot(focus_task_id=focus_id)
+                    else:
+                        payload = ORCHESTRATOR.store.snapshot()
+                        eff_rev = int(payload.get("state_rev") or cur_rev)
+                    raw_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    gz_bytes = gzip.compress(raw_bytes, compresslevel=4)
+                    cached_pair = (raw_bytes, gz_bytes)
+                    cur_rev = eff_rev
+                    etag = f'"rev-{cur_rev}-{"s" if slim else "f"}-{focus_id or "auto"}"'
+                    with _STATE_CACHE_LOCK:
+                        # Evict stale revisions so cache stays tiny (<= 4 entries)
+                        for k in list(_STATE_HTTP_CACHE.keys()):
+                            if k[0] != cur_rev or len(_STATE_HTTP_CACHE) >= 4:
+                                _STATE_HTTP_CACHE.pop(k, None)
+                        _STATE_HTTP_CACHE[(cur_rev, slim, focus_id)] = cached_pair
+                self._send_raw_bytes(
+                    200,
+                    cached_pair[0],
+                    "application/json; charset=utf-8",
+                    gz_body=cached_pair[1],
+                    extra_headers={
+                        "ETag": etag,
+                        "X-State-Rev": str(cur_rev),
+                        "X-App-Version": APP_VERSION,
+                        "X-Server-Rev": str(SERVER_REV),
+                    },
+                )
             elif route == "/api/models":
                 refresh = qs.get("refresh", ["0"])[0] == "1"
                 self._send_json(200, ORCHESTRATOR.get_capabilities(refresh_cli=refresh))
@@ -529,8 +641,8 @@ class SidebarHandler(BaseHTTPRequestHandler):
                 if resolved["kind"] != "file":
                     raise ValueError("仅支持读取普通文件")
                 abs_p = resolved["path"]
-                if not _is_allowed_raw_file_path(abs_p):
-                    raise ValueError(f"安全拦截：拒绝读取绑定项目目录之外的文件: {abs_p}")
+                if not _is_allowed_raw_file_path(abs_p, task_id=task_id):
+                    raise ValueError(f"安全拦截：拒绝读取当前任务绑定项目目录之外的文件: {abs_p}")
                 ext_low = os.path.splitext(abs_p)[1].lower()
                 mime = "image/svg+xml" if ext_low == ".svg" else (mimetypes.guess_type(abs_p)[0] or "application/octet-stream")
                 with open(abs_p, "rb") as f:
@@ -601,6 +713,17 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     max_concurrency=body.get("max_concurrency"),
                     default_max_auto_repairs=body.get("default_max_auto_repairs"),
                     auto_spawn_quota_backup=body.get("auto_spawn_quota_backup"),
+                    context_budget_chars=body.get("context_budget_chars"),
+                    context_session_mode=body.get("context_session_mode"),
+                    auto_context_rollover=body.get("auto_context_rollover"),
+                    max_turns_per_session=body.get("max_turns_per_session"),
+                    enable_cross_task_memory=body.get("enable_cross_task_memory"),
+                    enable_ast_repomap=body.get("enable_ast_repomap"),
+                    enable_git_worktree_isolation=body.get("enable_git_worktree_isolation"),
+                    task_token_budget=body.get("task_token_budget"),
+                    max_sandbox=body.get("max_sandbox"),
+                    default_task_sandbox=body.get("default_task_sandbox"),
+                    roundtable_allow_member_writes=body.get("roundtable_allow_member_writes"),
                 )
                 self._send_json(200, {"ok": True, "binding": res})
             elif route == "/api/roles":
@@ -649,6 +772,13 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     tags=body.get("tags"),
                     mode=body.get("mode", "next_round"),
                     reason=body.get("reason", "界面编辑成员名称/配置"),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/members/set_sandbox":
+                res = ORCHESTRATOR.set_members_sandbox(
+                    sandbox=body.get("sandbox", "workspace-write"),
+                    member_id=body.get("member_id") or None,
+                    client=body.get("client") or None,
                 )
                 self._send_json(200, {"ok": True, **res})
             elif route == "/api/members/spawn_backup":
@@ -715,14 +845,37 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     openscience_playbooks=body.get("openscience_playbooks"),
                     squad_preset=str(body.get("squad_preset") or ""),
                     chief_max_members=body.get("chief_max_members"),
+                    anonymous_peer_review=bool(body.get("anonymous_peer_review", False)),
+                    enable_worktree_isolation=body.get("enable_worktree_isolation"),
+                    task_token_budget=body.get("task_token_budget"),
+                    allow_member_writes=body.get("allow_member_writes"),
                 )
                 self._send_json(200, {"ok": True, "task": res})
+            elif route == "/api/tasks/worktrees/merge":
+                res = ORCHESTRATOR.merge_task_worktree(
+                    task_id=body["task_id"],
+                    step_index=int(body["step_index"]),
+                    cleanup_after=bool(body.get("cleanup_after", True)),
+                )
+                self._send_json(200, {"ok": True, **res})
+            elif route == "/api/tasks/worktrees/cleanup":
+                res = ORCHESTRATOR.cleanup_task_worktree(
+                    task_id=body["task_id"],
+                    step_index=int(body["step_index"]),
+                )
+                self._send_json(200, {"ok": True, **res})
             elif route == "/api/tasks/verify_figure":
                 res = ORCHESTRATOR.verify_task_figure(
                     task_id=body["task_id"],
                     manifest_path=body["manifest_path"],
                 )
                 self._send_json(200, {"ok": True, "report": res})
+            elif route == "/api/tasks/compact_context":
+                res = ORCHESTRATOR.compact_task_context(
+                    task_id=body["task_id"],
+                    reset_sessions=bool(body.get("reset_sessions", True)),
+                )
+                self._send_json(200, {"ok": True, **res})
             elif route == "/api/tasks/interject":
                 res = ORCHESTRATOR.interject_chat(
                     task_id=body["task_id"],
@@ -777,6 +930,9 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     task_id=body["task_id"],
                     prompt=body["prompt"],
                     step_index=body.get("step_index"),
+                    target_member_id=body.get("target_member_id") or None,
+                    sandbox=body.get("sandbox") or None,
+                    title=body.get("title") or None,
                 )
                 self._send_json(200, {"ok": True, "task": res})
             elif route == "/api/tasks/answer":

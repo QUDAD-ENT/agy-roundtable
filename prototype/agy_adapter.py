@@ -20,7 +20,17 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from codex_adapter import CREATE_NO_WINDOW, CodexExecutionResult, _safe_env, get_runtime_dirs, is_transient_network_error, kill_process_tree
+from codex_adapter import (
+    CREATE_NO_WINDOW,
+    CodexExecutionResult,
+    _safe_env,
+    get_runtime_dirs,
+    hidden_subprocess_kwargs,
+    is_transient_network_error,
+    kill_process_tree,
+    resolve_idle_timeout,
+)
+from context_engine import classify_turn_error
 
 
 EFFORT_SUFFIX_RE = re.compile(r"^(.*)-(low|medium|high|xhigh|max)$")
@@ -76,8 +86,8 @@ class AgyAdapter:
                     capture_output=True,
                     text=True,
                     env=_safe_env(),
-                    creationflags=CREATE_NO_WINDOW,
                     timeout=8,
+                    **hidden_subprocess_kwargs(),
                 )
                 cli_version = f"agy {(pv.stdout or pv.stderr).strip()}"
             except Exception as exc:
@@ -91,8 +101,8 @@ class AgyAdapter:
                     encoding="utf-8",
                     errors="replace",
                     env=_safe_env(),
-                    creationflags=CREATE_NO_WINDOW,
                     timeout=18,
+                    **hidden_subprocess_kwargs(),
                 )
                 if pm.returncode == 0 and pm.stdout.strip():
                     logged_in = True
@@ -233,12 +243,13 @@ class AgyAdapter:
         sandbox: str = "read-only",
         agy_project_id: Optional[str] = None,
         attempt_id: Optional[str] = None,
-        idle_timeout_sec: float = 240.0,
+        idle_timeout_sec: Optional[float] = None,
         max_transient_retries: int = 2,
         on_start: Optional[Callable[[int], None]] = None,
         on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_partial_text: Optional[Callable[[str], None]] = None,
     ) -> CodexExecutionResult:
+        eff_idle_timeout = resolve_idle_timeout(reasoning_effort, idle_timeout_sec)
         requested_cfg = {
             "client": "antigravity",
             "model": model,
@@ -273,15 +284,33 @@ class AgyAdapter:
                 accepted_config=accepted_cfg,
             )
 
-        dir_index = self._build_workdir_index(cwd or os.getcwd())
-        agy_safe_prompt = (
-            "【Antigravity 无头 CLI 规范：你当前拥有的可用只读工具为 read_file 与 search_web"
-            + ("，以及写入工具 write_file / edit_file" if sandbox == "workspace-write" else "")
-            + "。严禁调用 run_command、run_workflow、invoke_subagent、ask_question 或 codex-team MCP 工具！"
-            "下方已为你自动列出当前项目目录的文件树路径，请直接将所需文件的绝对路径传给 read_file 读取，核查后直接输出完整正文结论。】\n"
-            f"{dir_index}\n\n"
-            + prompt
-        )
+        def _build_agy_prompt(raw_p: str, sess: Optional[str]) -> str:
+            """
+            KV-Cache Prefix-Stable wrapper:
+            - Resumed session (`sess` non-empty): pass Delta prompt cleanly without re-scanning/prepending volatile dir_index!
+            - Fresh/rollover session (`sess` is None): static byte-frozen tool rule at top, volatile dir_index at the END (Zone C)!
+            """
+            if sess:
+                return raw_p
+            base_dir = cwd or os.getcwd()
+            dir_idx = self._build_workdir_index(base_dir)
+            repomap = ""
+            try:
+                from memory_index import build_structural_repomap
+                repomap = build_structural_repomap(base_dir, max_chars=2000)
+            except Exception:
+                repomap = ""
+            static_rule = (
+                "【Antigravity 无头 CLI 规范：你当前拥有的可用只读工具为 read_file 与 search_web"
+                + ("，以及写入工具 write_file / edit_file" if sandbox == "workspace-write" else "")
+                + "。严禁调用 run_command、run_workflow、invoke_subagent、ask_question 或 codex-team MCP 工具！"
+                "文末已为你列出当前项目的结构化代码符号图谱（AST RepoMap）与文件绝对路径索引，请直接将所需文件的绝对路径传给 read_file 读取；"
+                "读取巨型数据表/计数矩阵时优先查看汇总表与脚本，避免对同一大文件连续多次分块翻页；核查后直接输出高密度、结构化正文结论。】"
+            )
+            tail_blocks = [b for b in (repomap, dir_idx) if b]
+            return f"{static_rule}\n\n{raw_p}\n\n" + "\n\n".join(tail_blocks)
+
+        agy_safe_prompt = _build_agy_prompt(prompt, session_id)
 
         def _invoke_with_project_init(p_txt: str, sess: Optional[str]) -> CodexExecutionResult:
             r = self._run_agy_once(
@@ -293,7 +322,7 @@ class AgyAdapter:
                 agy_project_id=agy_project_id,
                 force_new_project=False,
                 attempt_id=attempt_id,
-                idle_timeout_sec=idle_timeout_sec,
+                idle_timeout_sec=eff_idle_timeout,
                 requested_cfg=requested_cfg,
                 accepted_cfg=accepted_cfg,
                 on_start=on_start,
@@ -317,7 +346,7 @@ class AgyAdapter:
                     agy_project_id=None,
                     force_new_project=True,
                     attempt_id=attempt_id,
-                    idle_timeout_sec=idle_timeout_sec,
+                    idle_timeout_sec=eff_idle_timeout,
                     requested_cfg=requested_cfg,
                     accepted_cfg=accepted_cfg,
                     on_start=on_start,
@@ -329,26 +358,28 @@ class AgyAdapter:
         cur_sess = session_id
         res: Optional[CodexExecutionResult] = None
         for retry_idx in range(max_transient_retries + 1):
-            res = _invoke_with_project_init(agy_safe_prompt, cur_sess)
+            cur_prompt = _build_agy_prompt(prompt, cur_sess) if retry_idx > 0 else agy_safe_prompt
+            res = _invoke_with_project_init(cur_prompt, cur_sess)
 
             # If headless mode denied a tool and produced empty output, retry once instructing allowed built-in file tools
             joined_err = f"{res.error or ''}\n" + "\n".join(res.stderr_lines).lower()
             if (
                 not res.aborted
+                and not res.context_overflow
                 and not res.response_text.strip()
                 and ("no output produced" in joined_err or "permission" in joined_err or "未产生任何文本输出" in joined_err)
             ):
                 if on_event:
                     on_event({"type": "agy.retry_file_tools", "activity_label": "🔄 切换内置读取工具重试", "summary": "自动切换已授权内置文件工具重新生成输出", "ts": time.time()})
-                retry_prompt = (
+                retry_prompt = _build_agy_prompt(
                     "上一轮因调用了未授权命令未产生文字输出。严禁调用 run_command 或 run_workflow！"
-                    "请直接从下方目录索引中挑选路径并调用 read_file（或 search_web），随后必须直接输出完整的文字分析结论：\n"
-                    f"{dir_index}\n\n"
-                    + prompt
+                    "请直接从文末目录索引中挑选路径并调用 read_file（或 search_web），随后必须直接输出完整的文字分析结论。\n\n"
+                    + prompt,
+                    None,
                 )
                 res = _invoke_with_project_init(retry_prompt, None)
 
-            if res.aborted or res.final_status == "succeeded" or res.session_not_found:
+            if res.aborted or res.final_status == "succeeded" or res.session_not_found or res.context_overflow:
                 return res
 
             combined_err = f"{res.error or ''}\n" + "\n".join(res.stderr_lines[-8:])
@@ -357,7 +388,9 @@ class AgyAdapter:
                 or "empty conversation id" in combined_err.lower()
                 or "failed to start conversation" in combined_err.lower()
             )
-            if retry_idx < max_transient_retries and is_backend_hiccup:
+            is_watchdog = "watchdog_idle_timeout" in combined_err.lower()
+            allowed_retries = min(max_transient_retries, 1) if is_watchdog else max_transient_retries
+            if retry_idx < allowed_retries and is_backend_hiccup:
                 backoff = 2.5 * (retry_idx + 1)
                 if on_event:
                     on_event({
@@ -485,7 +518,7 @@ class AgyAdapter:
             errors="replace",
             cwd=work_dir,
             env=_safe_env(),
-            creationflags=CREATE_NO_WINDOW,
+            **hidden_subprocess_kwargs(),
         )
 
         # Feed prompt via background stdin writer so large multi-turn prompts never deadlock pipes
@@ -517,11 +550,26 @@ class AgyAdapter:
         def _watchdog_loop() -> None:
             if idle_timeout_sec <= 0:
                 return
+            last_hb_ts = time.time()
             while proc.poll() is None and not meta.get("abort_requested"):
-                if time.time() - meta["last_io_ts"] > idle_timeout_sec:
+                now_w = time.time()
+                silent = now_w - meta["last_io_ts"]
+                if silent > idle_timeout_sec:
                     meta["watchdog_timed_out"] = True
                     kill_process_tree(proc.pid)
                     break
+                if silent >= 45.0 and (now_w - last_hb_ts) >= 30.0:
+                    last_hb_ts = now_w
+                    if on_event:
+                        try:
+                            on_event({
+                                "type": "thinking.heartbeat",
+                                "activity_label": f"🧠 深度思考推理中（已静默 {int(silent)}s · 进程活跃）",
+                                "summary": f"深度思考推理中（已静默 {int(silent)}s / 上限 {int(idle_timeout_sec)}s）",
+                                "ts": now_w,
+                            })
+                        except Exception:
+                            pass
                 time.sleep(2.0)
 
         threading.Thread(target=_watchdog_loop, daemon=True).start()
@@ -667,6 +715,26 @@ class AgyAdapter:
             stream_error = stream_error or (f"模型未产生任何文本输出: {stderr_tail}" if stderr_tail else "模型未产生任何文本输出 (empty response)")
 
         accepted_final["session_id"] = res_session_id
+        succeeded_now = (not aborted) and exit_code == 0 and turn_completed
+        err_kind: Optional[str] = None
+        if not succeeded_now and not aborted:
+            err_kind, _sig = classify_turn_error(stream_error, stderr_lines, events)
+            if session_missing["value"] and err_kind != "context_length_exceeded":
+                err_kind = "session_not_found"
+        ctx_overflow = err_kind == "context_length_exceeded"
+        saw_write_tool = any(
+            isinstance(ev, dict)
+            and ev.get("event") == "step_update"
+            and (ev.get("step_update") or {}).get("tool_name") in ("write_file", "edit_file")
+            for ev in events
+        )
+        if sandbox == "read-only":
+            se_state = "read_only"
+        elif saw_write_tool:
+            se_state = "mutated_verified" if succeeded_now else "unknown_mutation"
+        else:
+            se_state = "none"
+
         return CodexExecutionResult(
             session_id=res_session_id,
             response_text=final_response,
@@ -683,4 +751,7 @@ class AgyAdapter:
             requested_config=requested_cfg,
             accepted_config=accepted_final,
             usage=usage_info,
+            context_overflow=ctx_overflow,
+            error_kind=err_kind,
+            side_effect_state=se_state,
         )

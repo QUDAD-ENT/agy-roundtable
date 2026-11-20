@@ -12,8 +12,22 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+_PROV_LOCKS_GUARD = threading.Lock()
+_PROV_TASK_LOCKS: Dict[str, threading.RLock] = {}
+
+
+def _get_task_lock(task_dir: str) -> threading.RLock:
+    key = os.path.normcase(os.path.abspath(task_dir))
+    with _PROV_LOCKS_GUARD:
+        lk = _PROV_TASK_LOCKS.get(key)
+        if lk is None:
+            lk = threading.RLock()
+            _PROV_TASK_LOCKS[key] = lk
+        return lk
 
 
 def _canonical_node_id(kind: str, label: str, path: str = "", sha256: str = "", extra_key: str = "") -> str:
@@ -83,39 +97,40 @@ class TaskProvenanceStore:
         extra_key: str = "",
     ) -> str:
         kind = kind if kind in ("source", "run", "artifact", "claim") else "artifact"
-        g = self.load_graph()
-        nid = _canonical_node_id(kind, label, path=path, sha256=sha256, extra_key=extra_key)
-        now = time.time()
-        existing = g["nodes"].get(nid)
-        if not existing:
-            g["nodes"][nid] = {
-                "id": nid,
-                "kind": kind,
-                "label": label.strip(),
-                "artifact_type": artifact_type,
-                "path": path.replace("\\", "/") if path else "",
-                "sha256": sha256,
-                "tool": tool,
-                "meta": dict(meta or {}),
-                "created_at": now,
-            }
-        else:
-            if meta:
-                existing.setdefault("meta", {}).update(meta)
-            if sha256 and not existing.get("sha256"):
-                existing["sha256"] = sha256
+        with _get_task_lock(self.task_dir):
+            g = self.load_graph()
+            nid = _canonical_node_id(kind, label, path=path, sha256=sha256, extra_key=extra_key)
+            now = time.time()
+            existing = g["nodes"].get(nid)
+            if not existing:
+                g["nodes"][nid] = {
+                    "id": nid,
+                    "kind": kind,
+                    "label": label.strip(),
+                    "artifact_type": artifact_type,
+                    "path": path.replace("\\", "/") if path else "",
+                    "sha256": sha256,
+                    "tool": tool,
+                    "meta": dict(meta or {}),
+                    "created_at": now,
+                }
+            else:
+                if meta:
+                    existing.setdefault("meta", {}).update(meta)
+                if sha256 and not existing.get("sha256"):
+                    existing["sha256"] = sha256
 
-        existing_edges = {(e["from"], e["to"], e.get("relation", "derived-from")) for e in g["edges"]}
-        for parent_id in derived_from or []:
-            if parent_id and parent_id != nid and parent_id in g["nodes"]:
-                ekey = (nid, parent_id, "derived-from")
-                if ekey not in existing_edges:
-                    g["edges"].append({"from": nid, "to": parent_id, "relation": "derived-from", "ts": now})
-                    existing_edges.add(ekey)
+            existing_edges = {(e["from"], e["to"], e.get("relation", "derived-from")) for e in g["edges"]}
+            for parent_id in derived_from or []:
+                if parent_id and parent_id != nid and parent_id in g["nodes"]:
+                    ekey = (nid, parent_id, "derived-from")
+                    if ekey not in existing_edges:
+                        g["edges"].append({"from": nid, "to": parent_id, "relation": "derived-from", "ts": now})
+                        existing_edges.add(ekey)
 
-        g["updated_at"] = now
-        self._write_atomic(self.prov_path, g)
-        return nid
+            g["updated_at"] = now
+            self._write_atomic(self.prov_path, g)
+            return nid
 
     def record_attempt_lineage(
         self,
@@ -263,45 +278,46 @@ class TaskProvenanceStore:
         run_node_id: str = "",
     ) -> Dict[str, Any]:
         """Record an OpenScience Autoresearch experiment run & auto-compute delta vs baseline."""
-        exp_data = self.load_experiments()
-        runs = exp_data.setdefault("runs", [])
-        run_id = str(raw.get("run_id") or f"exp_{len(runs) + 1:03d}")
-        is_baseline = bool(raw.get("is_baseline", False)) or (len(runs) == 0 and raw.get("priority") == 1000)
-        metric_name = str(raw.get("metric_name") or "primary_metric")
-        direction = str(raw.get("direction") or "maximize").lower()
-        val_raw = raw.get("metric_value") if "metric_value" in raw else raw.get("metric")
-        try:
-            metric_val = float(val_raw) if val_raw is not None else None
-        except Exception:
-            metric_val = None
+        with _get_task_lock(self.task_dir):
+            exp_data = self.load_experiments()
+            runs = exp_data.setdefault("runs", [])
+            run_id = str(raw.get("run_id") or f"exp_{len(runs) + 1:03d}")
+            is_baseline = bool(raw.get("is_baseline", False)) or (len(runs) == 0 and raw.get("priority") == 1000)
+            metric_name = str(raw.get("metric_name") or "primary_metric")
+            direction = str(raw.get("direction") or "maximize").lower()
+            val_raw = raw.get("metric_value") if "metric_value" in raw else raw.get("metric")
+            try:
+                metric_val = float(val_raw) if val_raw is not None else None
+            except Exception:
+                metric_val = None
 
-        # Compute delta vs baseline run on same metric_name
-        base_run = next((r for r in runs if r.get("is_baseline") and r.get("metric_name") == metric_name), None)
-        delta_vs_base: Optional[float] = None
-        if not is_baseline and base_run is not None and metric_val is not None and base_run.get("metric_value") is not None:
-            delta_vs_base = round(metric_val - float(base_run["metric_value"]), 6)
+            # Compute delta vs baseline run on same metric_name
+            base_run = next((r for r in runs if r.get("is_baseline") and r.get("metric_name") == metric_name), None)
+            delta_vs_base: Optional[float] = None
+            if not is_baseline and base_run is not None and metric_val is not None and base_run.get("metric_value") is not None:
+                delta_vs_base = round(metric_val - float(base_run["metric_value"]), 6)
 
-        rec = {
-            "run_id": run_id,
-            "is_baseline": is_baseline,
-            "hypothesis": str(raw.get("hypothesis") or raw.get("label") or ""),
-            "metric_name": metric_name,
-            "metric_value": metric_val,
-            "direction": direction,
-            "delta_vs_baseline": delta_vs_base,
-            "status": str(raw.get("status") or ("baseline" if is_baseline else "completed")),
-            "script_path": str(raw.get("script_path") or ""),
-            "notes": str(raw.get("notes") or ""),
-            "attempt_id": attempt_id,
-            "member_id": member_id,
-            "model": model,
-            "provenance_node_id": run_node_id,
-            "ts": time.time(),
-        }
-        runs.append(rec)
-        exp_data["updated_at"] = time.time()
-        self._write_atomic(self.exp_path, exp_data)
-        return rec
+            rec = {
+                "run_id": run_id,
+                "is_baseline": is_baseline,
+                "hypothesis": str(raw.get("hypothesis") or raw.get("label") or ""),
+                "metric_name": metric_name,
+                "metric_value": metric_val,
+                "direction": direction,
+                "delta_vs_baseline": delta_vs_base,
+                "status": str(raw.get("status") or ("baseline" if is_baseline else "completed")),
+                "script_path": str(raw.get("script_path") or ""),
+                "notes": str(raw.get("notes") or ""),
+                "attempt_id": attempt_id,
+                "member_id": member_id,
+                "model": model,
+                "provenance_node_id": run_node_id,
+                "ts": time.time(),
+            }
+            runs.append(rec)
+            exp_data["updated_at"] = time.time()
+            self._write_atomic(self.exp_path, exp_data)
+            return rec
 
     def get_summary(self) -> Dict[str, Any]:
         g = self.load_graph()

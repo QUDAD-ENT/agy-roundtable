@@ -23,8 +23,23 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from context_engine import classify_turn_error
+
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) if os.name == "nt" else 0
+
+
+def hidden_subprocess_kwargs(new_process_group: bool = False) -> Dict[str, Any]:
+    """Win32 zero-popup subprocess flags: CREATE_NO_WINDOW (NEVER mixed with DETACHED_PROCESS!)
+    + STARTF_USESHOWWINDOW / SW_HIDE so neither direct children nor grandchildren flash console windows."""
+    if os.name != "nt":
+        return {}
+    flags = CREATE_NO_WINDOW | (CREATE_NEW_PROCESS_GROUP if new_process_group else 0)
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    return {"creationflags": flags, "startupinfo": si}
 
 
 def get_runtime_dirs() -> Tuple[str, str]:
@@ -73,8 +88,8 @@ def is_pid_alive(pid: Optional[int]) -> bool:
             ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
             capture_output=True,
             text=True,
-            creationflags=CREATE_NO_WINDOW,
             timeout=4,
+            **hidden_subprocess_kwargs(),
         )
         return f'"{int(pid)}"' in p.stdout
     except Exception:
@@ -91,8 +106,8 @@ def kill_process_tree(pid: int, timeout_sec: float = 5.0) -> bool:
                 ["taskkill", "/F", "/T", "/PID", str(int(pid))],
                 capture_output=True,
                 text=True,
-                creationflags=CREATE_NO_WINDOW,
                 timeout=5,
+                **hidden_subprocess_kwargs(),
             )
         except Exception:
             pass
@@ -134,6 +149,9 @@ class CodexExecutionResult:
     command_logs: List[Dict[str, Any]] = field(default_factory=list)
     changed_files: List[Dict[str, Any]] = field(default_factory=list)
     edit_after_check: bool = False
+    context_overflow: bool = False
+    error_kind: Optional[str] = None
+    side_effect_state: str = "none"
 
     @property
     def final_status(self) -> str:
@@ -157,6 +175,9 @@ class CodexExecutionResult:
             "policy_blocked": self.policy_blocked,
             "blocking_reason": self.blocking_reason,
             "session_not_found": self.session_not_found,
+            "context_overflow": self.context_overflow,
+            "error_kind": self.error_kind,
+            "side_effect_state": self.side_effect_state,
             "requested_config": self.requested_config,
             "accepted_config": self.accepted_config,
             "usage": self.usage,
@@ -189,6 +210,20 @@ TRANSIENT_ERR_PATTERNS = (
 def is_transient_network_error(err_text: str) -> bool:
     low = (err_text or "").lower()
     return any(pat in low for pat in TRANSIENT_ERR_PATTERNS)
+
+
+def resolve_idle_timeout(reasoning_effort: Optional[str], idle_timeout_sec: Optional[float] = None) -> float:
+    """Effort-aware idle watchdog ceiling so deep reasoning bursts ('high'/'xhigh') aren't falsely killed at 240s."""
+    if idle_timeout_sec is not None:
+        return float(idle_timeout_sec)
+    eff = (reasoning_effort or "").strip().lower()
+    if eff in ("xhigh", "max"):
+        return 600.0
+    if eff == "high":
+        return 480.0
+    if eff == "medium":
+        return 300.0
+    return 240.0
 
 
 class CodexAdapter:
@@ -311,8 +346,8 @@ class CodexAdapter:
                     capture_output=True,
                     text=True,
                     env=_safe_env(),
-                    creationflags=CREATE_NO_WINDOW,
                     timeout=8,
+                    **hidden_subprocess_kwargs(),
                 )
                 cli_version = (pv.stdout or pv.stderr).strip()
             except Exception as exc:
@@ -324,8 +359,8 @@ class CodexAdapter:
                     capture_output=True,
                     text=True,
                     env=_safe_env(),
-                    creationflags=CREATE_NO_WINDOW,
                     timeout=8,
+                    **hidden_subprocess_kwargs(),
                 )
                 login_status = ((pl.stdout or "") + " " + (pl.stderr or "")).strip()
                 logged_in = pl.returncode == 0 and ("Logged in" in login_status)
@@ -406,12 +441,13 @@ class CodexAdapter:
         sandbox: str = "read-only",
         skip_git_check: bool = True,
         attempt_id: Optional[str] = None,
-        idle_timeout_sec: float = 240.0,
+        idle_timeout_sec: Optional[float] = None,
         max_transient_retries: int = 2,
         on_start: Optional[Callable[[int], None]] = None,
         on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
         on_partial_text: Optional[Callable[[str], None]] = None,
     ) -> CodexExecutionResult:
+        eff_idle_timeout = resolve_idle_timeout(reasoning_effort, idle_timeout_sec)
         requested_cfg = {
             "client": "codex",
             "model": model,
@@ -458,17 +494,20 @@ class CodexAdapter:
                 sandbox=sandbox,
                 skip_git_check=skip_git_check,
                 attempt_id=attempt_id,
-                idle_timeout_sec=idle_timeout_sec,
+                idle_timeout_sec=eff_idle_timeout,
                 requested_cfg=requested_cfg,
                 accepted_cfg=accepted_cfg,
                 on_start=on_start,
                 on_event=on_event,
                 on_partial_text=on_partial_text,
             )
-            if res.aborted or res.final_status == "succeeded" or res.policy_blocked or res.session_not_found:
+            if res.aborted or res.final_status == "succeeded" or res.policy_blocked or res.session_not_found or res.context_overflow:
                 return res
             combined_err = f"{res.error or ''}\n" + "\n".join(res.stderr_lines[-8:])
-            if retry_idx < max_transient_retries and is_transient_network_error(combined_err):
+            # Cap watchdog_idle_timeout retries to 1 so stalled calls fail over fast instead of burning 3x timeout!
+            is_watchdog = "watchdog_idle_timeout" in combined_err.lower()
+            allowed_retries = min(max_transient_retries, 1) if is_watchdog else max_transient_retries
+            if retry_idx < allowed_retries and is_transient_network_error(combined_err):
                 backoff = 2.0 * (retry_idx + 1)
                 if on_event:
                     on_event({
@@ -507,7 +546,7 @@ class CodexAdapter:
 
         argv = list(self._base_argv())
         if session_id:
-            argv.extend(["exec", "resume", session_id, "--json", "-c", 'approval_policy="never"', "-c", f'sandbox_mode="{sandbox}"'])
+            argv.extend(["exec", "resume", session_id, "--json", "-c", 'approval_policy="never"', "-c", f'sandbox_mode="{sandbox}"', "-c", "notify=[]"])
             if skip_git_check:
                 argv.append("--skip-git-repo-check")
             if model:
@@ -516,7 +555,7 @@ class CodexAdapter:
                 argv.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
             argv.append("-")
         else:
-            argv.extend(["exec", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"'])
+            argv.extend(["exec", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"', "-c", "notify=[]"])
             if skip_git_check:
                 argv.append("--skip-git-repo-check")
             if model:
@@ -542,7 +581,7 @@ class CodexAdapter:
             errors="replace",
             cwd=work_dir,
             env=_safe_env(),
-            creationflags=CREATE_NO_WINDOW,
+            **hidden_subprocess_kwargs(),
         )
 
         meta: Dict[str, Any] = {"abort_requested": False, "watchdog_timed_out": False, "last_io_ts": time.time()}
@@ -553,11 +592,27 @@ class CodexAdapter:
         def _watchdog_loop() -> None:
             if idle_timeout_sec <= 0:
                 return
+            last_hb_ts = time.time()
             while proc.poll() is None and not meta.get("abort_requested"):
-                if time.time() - meta["last_io_ts"] > idle_timeout_sec:
+                now_w = time.time()
+                silent = now_w - meta["last_io_ts"]
+                if silent > idle_timeout_sec:
                     meta["watchdog_timed_out"] = True
                     kill_process_tree(proc.pid)
                     break
+                # Soft live heartbeat during long deep-reasoning silence so UI clearly shows process is alive
+                if silent >= 45.0 and (now_w - last_hb_ts) >= 30.0:
+                    last_hb_ts = now_w
+                    if on_event:
+                        try:
+                            on_event({
+                                "type": "thinking.heartbeat",
+                                "activity_label": f"🧠 深度思考推理中（已静默 {int(silent)}s · 进程活跃）",
+                                "summary": f"深度思考推理中（已静默 {int(silent)}s / 上限 {int(idle_timeout_sec)}s）",
+                                "ts": now_w,
+                            })
+                        except Exception:
+                            pass
                 time.sleep(2.0)
 
         threading.Thread(target=_watchdog_loop, daemon=True).start()
@@ -568,11 +623,21 @@ class CodexAdapter:
             except Exception:
                 pass
 
+        # Prevent Windows Codex read-only sandbox policy blocks caused by multi-line PowerShell / $env: assignments
+        stdin_prompt = prompt
+        if os.name == "nt" and sandbox == "read-only" and not session_id:
+            ro_hygiene = (
+                "【Codex Windows 只读沙箱执行规范：严禁执行多行 PowerShell 脚本、$env: 环境变量赋值、"
+                "heredoc (@'...'@) 或文件重定向（会触发 policy 拦截导致本轮受阻）；"
+                "请仅使用简洁单行只读命令（如 Get-Content -TotalCount / Select-String / Get-ChildItem / 单行只读 python -c）。】\n\n"
+            )
+            stdin_prompt = ro_hygiene + prompt
+
         # Feed prompt via stdin and close stdin cleanly
         def _feed_stdin():
             try:
                 if proc.stdin:
-                    proc.stdin.write(prompt)
+                    proc.stdin.write(stdin_prompt)
                     proc.stdin.close()
             except Exception:
                 pass
@@ -734,7 +799,13 @@ class CodexAdapter:
                         )
                 elif ev_type == "turn.completed":
                     turn_completed = True
-                    usage_info = ev.get("usage") or {}
+                    usage_info = dict(ev.get("usage") or {})
+                    tool_calls_done = sum(
+                        1 for e in events
+                        if e.get("type") == "item.completed"
+                        and (e.get("item") or {}).get("type") in ("command_execution", "file_change", "mcp_tool_call", "web_search")
+                    )
+                    usage_info["internal_api_calls"] = max(1, 1 + tool_calls_done)
                     if on_event:
                         on_event(
                             {
@@ -785,6 +856,21 @@ class CodexAdapter:
         accepted_final["session_id"] = res_session_id
 
         partial_joined = partial_chunks[-1] if partial_chunks else response_text
+        succeeded_now = (not aborted) and (not policy_blocked) and exit_code == 0 and turn_completed
+        err_kind: Optional[str] = None
+        if not succeeded_now and not aborted:
+            err_kind, _sig = classify_turn_error(error_msg, stderr_lines, events)
+            if policy_blocked:
+                err_kind = "policy_blocked"
+            elif session_missing_flag["value"] and err_kind != "context_length_exceeded":
+                err_kind = "session_not_found"
+        ctx_overflow = err_kind == "context_length_exceeded"
+        if sandbox == "read-only":
+            se_state = "read_only"
+        elif changed_files or command_logs:
+            se_state = "mutated_verified" if succeeded_now else "unknown_mutation"
+        else:
+            se_state = "none"
 
         return CodexExecutionResult(
             session_id=res_session_id,
@@ -805,4 +891,7 @@ class CodexAdapter:
             command_logs=command_logs,
             changed_files=changed_files,
             edit_after_check=(last_file_edit_seq > last_ok_cmd_seq and last_file_edit_seq >= 0),
+            context_overflow=ctx_overflow,
+            error_kind=err_kind,
+            side_effect_state=se_state,
         )
