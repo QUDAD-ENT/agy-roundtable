@@ -30,6 +30,22 @@ CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.nam
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) if os.name == "nt" else 0
 
 
+def suppress_windows_crash_dialogs() -> int:
+    """Suppress blocking Win32 GP-fault / critical-error modal dialogs (e.g. 'Rterm.exe - 应用程序错误')
+    for this process and ALL inherited child/grandchild processes."""
+    if os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        # SEM_FAILCRITICALERRORS (0x0001) | SEM_NOGPFAULTERRORBOX (0x0002) | SEM_NOOPENFILEERRORBOX (0x8000)
+        return int(ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000))
+    except Exception:
+        return 0
+
+
+suppress_windows_crash_dialogs()
+
+
 def hidden_subprocess_kwargs(new_process_group: bool = False) -> Dict[str, Any]:
     """Win32 zero-popup subprocess flags: CREATE_NO_WINDOW (NEVER mixed with DETACHED_PROCESS!)
     + STARTF_USESHOWWINDOW / SW_HIDE so neither direct children nor grandchildren flash console windows."""
@@ -439,6 +455,7 @@ class CodexAdapter:
         reasoning_effort: Optional[str] = None,
         cwd: Optional[str] = None,
         sandbox: str = "read-only",
+        add_dirs: Optional[List[str]] = None,
         skip_git_check: bool = True,
         attempt_id: Optional[str] = None,
         idle_timeout_sec: Optional[float] = None,
@@ -448,11 +465,13 @@ class CodexAdapter:
         on_partial_text: Optional[Callable[[str], None]] = None,
     ) -> CodexExecutionResult:
         eff_idle_timeout = resolve_idle_timeout(reasoning_effort, idle_timeout_sec)
+        clean_add_dirs = [os.path.normpath(os.path.abspath(d)) for d in (add_dirs or []) if d and os.path.isdir(str(d).strip())]
         requested_cfg = {
             "client": "codex",
             "model": model,
             "reasoning_effort": reasoning_effort,
             "sandbox": sandbox,
+            "add_dirs": clean_add_dirs,
         }
         ok, err_reason, accepted_cfg = self.validate_model_effort(model, reasoning_effort)
         if not ok:
@@ -492,6 +511,7 @@ class CodexAdapter:
                 reasoning_effort=reasoning_effort,
                 cwd=cwd,
                 sandbox=sandbox,
+                add_dirs=clean_add_dirs,
                 skip_git_check=skip_git_check,
                 attempt_id=attempt_id,
                 idle_timeout_sec=eff_idle_timeout,
@@ -530,6 +550,7 @@ class CodexAdapter:
         reasoning_effort: Optional[str],
         cwd: Optional[str],
         sandbox: str,
+        add_dirs: Optional[List[str]],
         skip_git_check: bool,
         attempt_id: Optional[str],
         idle_timeout_sec: float,
@@ -540,13 +561,17 @@ class CodexAdapter:
         on_partial_text: Optional[Callable[[str], None]],
     ) -> CodexExecutionResult:
 
-        # P0-0 Hard Sandbox Trust Root: reject danger-full-access or any non-allowlisted sandbox mode!
-        if sandbox not in ("read-only", "workspace-write"):
-            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write）: {sandbox}")
+        # Allow the 3 official Codex sandbox tiers (explicit opt-in for danger-full-access is enforced at TeamOrchestrator trust root)
+        if sandbox not in ("read-only", "workspace-write", "danger-full-access"):
+            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write / danger-full-access）: {sandbox}")
 
+        valid_add_dirs = [os.path.normpath(os.path.abspath(d)) for d in (add_dirs or []) if d and os.path.isdir(str(d).strip())]
         argv = list(self._base_argv())
         if session_id:
             argv.extend(["exec", "resume", session_id, "--json", "-c", 'approval_policy="never"', "-c", f'sandbox_mode="{sandbox}"', "-c", "notify=[]"])
+            if valid_add_dirs and sandbox == "workspace-write":
+                roots_toml = "[" + ",".join(json.dumps(d.replace("\\", "/")) for d in valid_add_dirs) + "]"
+                argv.extend(["-c", f"sandbox_workspace_write.writable_roots={roots_toml}"])
             if skip_git_check:
                 argv.append("--skip-git-repo-check")
             if model:
@@ -556,6 +581,8 @@ class CodexAdapter:
             argv.append("-")
         else:
             argv.extend(["exec", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"', "-c", "notify=[]"])
+            for ad in valid_add_dirs:
+                argv.extend(["--add-dir", ad])
             if skip_git_check:
                 argv.append("--skip-git-repo-check")
             if model:
@@ -623,13 +650,16 @@ class CodexAdapter:
             except Exception:
                 pass
 
-        # Prevent Windows Codex read-only sandbox policy blocks caused by multi-line PowerShell / $env: assignments
+        # Prevent Windows Codex read-only sandbox crashes & policy blocks:
+        # 1) R 4.5.2 (Rscript.exe/Rterm.exe) segfaults with 0xc0000005 under Codex Windows read-only restricted token!
+        # 2) Multi-line PowerShell / $env: assignments / heredocs trigger policy rejection.
         stdin_prompt = prompt
         if os.name == "nt" and sandbox == "read-only" and not session_id:
             ro_hygiene = (
-                "【Codex Windows 只读沙箱执行规范：严禁执行多行 PowerShell 脚本、$env: 环境变量赋值、"
-                "heredoc (@'...'@) 或文件重定向（会触发 policy 拦截导致本轮受阻）；"
-                "请仅使用简洁单行只读命令（如 Get-Content -TotalCount / Select-String / Get-ChildItem / 单行只读 python -c）。】\n\n"
+                "【Codex Windows 只读沙箱执行规范（必守）：\n"
+                "1. 严禁在 read-only 只读沙箱内调用 Rscript / Rterm / R.exe（Windows 只读受限令牌下 R 启动会触发 0xc0000005 内存访问冲突崩溃）；"
+                "如需只读统计复算或核验 .R 脚本结果，请直接阅读源码/结果表或使用单行 python -c（pandas/numpy/scipy/statsmodels）复算；确需运行 R 脚本须由用户切换为 workspace-write 模式。\n"
+                "2. 严禁执行多行 PowerShell 脚本、$env: 环境变量赋值、heredoc (@'...'@) 或文件重定向（会触发 policy 拦截）；请仅使用简洁单行只读命令（Get-Content -TotalCount / Select-String / Get-ChildItem / 单行 python -c）。】\n\n"
             )
             stdin_prompt = ro_hygiene + prompt
 

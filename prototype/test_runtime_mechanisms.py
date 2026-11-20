@@ -3660,7 +3660,7 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
 
         # 2. Local VERSION.json loads cleanly
         loc = vc.get_local_version_info()
-        self.assertEqual(loc["version"], "5.5.0")
+        self.assertGreaterEqual(vc.compare_versions(loc["version"], "5.5.0"), 0)
         self.assertGreaterEqual(loc["server_rev"], 19)
 
         # 3. Simulated older installation (v5.4.0) detects newer GitHub VERSION.json (v5.5.0)
@@ -3715,6 +3715,152 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
         self.assertFalse(res_off["has_update"])
         self.assertEqual(res_off["source"], "local_only")
         self.assertTrue(bool(res_off["offline_or_error"]))
+
+    def test_33_v551_win32_crash_dialog_suppression_and_ro_rscript_guard(self) -> None:
+        """Verify Win32 SetErrorMode crash-dialog suppression and Windows read-only Rscript crash guardrail."""
+        from codex_adapter import suppress_windows_crash_dialogs
+
+        if os.name == "nt":
+            import ctypes
+            suppress_windows_crash_dialogs()
+            cur_mode = int(ctypes.windll.kernel32.GetErrorMode())
+            self.assertTrue(cur_mode & 0x0001, f"SEM_FAILCRITICALERRORS not set: {cur_mode:#x}")
+            self.assertTrue(cur_mode & 0x0002, f"SEM_NOGPFAULTERRORBOX not set: {cur_mode:#x}")
+
+        with open(os.path.join(PROTO_DIR, "codex_adapter.py"), encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("严禁在 read-only 只读沙箱内调用 Rscript", src)
+        self.assertIn("0xc0000005", src)
+
+    def test_34_v56_three_tier_sandbox_opt_in_add_dirs_per_seat_and_mcp_default(self) -> None:
+        """Verify v5.6.0 Scheme A: fail-closed danger-full-access opt-in, instant relock clamping, --add-dir propagation, per-seat roundtable overrides, and default sandbox inheritance."""
+        proj_dir = os.path.join(self.tmp_dir, f"v56_proj_{time.time_ns()}")
+        extra_dir = os.path.join(self.tmp_dir, f"v56_extra_data_{time.time_ns()}")
+        os.makedirs(proj_dir, exist_ok=True)
+        os.makedirs(extra_dir, exist_ok=True)
+
+        seen_calls: List[Dict[str, Any]] = []
+
+        def fake_runner(prompt, session_id, **kwargs):
+            req_cfg = dict(kwargs.get("requested_config") or {})
+            seen_calls.append({
+                "sandbox": kwargs.get("sandbox"),
+                "add_dirs": list(req_cfg.get("add_dirs") or []),
+                "cwd": kwargs.get("cwd"),
+            })
+            return CodexExecutionResult(
+                session_id=session_id or f"v56-{len(seen_calls)}",
+                response_text="ok",
+                partial_text="",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=req_cfg,
+                accepted_config=dict(kwargs.get("accepted_config") or {}),
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=fake_runner),
+            agy_adapter=AgyAdapter(runner_override=fake_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            orch.switch_project(proj_dir)
+
+            # 1. Fail-closed by default: danger-full-access is rejected everywhere before opt-in unlock
+            self.assertFalse(bool(orch.store.snapshot()["binding"].get("allow_danger_full_access", False)))
+            with self.assertRaises(ValueError):
+                orch.update_binding(max_sandbox="danger-full-access")
+            with self.assertRaises(ValueError):
+                orch.set_members_sandbox("danger-full-access", member_id="codex_author")
+            with self.assertRaises(ValueError):
+                orch.create_task(title="blocked", goal="blocked", execution_mode="single_member", sandbox="danger-full-access")
+
+            # Non-existent --add-dir is rejected cleanly
+            with self.assertRaises(ValueError):
+                orch.update_binding(extra_add_dirs=[os.path.join(self.tmp_dir, "does_not_exist_999")])
+
+            # 2. Explicit 2-step opt-in unlock + extra_add_dirs + default_task_sandbox inheritance
+            orch.update_binding(
+                allow_danger_full_access=True,
+                max_sandbox="danger-full-access",
+                default_task_sandbox="workspace-write",
+                extra_add_dirs=[extra_dir],
+            )
+            st_u = orch.store.snapshot()
+            self.assertTrue(st_u["binding"]["allow_danger_full_access"])
+            self.assertEqual(st_u["binding"]["max_sandbox"], "danger-full-access")
+            self.assertEqual(st_u["binding"]["extra_add_dirs"], [os.path.normpath(os.path.abspath(extra_dir))])
+
+            # sandbox=None (as MCP team_dispatch_task now sends) inherits settings['default_task_sandbox'] = workspace-write!
+            t_inh = orch.create_task(
+                title="MCP默认继承测试",
+                goal="测试默认继承 workspace-write",
+                execution_mode="single_member",
+                target_member_id="codex_author",
+                sandbox=None,
+            )
+            self.assertEqual(t_inh["sandbox"], "workspace-write")
+            self.assertEqual(t_inh["steps"][0]["sandbox"], "workspace-write")
+            self.assertIn(os.path.normpath(os.path.abspath(extra_dir)), t_inh["add_dirs"])
+
+            dl = time.time() + 10.0
+            while time.time() < dl:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_inh["id"])
+                if cur["status"] == "succeeded":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(cur["status"], "succeeded")
+            self.assertEqual(seen_calls[-1]["sandbox"], "workspace-write")
+            self.assertIn(os.path.normpath(os.path.abspath(extra_dir)), seen_calls[-1]["add_dirs"])
+
+            # 3. Tier 3 unlocked: member + Roundtable per-seat overrides (codex_author=danger-full-access, agy_gemini=read-only)
+            orch.set_members_sandbox("danger-full-access", member_id="codex_author")
+            self.assertEqual(orch.store.snapshot()["members"]["codex_author"]["sandbox"], "danger-full-access")
+            orch.update_binding(default_task_sandbox="danger-full-access")
+
+            seen_calls.clear()
+            t_rt = orch.create_task(
+                title="圆桌单席三档权限验证",
+                goal="测试单席混合权限与 --add-dir",
+                execution_mode="roundtable",
+                participants=["codex_author", "agy_gemini"],
+                host_member_id="codex_author",
+                discussion_rounds=1,
+                enable_host_opening=False,
+                sandbox="danger-full-access",
+                seat_sandboxes={"codex_author": "danger-full-access", "agy_gemini": "read-only"},
+            )
+            step_codex = next(s for s in t_rt["steps"] if s["step_type"] == "discussion" and s["member_id"] == "codex_author")
+            step_agy = next(s for s in t_rt["steps"] if s["step_type"] == "discussion" and s["member_id"] == "agy_gemini")
+            self.assertEqual(step_codex["sandbox"], "danger-full-access")
+            self.assertFalse(step_codex["read_only"])
+            self.assertEqual(step_agy["sandbox"], "read-only")
+            self.assertTrue(step_agy["read_only"])
+
+            dl = time.time() + 12.0
+            while time.time() < dl:
+                cur_rt = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t_rt["id"])
+                if cur_rt["status"] == "succeeded":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(cur_rt["status"], "succeeded")
+            sbs_seen = {c["sandbox"] for c in seen_calls}
+            self.assertIn("danger-full-access", sbs_seen)
+            self.assertIn("read-only", sbs_seen)
+            self.assertTrue(all(os.path.normpath(os.path.abspath(extra_dir)) in c["add_dirs"] for c in seen_calls))
+
+            # 4. Instant Relock clamps binding.max_sandbox, settings.default_task_sandbox, and all members[*].sandbox back to workspace-write!
+            orch.update_binding(allow_danger_full_access=False)
+            st_lk = orch.store.snapshot()
+            self.assertFalse(st_lk["binding"]["allow_danger_full_access"])
+            self.assertEqual(st_lk["binding"]["max_sandbox"], "workspace-write")
+            self.assertEqual(st_lk["settings"]["default_task_sandbox"], "workspace-write")
+            self.assertEqual(st_lk["members"]["codex_author"]["sandbox"], "workspace-write")
+            with self.assertRaises(ValueError):
+                orch.create_task(title="relocked", goal="relocked", execution_mode="single_member", sandbox="danger-full-access")
+        finally:
+            orch.stop_scheduler()
 
 
 if __name__ == "__main__":

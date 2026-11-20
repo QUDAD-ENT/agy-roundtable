@@ -26,10 +26,12 @@ PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 if PROTO_DIR not in sys.path:
     sys.path.insert(0, PROTO_DIR)
 
-from codex_adapter import CREATE_NO_WINDOW, get_runtime_dirs, hidden_subprocess_kwargs
+from codex_adapter import CREATE_NO_WINDOW, get_runtime_dirs, hidden_subprocess_kwargs, suppress_windows_crash_dialogs
 from figure_qa import inspect_any_figure
 from team_runtime import TeamOrchestrator
 from version_checker import check_for_updates, get_local_version_info
+
+suppress_windows_crash_dialogs()
 
 PORT = int(os.environ.get("TEAM_SIDEBAR_PORT", "8765"))
 ORCHESTRATOR = TeamOrchestrator()
@@ -690,6 +692,9 @@ class SidebarHandler(BaseHTTPRequestHandler):
             elif route == "/api/fs/pick_native":
                 res = ORCHESTRATOR.pick_project_native()
                 self._send_json(200, {"ok": True, **res})
+            elif route == "/api/fs/pick_dir":
+                res = ORCHESTRATOR.pick_dir_native(body.get("initial_path") or None)
+                self._send_json(200, {"ok": True, **res})
             elif route == "/api/fs/open_explorer":
                 proj_p = body.get("path") or ORCHESTRATOR.store.snapshot()["binding"]["project_path"]
                 if os.path.isdir(proj_p):
@@ -724,6 +729,8 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     max_sandbox=body.get("max_sandbox"),
                     default_task_sandbox=body.get("default_task_sandbox"),
                     roundtable_allow_member_writes=body.get("roundtable_allow_member_writes"),
+                    allow_danger_full_access=body.get("allow_danger_full_access"),
+                    extra_add_dirs=body.get("extra_add_dirs"),
                 )
                 self._send_json(200, {"ok": True, "binding": res})
             elif route == "/api/roles":
@@ -837,7 +844,9 @@ class SidebarHandler(BaseHTTPRequestHandler):
                     steps=body.get("steps"),
                     project_path=body.get("project_path"),
                     workspace_scope=body.get("workspace_scope"),
-                    sandbox=body.get("sandbox", "read-only"),
+                    sandbox=body.get("sandbox"),
+                    add_dirs=body.get("add_dirs"),
+                    seat_sandboxes=body.get("seat_sandboxes"),
                     max_auto_repairs=body.get("max_auto_repairs"),
                     require_manual_ruling=bool(body.get("require_manual_ruling", False)),
                     reuse_member_session=bool(body.get("reuse_member_session", False)),

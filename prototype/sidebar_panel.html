@@ -1728,6 +1728,124 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    /* v5.6.0 Three-Tier Sandbox Center, Topbar Pill & Per-Seat Permission Badges */
+    .sb-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 26px;
+      height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      background: var(--surface-subtle);
+      color: var(--text-2);
+      transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+    }
+    .sb-pill:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--text); }
+    .sb-pill.sb-rw {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-color: var(--accent-border);
+    }
+    .sb-pill.sb-danger {
+      background: var(--err-soft);
+      color: var(--err);
+      border-color: var(--err-border);
+    }
+    .sb-tier-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 10px;
+      margin: 10px 0 14px;
+    }
+    .sb-tier-card {
+      background: var(--surface-subtle);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .sb-tier-card.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .sb-tier-card.danger {
+      border-color: var(--err-border);
+    }
+    .sb-tier-card.danger.active {
+      border-color: var(--err);
+      background: var(--err-soft);
+    }
+    .sb-tier-title {
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      color: var(--text);
+    }
+    .sb-tier-desc {
+      font-size: 11.5px;
+      color: var(--text-2);
+      line-height: 1.45;
+      flex: 1;
+    }
+    .add-dir-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .add-dir-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 7px;
+      background: var(--surface-subtle);
+      border: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .add-dir-path {
+      font-family: "Cascadia Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11.5px;
+      color: var(--text);
+      overflow-wrap: anywhere;
+      min-width: 0;
+      flex: 1;
+    }
+    .seat-sb-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 20px;
+      min-width: 22px;
+      padding: 0 5px;
+      border-radius: 999px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text-2);
+      font-size: 10.5px;
+      font-family: inherit;
+      cursor: pointer;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .seat-sb-btn.rw { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-border); }
+    .seat-sb-btn.danger { background: var(--err-soft); color: var(--err); border-color: var(--err-border); }
   </style>
 </head>
 <body>
@@ -1752,7 +1870,7 @@
       <div class="brand">
         <span class="brand-mark" id="brand-icon"></span>
         <span>AGY Roundtable</span>
-        <button type="button" id="btn-ver-pill" class="tag tabular" style="height:20px; min-height:20px; padding:0 6px; font-size:10.5px; cursor:pointer; border:1px solid var(--border); background:var(--surface-subtle); color:var(--text-2); margin-left:2px; flex-shrink:0;" onclick="onVersionPillClick()" title="版本与更新检查">v5.5.0</button>
+        <button type="button" id="btn-ver-pill" class="tag tabular" style="height:20px; min-height:20px; padding:0 6px; font-size:10.5px; cursor:pointer; border:1px solid var(--border); background:var(--surface-subtle); color:var(--text-2); margin-left:2px; flex-shrink:0;" onclick="onVersionPillClick()" title="版本与更新检查">v5.6.0</button>
       </div>
       <div class="v-sep"></div>
       <div class="proj-picker">
@@ -1779,6 +1897,7 @@
 
     <div class="topbar-right">
       <span id="paused-pill" class="tag tag-warn hidden"></span>
+      <button type="button" id="btn-sandbox-pill" class="sb-pill sb-ro" onclick="openSandboxModal()" title="沙箱与目录权限中心">🔒 只读</button>
       <button class="kbd-pill" id="btn-cmd-k" onclick="openCmdK()" title="Quick Switch Specialist & Actions (Ctrl+K)" aria-label="Quick Switch Specialist"></button>
       <button class="btn btn-sm" id="btn-new-task" onclick="toggleComposerOpen()" aria-label="New Task"></button>
       <button class="btn btn-ghost btn-icon" id="btn-theme-toggle" onclick="toggleTheme()" title="Toggle Theme" aria-label="Toggle Theme"></button>
@@ -1801,12 +1920,14 @@
             <button class="seg-btn" data-mode="custom_dag" onclick="selectComposerMode('custom_dag')"></button>
             <button class="seg-btn" data-mode="single_member" onclick="selectComposerMode('single_member')"></button>
           </div>
-          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:100%;">
-            <select id="cmp-sandbox" style="width:auto; max-width:100%; min-height:29px; padding:4px 26px 4px 8px; font-size:12px;" onchange="CMP.sandboxUserTouched=true; renderComposerStudio(); renderFigureContractStrip();"></select>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; max-width:100%;">
+            <select id="cmp-sandbox" style="width:auto; max-width:100%; min-height:29px; padding:4px 26px 4px 8px; font-size:12px;" onchange="CMP.sandboxUserTouched=true; renderComposerStudio(); renderFigureContractStrip(); renderComposerSandboxBanner();"></select>
+            <button type="button" class="btn btn-sec btn-xs" id="btn-cmp-perm-center" onclick="openSandboxModal()" title="沙箱与跨目录权限中心">🛡️ 权限中心</button>
             <button class="btn btn-ghost btn-icon hidden" id="btn-close-composer" onclick="setComposerOpen(false)" title="Close"></button>
           </div>
         </div>
 
+        <div id="composer-sandbox-banner"></div>
         <div id="composer-mode-hint" class="composer-mode-hint"></div>
         <div id="composer-mode-studio"></div>
         <div id="composer-playbooks-bar" class="preset-strip" style="margin-bottom:8px;"></div>
@@ -2440,10 +2561,54 @@
         permCodexLockAll: 'Codex 全只读',
         permWritableTag: '可改文件',
         permReadOnlyTag: '只读',
-        permToggleTip: '点击切换该成员的文件修改权限 (read-only / workspace-write)',
+        permFullTag: '完全访问',
+        permToggleTip: '点击循环切换该成员的文件权限（只读 / 项目可写 / 已解锁时含完全访问）',
         mSandbox: '文件修改权限 (Sandbox)',
         rtAllowWrites: '圆桌允许可写成员直接改文件',
         permUpdatedToast: '已更新文件权限：{msg}',
+        sandboxFull: '⚠️ 完全访问 (danger-full-access)',
+        sbCenterTitle: '沙箱与目录权限中心',
+        sbCenterSub: '完全由你自主控制 AI 可读写范围：默认安全隔离，跨盘目录按需授权，高危完全访问需二次确认解锁并可随时一键回收。',
+        sbPillRo: '🔒 只读',
+        sbPillRw: '✏️ 可写',
+        sbPillFull: '⚠️ 完全访问',
+        sbTierRoTitle: '🔒 只读模式',
+        sbTierRoDesc: '仅允许读取与核验文件，禁止任何写入。适合纯审稿、只读问答与防误改审计（Windows 只读下自动规避 R 崩溃并改用 Python 核验）。',
+        sbTierRwTitle: '✏️ 项目目录可写',
+        sbTierRwDesc: '日常科研与开发推荐：允许在当前项目目录及下方授权的附加目录 (--add-dir) 内改代码、画图与正常运行 R/Python 脚本。',
+        sbTierFullTitle: '⚠️ 完全访问（无沙箱）',
+        sbTierFullDesc: '解除文件系统与网络沙箱拦截（danger-full-access），可读写本机任意路径、调用系统工具与在线安装依赖。默认安全锁定，仅在确有需要时解锁。',
+        sbActiveTag: '当前默认',
+        sbLockedTag: '安全锁定',
+        sbUnlockedTag: '已解锁',
+        sbSetDefaultBtn: '设为默认任务权限',
+        sbLockGlobalRoBtn: '全局锁死为只读',
+        sbUnlockBtn: '解锁完全访问（需二次确认）',
+        sbRelockBtn: '立即重新锁定并回收',
+        sbUnlockConfirmTitle: '⚠️ 二次风险确认：解锁完全访问 (danger-full-access)',
+        sbUnlockConfirmBody: '解锁后，你可在任务或成员配置中主动选择 danger-full-access：该模式会关闭 CLI 文件沙箱隔离，AI 将拥有当前 Windows 账户的完整读写与命令执行权限（包括当前项目目录之外的文件）。',
+        sbUnlockConfirmTip: '如果仅需访问外部数据盘/文件夹（如 H:\\BioData），更推荐使用「项目目录可写 + 附加授权目录 (--add-dir)」以保持最小权限隔离。',
+        sbUnlockConfirmCheck: '我已了解无沙箱完全访问的风险，确认解锁 danger-full-access 选项（随时可在权限中心一键重新锁定回收）',
+        sbUnlockConfirmGo: '确认解锁完全访问',
+        sbUnlockedToast: '已解锁 danger-full-access（上限已提升，随时可重新锁定回收）',
+        sbRelockedToast: '已立即重新锁定！所有 danger-full-access 配置已安全回退至 workspace-write',
+        sbAddDirsTitle: '附加跨盘/外部授权目录 (--add-dir)',
+        sbAddDirsSub: '在「项目目录可写」下额外放行的目录（最多 8 个），Codex 与 Antigravity CLI 均可直接读写，无需放开整机权限。',
+        sbAddDirPh: '粘贴目录路径，如 H:\\project 1\\BioData',
+        sbAddDirAdd: '添加目录',
+        sbAddDirPick: '系统选目录',
+        sbAddDirEmpty: '暂未添加外部授权目录（当前仅限绑定项目根目录）。',
+        sbAddDirAdded: '已添加授权目录：{dir}',
+        sbAddDirRemoved: '已移除授权目录',
+        sbDangerBanner: '⚠️ 当前任务已选择「完全访问 (danger-full-access)」：沙箱隔离已关闭，AI 可读写本机任意路径与执行完整命令。请确认目标明确无误。',
+        sbExtraDirsInfo: '附加授权目录 (--add-dir)：已放行 {n} 个外部目录',
+        sbSeatTip: '点击切换该席位本场圆桌权限（当前：{sb}）',
+        sbPermCenterBtn: '权限中心',
+        sbBatchTitle: '快捷开关与引擎批量授权',
+        sbAgyAllowAll: 'AGY 全可改',
+        sbAgyLockAll: 'AGY 全只读',
+        sbCodexFullAll: 'Codex 完全访问',
+        sbOpenCenterLink: '打开沙箱与目录权限中心…',
         verCheckBtn: '检查 GitHub 新版本',
         verUpToDate: '当前已是最新版本 v{v}',
         verUpdateTitle: '发现 AGY Roundtable 新版本！',
@@ -2842,10 +3007,54 @@
         permCodexLockAll: 'Codex Read-Only',
         permWritableTag: 'Writable',
         permReadOnlyTag: 'Read-only',
-        permToggleTip: 'Click to toggle member file-edit permission (read-only / workspace-write)',
+        permFullTag: 'Full Access',
+        permToggleTip: 'Click to cycle member file-edit permission (read-only / workspace-write / danger-full-access if unlocked)',
         mSandbox: 'File Permission (Sandbox)',
         rtAllowWrites: 'Allow writable members to edit files in Roundtable',
         permUpdatedToast: 'Permissions updated: {msg}',
+        sandboxFull: '⚠️ Full Access (danger-full-access)',
+        sbCenterTitle: 'Sandbox & Directory Permission Center',
+        sbCenterSub: 'You control exact AI filesystem boundaries: safe by default, grant extra cross-drive folders via --add-dir, or unlock danger-full-access with 2-step confirmation (instantly relockable).',
+        sbPillRo: '🔒 RO',
+        sbPillRw: '✏️ RW',
+        sbPillFull: '⚠️ Full',
+        sbTierRoTitle: '🔒 Read-Only',
+        sbTierRoDesc: 'Strict read-only inspection and peer review; zero file edits allowed. Safe for auditing and QA.',
+        sbTierRwTitle: '✏️ Workspace-Write',
+        sbTierRwDesc: 'Recommended for coding, figures & R/Python execution: edits allowed inside the bound workspace plus any granted --add-dir folders below.',
+        sbTierFullTitle: '⚠️ Full Access (Unsandboxed)',
+        sbTierFullDesc: 'Disables CLI sandbox restrictions (danger-full-access) for arbitrary host paths, system tools, and installs. Locked by default until explicitly unlocked.',
+        sbActiveTag: 'Default',
+        sbLockedTag: 'Locked',
+        sbUnlockedTag: 'Unlocked',
+        sbSetDefaultBtn: 'Set as Default Task Mode',
+        sbLockGlobalRoBtn: 'Lock Global Ceiling Read-Only',
+        sbUnlockBtn: 'Unlock Full Access (2-Step)',
+        sbRelockBtn: 'Relock & Clamp Now',
+        sbUnlockConfirmTitle: '⚠️ Confirm Risk: Unlock Full Access (danger-full-access)',
+        sbUnlockConfirmBody: 'Unlocking enables choosing danger-full-access for tasks or members, disabling CLI sandbox boundaries so AI runs with full user-level filesystem and shell privileges outside the workspace.',
+        sbUnlockConfirmTip: 'If you only need access to another folder/drive (e.g. H:\\BioData), prefer Workspace-Write + Extra Authorized Directories (--add-dir) for least privilege.',
+        sbUnlockConfirmCheck: 'I understand the risks of unsandboxed full access and confirm unlocking danger-full-access (revocable anytime).',
+        sbUnlockConfirmGo: 'Confirm Unlock',
+        sbUnlockedToast: 'Unlocked danger-full-access (revocable anytime from Permission Center)',
+        sbRelockedToast: 'Relocked! All danger-full-access settings clamped back to workspace-write',
+        sbAddDirsTitle: 'Extra Authorized Directories (--add-dir)',
+        sbAddDirsSub: 'Additional folders (up to 8) granted under Workspace-Write to both Codex & Antigravity CLI without enabling full-machine access.',
+        sbAddDirPh: 'Paste folder path, e.g. H:\\project 1\\BioData',
+        sbAddDirAdd: 'Add Folder',
+        sbAddDirPick: 'OS Folder Picker',
+        sbAddDirEmpty: 'No extra directories granted yet (scoped to active workspace only).',
+        sbAddDirAdded: 'Granted extra directory: {dir}',
+        sbAddDirRemoved: 'Removed extra directory',
+        sbDangerBanner: '⚠️ Full Access (danger-full-access) selected for this task: CLI sandbox isolation is disabled. Verify scope carefully before launching.',
+        sbExtraDirsInfo: 'Extra Authorized Dirs (--add-dir): {n} folder(s) granted',
+        sbSeatTip: 'Click to override this seat permission (current: {sb})',
+        sbPermCenterBtn: 'Permissions',
+        sbBatchTitle: 'Quick Toggles & Engine Batch Permissions',
+        sbAgyAllowAll: 'AGY Write All',
+        sbAgyLockAll: 'AGY Read-Only',
+        sbCodexFullAll: 'Codex Full Access',
+        sbOpenCenterLink: 'Open Sandbox & Directory Center…',
         verCheckBtn: 'Check GitHub Updates',
         verUpToDate: 'Already on latest version v{v}',
         verUpdateTitle: 'New AGY Roundtable Version Available!',
@@ -2861,8 +3070,8 @@
       }
     };
 
-    const CLIENT_APP_VERSION = '5.5.0';
-    const CLIENT_SERVER_REV = 19;
+    const CLIENT_APP_VERSION = '5.6.0';
+    const CLIENT_SERVER_REV = 21;
     let UPDATE_INFO = null;
     let LOCAL_UPGRADE_NOTIFIED_REV = 0;
 
@@ -2912,6 +3121,7 @@
       mode: 'roundtable',
       initialized: false,
       rtParticipants: [],
+      rtSeatSandboxes: {}, // memberId -> 'read-only' | 'workspace-write' | 'danger-full-access'
       rtHost: '',
       rtRounds: 2,
       rtHostOpening: false,
@@ -3188,13 +3398,11 @@
         btn.textContent = modeMap[btn.getAttribute('data-mode')];
       });
 
-      const sb = document.getElementById('cmp-sandbox');
-      const prevSb = sb.value || 'read-only';
-      sb.innerHTML = `
-        <option value="read-only">${esc(t('sandboxRo'))}</option>
-        <option value="workspace-write">${esc(t('sandboxRw'))}</option>
-      `;
-      sb.value = prevSb;
+      syncSandboxSelects(STATE);
+      updateSandboxPill(STATE);
+      renderComposerSandboxBanner();
+      const permBtn = document.getElementById('btn-cmp-perm-center');
+      if (permBtn) permBtn.textContent = '🛡️ ' + t('sbPermCenterBtn');
 
       document.getElementById('cmp-goal').placeholder = t('goalPlaceholder');
       document.getElementById('cmp-adv-summary').textContent = t('advSummary');
@@ -3421,9 +3629,14 @@
 
         <div class="pop-sec">
           <div class="pop-title">${esc(t('secPerms'))}</div>
+          <button class="pop-item-btn" id="btn-pop-open-sandbox-center" style="color:var(--accent); font-weight:600;" onclick="closeUtilsMenu(); openSandboxModal();">
+            <span>🛡️ ${esc(t('sbOpenCenterLink'))}</span>
+            <span class="tag ${STATE?.binding?.allow_danger_full_access ? 'tag-err' : ((STATE?.binding?.extra_add_dirs || []).length ? 'tag-accent' : '')}" style="font-size:10.5px;">${esc(STATE?.binding?.allow_danger_full_access ? t('sbUnlockedTag') : ((STATE?.binding?.extra_add_dirs || []).length ? `+${STATE.binding.extra_add_dirs.length} dir` : (STATE?.settings?.default_task_sandbox || 'read-only')))}</span>
+          </button>
           <div class="pop-row" style="padding:3px 0; gap:8px;">
             <span style="font-size:12px; color:var(--text-2); flex-shrink:0;">${esc(t('permMaxSandbox'))}</span>
             <select id="cfg-max-sandbox" style="width:146px; height:24px; padding:0 6px; font-size:11.5px;" onchange="updateContextSetting({ max_sandbox: this.value })">
+              ${STATE?.binding?.allow_danger_full_access ? `<option value="danger-full-access" ${(STATE?.binding?.max_sandbox || 'workspace-write') === 'danger-full-access' ? 'selected' : ''}>${esc(t('sandboxFull'))}</option>` : ''}
               <option value="workspace-write" ${(STATE?.binding?.max_sandbox || 'workspace-write') === 'workspace-write' ? 'selected' : ''}>${esc(t('sandboxRw'))}</option>
               <option value="read-only" ${(STATE?.binding?.max_sandbox || 'workspace-write') === 'read-only' ? 'selected' : ''}>${esc(t('sandboxRo'))}</option>
             </select>
@@ -3431,7 +3644,8 @@
           <div class="pop-row" style="padding:3px 0; gap:8px;">
             <span style="font-size:12px; color:var(--text-2); flex-shrink:0;">${esc(t('permDefaultTask'))}</span>
             <select id="cfg-default-task-sandbox" style="width:146px; height:24px; padding:0 6px; font-size:11.5px;" onchange="updateDefaultTaskSandbox(this.value)">
-              <option value="workspace-write" ${(STATE?.settings?.default_task_sandbox || 'read-only') === 'workspace-write' ? 'selected' : ''}>${esc(t('sandboxRw'))}</option>
+              ${(STATE?.binding?.allow_danger_full_access && (STATE?.binding?.max_sandbox || 'workspace-write') === 'danger-full-access') ? `<option value="danger-full-access" ${(STATE?.settings?.default_task_sandbox || 'read-only') === 'danger-full-access' ? 'selected' : ''}>${esc(t('sandboxFull'))}</option>` : ''}
+              <option value="workspace-write" ${(STATE?.settings?.default_task_sandbox || 'read-only') === 'workspace-write' ? 'selected' : ''} ${(STATE?.binding?.max_sandbox || 'workspace-write') === 'read-only' ? 'disabled' : ''}>${esc(t('sandboxRw'))}</option>
               <option value="read-only" ${(STATE?.settings?.default_task_sandbox || 'read-only') === 'read-only' ? 'selected' : ''}>${esc(t('sandboxRo'))}</option>
             </select>
           </div>
@@ -4053,12 +4267,21 @@
           ? `<span class="tag tag-ok"><span class="dot dot-ok"></span>${esc(t('squadHealthOk'))}</span>`
           : `<span class="tag tag-warn"><span class="dot dot-warn"></span>${esc(t('squadHealthWarn'))}</span>`;
 
+        const curTaskSb = document.getElementById('cmp-sandbox')?.value || 'read-only';
+        const effAllowWrites = Boolean(CMP.rtAllowWrites ?? STATE?.settings?.roundtable_allow_member_writes);
         const chips = ids.map(id => {
           const m = ms[id];
           const sel = CMP.rtParticipants.includes(id);
           const isHost = id === CMP.rtHost;
           const spec = m.specialty || '';
           const specShort = spec ? spec.split('·')[0].trim() : m.model;
+          let seatSbHtml = '';
+          if (sel && curTaskSb !== 'read-only') {
+            const effSeatSb = getEffectiveRtSeatSandbox(id, curTaskSb, effAllowWrites);
+            const sbCls = effSeatSb === 'danger-full-access' ? 'danger' : (effSeatSb === 'workspace-write' ? 'rw' : '');
+            const sbIcon = effSeatSb === 'danger-full-access' ? '⚠️' : (effSeatSb === 'workspace-write' ? '✏️' : '🔒');
+            seatSbHtml = `<button type="button" class="seat-sb-btn ${sbCls}" onclick="event.stopPropagation(); cycleRtSeatSandbox('${esc(id)}')" title="${esc(t('sbSeatTip', { sb: effSeatSb }))}">${sbIcon}</button>`;
+          }
           return `
             <div class="seat-pill ${sel ? 'selected' : ''}" onclick="toggleRtParticipant('${esc(id)}')" title="${esc(spec ? `${m.name} — ${spec}` : m.name)}">
               ${avatarHtml(id, m, { sm: true })}
@@ -4067,6 +4290,7 @@
                 <span class="seat-pill-spec">${esc(specShort)}</span>
               </div>
               <div class="seat-pill-actions">
+                ${seatSbHtml}
                 ${sel && isHost ? `<span class="host-badge">${svgIcon('crown', 11)}${esc(t('hostTag'))}</span>` : ''}
                 ${sel && !isHost ? `<button type="button" class="host-set-btn" onclick="event.stopPropagation(); setRtHost('${esc(id)}')">${esc(t('setHost'))}</button>` : ''}
                 <button type="button" class="pill-edit-btn" onclick="event.stopPropagation(); openSwitchMemberModal('${esc(id)}')" title="${esc(t('editMember'))}" aria-label="${esc(t('editMember'))}">${svgIcon('edit', 11)}</button>
@@ -4129,9 +4353,9 @@
                   <input type="checkbox" style="width:auto;" ${CMP.rtAnonymousPeer ? 'checked' : ''} onchange="CMP.rtAnonymousPeer=this.checked; renderComposerStudio();">
                   <span>${esc(t('rtAnonPeer'))}</span>
                 </label>
-                ${(document.getElementById('cmp-sandbox')?.value === 'workspace-write') ? `
-                  <label style="display:inline-flex; align-items:center; gap:5px; margin:0; cursor:pointer; font-size:12px; color:var(--accent); white-space:nowrap;">
-                    <input type="checkbox" id="cmp-rt-allow-writes" style="width:auto;" ${(CMP.rtAllowWrites ?? Boolean(STATE?.settings?.roundtable_allow_member_writes)) ? 'checked' : ''} onchange="CMP.rtAllowWrites=this.checked;">
+                ${(curTaskSb !== 'read-only') ? `
+                  <label style="display:inline-flex; align-items:center; gap:5px; margin:0; cursor:pointer; font-size:12px; color:${curTaskSb === 'danger-full-access' ? 'var(--err)' : 'var(--accent)'}; white-space:nowrap;">
+                    <input type="checkbox" id="cmp-rt-allow-writes" style="width:auto;" ${effAllowWrites ? 'checked' : ''} onchange="CMP.rtAllowWrites=this.checked; renderComposerStudio();">
                     <span>${esc(t('rtAllowWrites'))}</span>
                   </label>
                 ` : ''}
@@ -4656,14 +4880,17 @@
       document.getElementById('paused-pill').classList.toggle('hidden', !st.paused);
 
       const runnableIds = getRunnableIds(st);
+      syncSandboxSelects(st);
+      updateSandboxPill(st);
       const cmpSbEl = document.getElementById('cmp-sandbox');
       if (cmpSbEl && !CMP.sandboxUserTouched) {
         const defSb = st.settings?.default_task_sandbox || 'read-only';
-        if (cmpSbEl.value !== defSb && ['read-only', 'workspace-write'].includes(defSb)) {
+        if (cmpSbEl.value !== defSb && Array.from(cmpSbEl.options).some(o => o.value === defSb && !o.disabled)) {
           cmpSbEl.value = defSb;
           renderFigureContractStrip();
         }
       }
+      renderComposerSandboxBanner();
       const memberSig = JSON.stringify(runnableIds.map(id => [id, st.members[id].name, st.members[id].client, st.members[id].model, st.members[id].reasoning_effort, st.members[id].role, st.members[id].sandbox]));
       if (memberSig !== LAST_MEMBER_SIG) {
         LAST_MEMBER_SIG = memberSig;
@@ -6255,8 +6482,8 @@
             </div>
             <div class="member-card-badges">
               ${engineTag(m.client)}
-              <button type="button" class="tag ${(m.sandbox || 'read-only') === 'workspace-write' ? 'tag-accent' : ''}" style="min-height:20px; font-size:10.5px; cursor:pointer; border:1px solid var(--border-strong);" onclick="toggleMemberSandbox('${esc(id)}', '${esc(m.sandbox || 'read-only')}')" title="${esc(t('permToggleTip'))}">
-                ${(m.sandbox || 'read-only') === 'workspace-write' ? '✏️ ' + esc(t('permWritableTag')) : '🔒 ' + esc(t('permReadOnlyTag'))}
+              <button type="button" class="tag ${(m.sandbox || 'read-only') === 'danger-full-access' ? 'tag-err' : ((m.sandbox || 'read-only') === 'workspace-write' ? 'tag-accent' : '')}" style="min-height:20px; font-size:10.5px; cursor:pointer; border:1px solid var(--border-strong);" onclick="toggleMemberSandbox('${esc(id)}', '${esc(m.sandbox || 'read-only')}')" title="${esc(t('permToggleTip'))}">
+                ${(m.sandbox || 'read-only') === 'danger-full-access' ? '⚠️ ' + esc(t('permFullTag')) : ((m.sandbox || 'read-only') === 'workspace-write' ? '✏️ ' + esc(t('permWritableTag')) : '🔒 ' + esc(t('permReadOnlyTag')))}
               </button>
               ${gm === 'strict' ? `<span class="tag tag-ok" style="min-height:20px; font-size:10.5px;">${svgIcon('shield', 10)}Strict</span>` : ''}
               ${m.backup_of ? `<span class="tag tag-accent" style="min-height:20px; font-size:10.5px;">${esc(t('backupTag'))} · ${esc(m.backup_of)}</span>` : ''}
@@ -6340,8 +6567,17 @@
         payload.discussion_rounds = CMP.rtRounds;
         payload.enable_host_opening = Boolean(CMP.rtHostOpening);
         payload.anonymous_peer_review = Boolean(CMP.rtAnonymousPeer);
-        if (payload.sandbox === 'workspace-write') {
+        if (payload.sandbox !== 'read-only') {
           payload.allow_member_writes = Boolean(CMP.rtAllowWrites ?? STATE?.settings?.roundtable_allow_member_writes);
+          const seatMap = {};
+          for (const pid of CMP.rtParticipants) {
+            if (CMP.rtSeatSandboxes && CMP.rtSeatSandboxes[pid]) {
+              seatMap[pid] = CMP.rtSeatSandboxes[pid];
+            }
+          }
+          if (Object.keys(seatMap).length > 0) {
+            payload.seat_sandboxes = seatMap;
+          }
         }
       } else if (mode === 'chief_dispatch') {
         payload.chief_member_id = CMP.chiefId;
@@ -7466,6 +7702,7 @@
         <div style="margin-bottom:10px;">
           <label>${esc(t('mSandbox'))}</label>
           <select id="sw-sandbox">
+            ${(STATE?.binding?.allow_danger_full_access && (STATE?.binding?.max_sandbox || 'workspace-write') === 'danger-full-access') ? `<option value="danger-full-access" ${(m.sandbox || 'read-only') === 'danger-full-access' ? 'selected' : ''}>${esc(t('sandboxFull'))}</option>` : ''}
             <option value="workspace-write" ${(m.sandbox || 'read-only') === 'workspace-write' ? 'selected' : ''}>${esc(t('sandboxRw'))} (workspace-write)</option>
             <option value="read-only" ${(m.sandbox || 'read-only') === 'read-only' ? 'selected' : ''}>${esc(t('sandboxRo'))} (read-only)</option>
           </select>
@@ -7492,8 +7729,338 @@
       if (focusName) setTimeout(() => document.getElementById('sw-name')?.focus(), 40);
     }
 
+    // ==================== v5.6.0 THREE-TIER SANDBOX & DIRECTORY PERMISSION CENTER ====================
+    function isDangerFullAccessAvailable(st) {
+      const b = st?.binding || {};
+      return Boolean(b.allow_danger_full_access) && (b.max_sandbox || 'workspace-write') === 'danger-full-access';
+    }
+
+    function syncSandboxSelects(st) {
+      const b = st?.binding || {};
+      const maxSb = b.max_sandbox || 'workspace-write';
+      const allowDanger = isDangerFullAccessAvailable(st);
+      const buildOpts = (cur) => {
+        const opts = [];
+        opts.push(`<option value="read-only" ${cur === 'read-only' ? 'selected' : ''}>${esc(t('sandboxRo'))}</option>`);
+        opts.push(`<option value="workspace-write" ${cur === 'workspace-write' ? 'selected' : ''} ${maxSb === 'read-only' ? 'disabled' : ''}>${esc(t('sandboxRw'))}</option>`);
+        if (allowDanger) {
+          opts.push(`<option value="danger-full-access" ${cur === 'danger-full-access' ? 'selected' : ''}>${esc(t('sandboxFull'))}</option>`);
+        }
+        return opts.join('');
+      };
+      const clampVal = (v, fallback) => {
+        const val = v || fallback;
+        if (val === 'danger-full-access' && !allowDanger) return maxSb === 'read-only' ? 'read-only' : 'workspace-write';
+        if (val === 'workspace-write' && maxSb === 'read-only') return 'read-only';
+        return val;
+      };
+      const cmpSb = document.getElementById('cmp-sandbox');
+      if (cmpSb) {
+        const prev = clampVal(cmpSb.value, st?.settings?.default_task_sandbox || 'read-only');
+        const sig = `${LANG}|${maxSb}|${allowDanger ? 1 : 0}`;
+        if (cmpSb.getAttribute('data-sb-sig') !== sig) {
+          cmpSb.innerHTML = buildOpts(prev);
+          cmpSb.setAttribute('data-sb-sig', sig);
+        }
+        cmpSb.value = prev;
+      }
+      const addSb = document.getElementById('add-m-sandbox');
+      if (addSb) {
+        const prev = clampVal(addSb.value, maxSb === 'read-only' ? 'read-only' : 'workspace-write');
+        const sig = `${LANG}|${maxSb}|${allowDanger ? 1 : 0}`;
+        if (addSb.getAttribute('data-sb-sig') !== sig) {
+          addSb.innerHTML = buildOpts(prev);
+          addSb.setAttribute('data-sb-sig', sig);
+        }
+        addSb.value = prev;
+      }
+    }
+
+    function updateSandboxPill(st) {
+      const el = document.getElementById('btn-sandbox-pill');
+      if (!el) return;
+      const b = st?.binding || {};
+      const maxSb = b.max_sandbox || 'workspace-write';
+      const defSb = st?.settings?.default_task_sandbox || 'read-only';
+      const addDirs = Array.isArray(b.extra_add_dirs) ? b.extra_add_dirs : [];
+      const eff = maxSb === 'read-only' ? 'read-only' : defSb;
+      el.classList.remove('sb-ro', 'sb-rw', 'sb-danger');
+      if (eff === 'danger-full-access' && b.allow_danger_full_access) {
+        el.classList.add('sb-danger');
+        el.textContent = t('sbPillFull');
+      } else if (eff === 'workspace-write') {
+        el.classList.add('sb-rw');
+        el.textContent = addDirs.length > 0 ? `${t('sbPillRw')} +${addDirs.length}` : t('sbPillRw');
+      } else {
+        el.classList.add('sb-ro');
+        el.textContent = addDirs.length > 0 ? `${t('sbPillRo')} +${addDirs.length}` : t('sbPillRo');
+      }
+      el.title = `${t('sbCenterTitle')} | ${t('permMaxSandbox')}: ${maxSb} | ${t('permDefaultTask')}: ${defSb}${addDirs.length ? ` | --add-dir: ${addDirs.length}` : ''}`;
+    }
+
+    function renderComposerSandboxBanner() {
+      const box = document.getElementById('composer-sandbox-banner');
+      if (!box) return;
+      const curSb = document.getElementById('cmp-sandbox')?.value || 'read-only';
+      const addDirs = Array.isArray(STATE?.binding?.extra_add_dirs) ? STATE.binding.extra_add_dirs : [];
+      const parts = [];
+      if (curSb === 'danger-full-access') {
+        parts.push(`<div class="notice notice-err" style="margin-bottom:8px; padding:7px 10px; font-size:11.5px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;"><span>${esc(t('sbDangerBanner'))}</span><button type="button" class="btn btn-sec btn-xs" onclick="openSandboxModal()">${esc(t('sbPermCenterBtn'))}</button></div>`);
+      } else if (addDirs.length > 0) {
+        parts.push(`<div style="margin-bottom:6px; font-size:11.5px; color:var(--text-2); display:flex; align-items:center; gap:6px; flex-wrap:wrap;"><span class="tag tag-accent" style="font-size:10.5px;">📁 ${esc(t('sbExtraDirsInfo', { n: addDirs.length }))}</span><button type="button" class="btn btn-ghost btn-xs" onclick="openSandboxModal()">${esc(t('sbPermCenterBtn'))}</button></div>`);
+      }
+      box.innerHTML = parts.join('');
+    }
+
+    function getEffectiveRtSeatSandbox(mid, taskSb, allowWrites) {
+      const rank = { 'read-only': 0, 'workspace-write': 1, 'danger-full-access': 2 };
+      const toSb = ['read-only', 'workspace-write', 'danger-full-access'];
+      const taskRank = rank[taskSb] ?? 0;
+      if (taskRank === 0) return 'read-only';
+      const ov = CMP.rtSeatSandboxes && CMP.rtSeatSandboxes[mid];
+      if (ov && rank[ov] !== undefined) {
+        return toSb[Math.min(taskRank, rank[ov])];
+      }
+      if (allowWrites) {
+        const memSb = STATE?.members?.[mid]?.sandbox || 'read-only';
+        if (memSb !== 'read-only' && rank[memSb] !== undefined) {
+          return toSb[Math.min(taskRank, rank[memSb])];
+        }
+      }
+      return 'read-only';
+    }
+
+    function cycleRtSeatSandbox(mid) {
+      const curTaskSb = document.getElementById('cmp-sandbox')?.value || 'read-only';
+      if (curTaskSb === 'read-only') return;
+      const effAllowWrites = Boolean(CMP.rtAllowWrites ?? STATE?.settings?.roundtable_allow_member_writes);
+      const cur = getEffectiveRtSeatSandbox(mid, curTaskSb, effAllowWrites);
+      const allowed = curTaskSb === 'danger-full-access'
+        ? ['read-only', 'workspace-write', 'danger-full-access']
+        : ['read-only', 'workspace-write'];
+      const idx = allowed.indexOf(cur);
+      const next = allowed[(idx + 1) % allowed.length];
+      CMP.rtSeatSandboxes = CMP.rtSeatSandboxes || {};
+      CMP.rtSeatSandboxes[mid] = next;
+      renderComposerStudio();
+    }
+
+    function openSandboxModal() {
+      const b = STATE?.binding || {};
+      const s = STATE?.settings || {};
+      const maxSb = b.max_sandbox || 'workspace-write';
+      const defSb = s.default_task_sandbox || 'read-only';
+      const allowDanger = Boolean(b.allow_danger_full_access);
+      const dangerUsable = allowDanger && maxSb === 'danger-full-access';
+      const addDirs = Array.isArray(b.extra_add_dirs) ? b.extra_add_dirs : [];
+      const rtWrites = Boolean(s.roundtable_allow_member_writes);
+
+      const dirRows = addDirs.length
+        ? addDirs.map((d, idx) => `
+            <div class="add-dir-row">
+              <span class="add-dir-path">${esc(d)}</span>
+              <button type="button" class="btn btn-ghost btn-xs" style="color:var(--err);" onclick="removeExtraSandboxDir(${idx})" title="Remove">✕</button>
+            </div>
+          `).join('')
+        : `<div style="font-size:11.5px; color:var(--text-3); padding:6px 0;">${esc(t('sbAddDirEmpty'))}</div>`;
+
+      openModal(`
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:6px;">
+          <div>
+            <h3 style="margin:0 0 4px;">🛡️ ${esc(t('sbCenterTitle'))}</h3>
+            <div style="font-size:12px; color:var(--text-2); line-height:1.45;">${esc(t('sbCenterSub'))}</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" onclick="closeModal()">${svgIcon('x', 14)}</button>
+        </div>
+
+        <div class="sb-tier-grid">
+          <div class="sb-tier-card ${defSb === 'read-only' ? 'active' : ''}">
+            <div class="sb-tier-title">
+              <span>${esc(t('sbTierRoTitle'))}</span>
+              ${defSb === 'read-only' ? `<span class="tag tag-accent" style="font-size:10px;">${esc(t('sbActiveTag'))}</span>` : ''}
+            </div>
+            <div class="sb-tier-desc">${esc(t('sbTierRoDesc'))}</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              <button type="button" class="btn ${defSb === 'read-only' ? 'btn-sec' : ''} btn-xs" onclick="applySandboxPresetTier('read-only', false)">${esc(t('sbSetDefaultBtn'))}</button>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="applySandboxPresetTier('read-only', true)">${esc(t('sbLockGlobalRoBtn'))}</button>
+            </div>
+          </div>
+
+          <div class="sb-tier-card ${defSb === 'workspace-write' && maxSb !== 'read-only' ? 'active' : ''}">
+            <div class="sb-tier-title">
+              <span>${esc(t('sbTierRwTitle'))}</span>
+              ${defSb === 'workspace-write' && maxSb !== 'read-only' ? `<span class="tag tag-accent" style="font-size:10px;">${esc(t('sbActiveTag'))}</span>` : ''}
+            </div>
+            <div class="sb-tier-desc">${esc(t('sbTierRwDesc'))}</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              <button type="button" class="btn ${defSb === 'workspace-write' ? 'btn-sec' : ''} btn-xs" onclick="applySandboxPresetTier('workspace-write', false)">${esc(t('sbSetDefaultBtn'))}</button>
+            </div>
+          </div>
+
+          <div class="sb-tier-card danger ${dangerUsable && defSb === 'danger-full-access' ? 'active' : ''}">
+            <div class="sb-tier-title">
+              <span style="color:var(--err);">${esc(t('sbTierFullTitle'))}</span>
+              <span class="tag ${allowDanger ? 'tag-err' : ''}" style="font-size:10px;">${esc(allowDanger ? t('sbUnlockedTag') : t('sbLockedTag'))}</span>
+            </div>
+            <div class="sb-tier-desc">${esc(t('sbTierFullDesc'))}</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;">
+              ${allowDanger ? `
+                <button type="button" class="btn btn-danger btn-xs" onclick="applySandboxPresetTier('danger-full-access', false)">${esc(t('sbSetDefaultBtn'))}</button>
+                <button type="button" class="btn btn-sec btn-xs" id="btn-relock-danger" onclick="relockDangerFullAccess()">${esc(t('sbRelockBtn'))}</button>
+              ` : `
+                <button type="button" class="btn btn-danger btn-xs" id="btn-unlock-danger" onclick="openDangerUnlockConfirmModal()">${esc(t('sbUnlockBtn'))}</button>
+              `}
+            </div>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border); padding-top:12px; margin-bottom:12px;">
+          <div style="font-size:12.5px; font-weight:600; margin-bottom:3px;">📁 ${esc(t('sbAddDirsTitle'))}</div>
+          <div style="font-size:11.5px; color:var(--text-2); margin-bottom:8px;">${esc(t('sbAddDirsSub'))}</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <input type="text" id="sb-add-dir-input" placeholder="${esc(t('sbAddDirPh'))}" style="flex:1 1 220px; min-height:30px; font-size:12px;" onkeydown="if(event.key==='Enter'){ event.preventDefault(); addExtraSandboxDir(); }">
+            <button type="button" class="btn btn-sec btn-sm" onclick="addExtraSandboxDir()">+ ${esc(t('sbAddDirAdd'))}</button>
+            <button type="button" class="btn btn-sec btn-sm" onclick="pickExtraSandboxDirNative()">${svgIcon('folderOpen', 13)} ${esc(t('sbAddDirPick'))}</button>
+          </div>
+          <div class="add-dir-list">${dirRows}</div>
+        </div>
+
+        <div style="border-top:1px solid var(--border); padding-top:12px;">
+          <div style="font-size:12.5px; font-weight:600; margin-bottom:8px;">⚙️ ${esc(t('sbBatchTitle'))}</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <label style="display:inline-flex; align-items:center; gap:6px; margin:0; cursor:pointer; font-size:12px; color:var(--text);">
+              <input type="checkbox" style="width:auto;" ${rtWrites ? 'checked' : ''} onchange="updateContextSetting({ roundtable_allow_member_writes: this.checked }).then(() => openSandboxModal())">
+              <span>${esc(t('rtAllowWrites'))}</span>
+            </label>
+            <span style="font-size:11.5px; color:var(--text-3);">${esc(t('permMaxSandbox'))}: <code>${esc(maxSb)}</code></span>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sec btn-xs" onclick="setClientSandboxBatch('codex', 'workspace-write').then(() => openSandboxModal())">${esc(t('permCodexAllowAll'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="setClientSandboxBatch('codex', 'read-only').then(() => openSandboxModal())">${esc(t('permCodexLockAll'))}</button>
+            <button type="button" class="btn btn-sec btn-xs" onclick="setClientSandboxBatch('antigravity', 'workspace-write').then(() => openSandboxModal())">${esc(t('sbAgyAllowAll'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" onclick="setClientSandboxBatch('antigravity', 'read-only').then(() => openSandboxModal())">${esc(t('sbAgyLockAll'))}</button>
+            ${dangerUsable ? `<button type="button" class="btn btn-danger btn-xs" onclick="setClientSandboxBatch('codex', 'danger-full-access').then(() => openSandboxModal())">${esc(t('sbCodexFullAll'))}</button>` : ''}
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+          <button type="button" class="btn btn-sec btn-sm" onclick="closeModal()">${esc(t('close'))}</button>
+        </div>
+      `, true);
+    }
+
+    function openDangerUnlockConfirmModal() {
+      openModal(`
+        <h3 style="margin:0 0 8px; color:var(--err);">${esc(t('sbUnlockConfirmTitle'))}</h3>
+        <div class="notice notice-err" style="margin-bottom:10px; font-size:12px; line-height:1.55;">
+          <span>${esc(t('sbUnlockConfirmBody'))}</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-2); line-height:1.5; margin-bottom:12px;">
+          💡 ${esc(t('sbUnlockConfirmTip'))}
+        </div>
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:12px; color:var(--text); margin-bottom:14px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface-subtle);">
+          <input type="checkbox" id="chk-danger-ack" style="width:auto; margin-top:2px; flex-shrink:0;" onchange="document.getElementById('btn-confirm-danger-go').disabled = !this.checked;">
+          <span>${esc(t('sbUnlockConfirmCheck'))}</span>
+        </label>
+        <div style="display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn btn-sec btn-sm" onclick="openSandboxModal()">${esc(t('cancel'))}</button>
+          <button type="button" class="btn btn-danger btn-sm" id="btn-confirm-danger-go" disabled onclick="confirmUnlockDangerFullAccess()">${esc(t('sbUnlockConfirmGo'))}</button>
+        </div>
+      `, true);
+    }
+
+    async function confirmUnlockDangerFullAccess() {
+      try {
+        await api('POST', '/api/binding', {
+          allow_danger_full_access: true,
+          max_sandbox: 'danger-full-access'
+        });
+        await refreshState(true);
+        toast(t('sbUnlockedToast'));
+        openSandboxModal();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function relockDangerFullAccess() {
+      try {
+        CMP.sandboxUserTouched = false;
+        CMP.rtSeatSandboxes = {};
+        await api('POST', '/api/binding', {
+          allow_danger_full_access: false,
+          max_sandbox: 'workspace-write'
+        });
+        await refreshState(true);
+        toast(t('sbRelockedToast'));
+        openSandboxModal();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function applySandboxPresetTier(tier, lockCeilingRo) {
+      try {
+        const body = { default_task_sandbox: tier };
+        if (tier === 'read-only' && lockCeilingRo) {
+          body.max_sandbox = 'read-only';
+        } else if (tier === 'workspace-write') {
+          if ((STATE?.binding?.max_sandbox || 'workspace-write') === 'read-only') {
+            body.max_sandbox = 'workspace-write';
+          }
+        } else if (tier === 'danger-full-access') {
+          body.max_sandbox = 'danger-full-access';
+        }
+        CMP.sandboxUserTouched = false;
+        await api('POST', '/api/binding', body);
+        await refreshState(true);
+        const cmpSbEl = document.getElementById('cmp-sandbox');
+        if (cmpSbEl && Array.from(cmpSbEl.options).some(o => o.value === tier && !o.disabled)) {
+          cmpSbEl.value = tier;
+        }
+        renderComposerStudio();
+        renderFigureContractStrip();
+        renderComposerSandboxBanner();
+        toast(t('permUpdatedToast', { msg: lockCeilingRo ? 'max_sandbox=read-only' : `default=${tier}` }));
+        openSandboxModal();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function addExtraSandboxDir(dirPathOverride = null) {
+      const inp = document.getElementById('sb-add-dir-input');
+      const raw = (dirPathOverride !== null ? dirPathOverride : (inp ? inp.value : '')).trim();
+      if (!raw) return;
+      const cur = Array.isArray(STATE?.binding?.extra_add_dirs) ? STATE.binding.extra_add_dirs.slice() : [];
+      cur.push(raw);
+      try {
+        await api('POST', '/api/binding', { extra_add_dirs: cur });
+        await refreshState(true);
+        toast(t('sbAddDirAdded', { dir: raw }));
+        openSandboxModal();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function pickExtraSandboxDirNative() {
+      try {
+        const r = await api('POST', '/api/fs/pick_dir', {});
+        if (!r.cancelled && r.path) {
+          await addExtraSandboxDir(r.path);
+        }
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
+    async function removeExtraSandboxDir(idx) {
+      const cur = Array.isArray(STATE?.binding?.extra_add_dirs) ? STATE.binding.extra_add_dirs.slice() : [];
+      cur.splice(idx, 1);
+      try {
+        await api('POST', '/api/binding', { extra_add_dirs: cur });
+        await refreshState(true);
+        toast(t('sbAddDirRemoved'));
+        openSandboxModal();
+      } catch (e) { toast(t('toastFail', { err: e.message }), true); }
+    }
+
     async function toggleMemberSandbox(mid, curSb) {
-      const nextSb = curSb === 'workspace-write' ? 'read-only' : 'workspace-write';
+      const tiers = isDangerFullAccessAvailable(STATE)
+        ? ['read-only', 'workspace-write', 'danger-full-access']
+        : ['read-only', 'workspace-write'];
+      const nextSb = tiers[(tiers.indexOf(curSb) + 1) % tiers.length];
       try {
         const r = await api('POST', '/api/members/set_sandbox', { member_id: mid, sandbox: nextSb });
         await refreshState(true);
@@ -7515,10 +8082,11 @@
       CMP.sandboxUserTouched = false;
       await updateContextSetting({ default_task_sandbox: val });
       const cmpSbEl = document.getElementById('cmp-sandbox');
-      if (cmpSbEl && ['read-only', 'workspace-write'].includes(val)) {
+      if (cmpSbEl && Array.from(cmpSbEl.options).some(o => o.value === val && !o.disabled)) {
         cmpSbEl.value = val;
         renderComposerStudio();
         renderFigureContractStrip();
+        renderComposerSandboxBanner();
       }
     }
 

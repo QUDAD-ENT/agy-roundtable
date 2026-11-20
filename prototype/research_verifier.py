@@ -279,6 +279,11 @@ def run_acceptance_checks(
         try:
             _hk: Dict[str, Any] = {}
             if os.name == "nt":
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+                except Exception:
+                    pass
                 _si = subprocess.STARTUPINFO()
                 _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 _si.wShowWindow = 0

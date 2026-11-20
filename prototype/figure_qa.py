@@ -80,6 +80,11 @@ def probe_plotting_backend(backend: str = "all") -> Dict[str, Any]:
     def _hidden_kw() -> Dict[str, Any]:
         if os.name != "nt":
             return {}
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002 | 0x8000)
+        except Exception:
+            pass
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 0
@@ -127,6 +132,11 @@ def probe_plotting_backend(backend: str = "all") -> Dict[str, Any]:
 
     if want in ("all", "r"):
         r_exe = shutil.which("Rscript.exe") or shutil.which("Rscript")
+        # Prefer direct x64\Rscript.exe over bin\Rscript.exe trampoline wrapper on Windows
+        if os.name == "nt" and r_exe:
+            x64_cand = os.path.join(os.path.dirname(r_exe), "x64", os.path.basename(r_exe))
+            if os.path.isfile(x64_cand):
+                r_exe = x64_cand
         r_info: Dict[str, Any] = {"available": False, "executable": r_exe or "", "packages": {}, "error": ""}
         if r_exe:
             r_expr = (

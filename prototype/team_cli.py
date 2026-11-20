@@ -17,7 +17,9 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
-from codex_adapter import get_runtime_dirs, hidden_subprocess_kwargs
+from codex_adapter import get_runtime_dirs, hidden_subprocess_kwargs, suppress_windows_crash_dialogs
+
+suppress_windows_crash_dialogs()
 
 PROTO_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BASE_URL = os.environ.get("TEAM_RUNTIME_URL", "http://127.0.0.1:8765")

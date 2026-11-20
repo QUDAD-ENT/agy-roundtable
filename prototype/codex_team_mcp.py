@@ -69,27 +69,40 @@ def team_dispatch_task(
     discussion_rounds: int = 2,
     stages_json: str = "[]",
     project_path: Optional[str] = None,
-    sandbox: str = "read-only",
+    sandbox: Optional[str] = None,
+    allow_member_writes: Optional[bool] = None,
+    add_dirs_json: str = "[]",
+    seat_sandboxes_json: str = "{}",
     wait: bool = True,
 ) -> str:
-    """发起协作任务，支持 4 种自由组织模式：roundtable(圆桌自主协商)、chief_dispatch(总管自动点将)、custom_dag(自定义多阶段串并行搭积木)、single_member(单人专办) 及 coordinator_auto。"""
+    """发起协作任务（roundtable/chief_dispatch/custom_dag/single_member/coordinator_auto）。sandbox 留空时自动继承用户在面板中配置的默认沙箱权限 (default_task_sandbox)；可传 read-only / workspace-write / danger-full-access（需用户已在权限中心解锁），并支持 add_dirs_json 跨目录授权与 seat_sandboxes_json 圆桌单席权限覆盖。"""
     participants = json.loads(participants_json) if participants_json.strip() else None
     stages = json.loads(stages_json) if stages_json.strip() else None
-    res = _client.create_task(
-        title=title,
-        goal=goal,
-        dispatch_mode=dispatch_mode,
-        execution_mode=execution_mode or dispatch_mode,
-        target_member_id=target_member_id,
-        reviewer_member_id=reviewer_member_id,
-        chief_member_id=chief_member_id,
-        host_member_id=host_member_id,
-        participants=participants or None,
-        discussion_rounds=discussion_rounds,
-        stages=stages or None,
-        project_path=project_path,
-        sandbox=sandbox,
-    )["task"]
+    add_dirs = json.loads(add_dirs_json) if add_dirs_json.strip() else None
+    seat_sandboxes = json.loads(seat_sandboxes_json) if seat_sandboxes_json.strip() else None
+    payload: Dict[str, Any] = {
+        "title": title,
+        "goal": goal,
+        "dispatch_mode": dispatch_mode,
+        "execution_mode": execution_mode or dispatch_mode,
+        "target_member_id": target_member_id,
+        "reviewer_member_id": reviewer_member_id,
+        "chief_member_id": chief_member_id,
+        "host_member_id": host_member_id,
+        "participants": participants or None,
+        "discussion_rounds": discussion_rounds,
+        "stages": stages or None,
+        "project_path": project_path,
+    }
+    if sandbox is not None:
+        payload["sandbox"] = sandbox
+    if allow_member_writes is not None:
+        payload["allow_member_writes"] = allow_member_writes
+    if add_dirs:
+        payload["add_dirs"] = add_dirs
+    if seat_sandboxes:
+        payload["seat_sandboxes"] = seat_sandboxes
+    res = _client.create_task(**payload)["task"]
     if wait:
         res = _client.wait_for_task(res["id"])
     return _fmt(res)
@@ -205,10 +218,11 @@ def team_switch_member_config(
     role: Optional[str] = None,
     model: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    sandbox: Optional[str] = None,
     mode: str = "next_round",
     reason: str = "总管调整配置",
 ) -> str:
-    """修改成员显示名称、切换客户端(codex/antigravity)、角色、模型与思考强度；闲置立即生效，运行中支持 next_round 或 abort_now。"""
+    """修改成员显示名称、切换客户端(codex/antigravity)、角色、模型、思考强度与文件沙箱权限(read-only/workspace-write/danger-full-access)；闲置立即生效，运行中支持 next_round 或 abort_now。"""
     return _fmt(
         _client._request(
             "POST",
@@ -220,6 +234,7 @@ def team_switch_member_config(
                 "role": role,
                 "model": model,
                 "reasoning_effort": reasoning_effort,
+                "sandbox": sandbox,
                 "mode": mode,
                 "reason": reason,
             },

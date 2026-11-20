@@ -57,7 +57,8 @@ from worktree_manager import (
 
 
 SUPPORTED_CLIENTS = ("codex", "antigravity")
-_SANDBOX_RANK = {"read-only": 0, "workspace-write": 1}
+_SANDBOX_RANK = {"read-only": 0, "workspace-write": 1, "danger-full-access": 2}
+_RANK_TO_SANDBOX = {0: "read-only", 1: "workspace-write", 2: "danger-full-access"}
 
 _QUOTA_ERROR_PATTERNS = (
     "quota",
@@ -123,17 +124,57 @@ def _short_model_id_token(model_slug: str) -> str:
     return tok[:18] or "alt"
 
 
-def _effective_sandbox(ceiling: Optional[str], requested: Optional[str], read_only: bool = False) -> str:
-    """P0-0 Hard Sandbox Trust Root: strictly allow only read-only / workspace-write and clamp by ceiling."""
+def _effective_sandbox(
+    ceiling: Optional[str],
+    requested: Optional[str],
+    read_only: bool = False,
+    allow_danger: bool = False,
+) -> str:
+    """Hard Sandbox Trust Root:
+    - Always allows `read-only` (0) and `workspace-write` (1).
+    - Allows `danger-full-access` (2) ONLY when `allow_danger=True` (explicit user 2-step opt-in).
+    - Otherwise fail-closed raises ValueError; clamps requested <= ceiling.
+    """
     ceil_val = (ceiling or "workspace-write").strip().lower()
     if ceil_val not in _SANDBOX_RANK:
         raise ValueError(f"非法上限 sandbox 策略: {ceil_val}")
+    if ceil_val == "danger-full-access" and not allow_danger:
+        raise ValueError("danger-full-access 尚未解锁，请先在「沙箱与目录权限中心」二次确认解锁")
     req_val = (requested or ceil_val).strip().lower()
     if req_val not in _SANDBOX_RANK:
-        raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write，拒绝 {req_val}）")
+        raise ValueError(f"非法 sandbox 策略（拒绝 {req_val}）")
+    if req_val == "danger-full-access" and not allow_danger:
+        raise ValueError(
+            "非法 sandbox 策略（仅允许 read-only / workspace-write，danger-full-access 需先在权限中心二次确认解锁）"
+        )
     if read_only:
         return "read-only"
-    return "read-only" if min(_SANDBOX_RANK[ceil_val], _SANDBOX_RANK[req_val]) == 0 else "workspace-write"
+    eff_rank = min(_SANDBOX_RANK[ceil_val], _SANDBOX_RANK[req_val])
+    return _RANK_TO_SANDBOX[eff_rank]
+
+
+def _normalize_add_dirs(raw_dirs: Optional[List[str]]) -> List[str]:
+    """Validate and deduplicate extra authorized directories (--add-dir). Max 8 existing directories."""
+    if not raw_dirs:
+        return []
+    out: List[str] = []
+    seen: set = set()
+    for d in raw_dirs:
+        if not isinstance(d, str):
+            continue
+        s = d.strip()
+        if not s:
+            continue
+        abs_p = os.path.normpath(os.path.abspath(s))
+        if not os.path.isdir(abs_p):
+            raise ValueError(f"附加授权目录不存在或不是文件夹: {s}")
+        key = os.path.normcase(abs_p)
+        if key not in seen:
+            seen.add(key)
+            out.append(abs_p)
+        if len(out) >= 8:
+            break
+    return out
 
 
 def _resolve_workdir(proj_root: str, rel_scope: Optional[str]) -> str:
@@ -699,6 +740,11 @@ class TeamOrchestrator:
             return {"cancelled": False, "path": picked["path"], **sw}
         return picked
 
+    def pick_dir_native(self, initial_path: Optional[str] = None) -> Dict[str, Any]:
+        """Open native OS folder picker without switching active project (for --add-dir selection)."""
+        cur = initial_path or self.store.snapshot()["binding"].get("project_path")
+        return pick_folder_native_dialog(cur)
+
     def update_binding(
         self,
         project_path: Optional[str] = None,
@@ -717,6 +763,8 @@ class TeamOrchestrator:
         max_sandbox: Optional[str] = None,
         default_task_sandbox: Optional[str] = None,
         roundtable_allow_member_writes: Optional[bool] = None,
+        allow_danger_full_access: Optional[bool] = None,
+        extra_add_dirs: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         if project_path is not None:
             self.switch_project(project_path)
@@ -726,19 +774,43 @@ class TeamOrchestrator:
             s = st.setdefault("settings", {})
             if remote_control_url is not None:
                 b["remote_control_url"] = remote_control_url.strip()
+            if allow_danger_full_access is not None:
+                b["allow_danger_full_access"] = bool(allow_danger_full_access)
+                if not b["allow_danger_full_access"]:
+                    if b.get("max_sandbox") == "danger-full-access":
+                        b["max_sandbox"] = "workspace-write"
+                    if s.get("default_task_sandbox") == "danger-full-access":
+                        s["default_task_sandbox"] = "workspace-write"
+                    for mem in (st.get("members") or {}).values():
+                        if mem.get("sandbox") == "danger-full-access":
+                            mem["sandbox"] = "workspace-write"
+                        pc = mem.get("pending_config")
+                        if isinstance(pc, dict) and pc.get("sandbox") == "danger-full-access":
+                            pc["sandbox"] = "workspace-write"
+            allow_danger = bool(b.get("allow_danger_full_access", False))
             if max_sandbox is not None:
                 ms_val = str(max_sandbox).strip().lower()
                 if ms_val not in _SANDBOX_RANK:
-                    raise ValueError(f"非法全局文件权限上限 max_sandbox（仅允许 read-only / workspace-write）: {ms_val}")
+                    raise ValueError(f"非法全局文件权限上限 max_sandbox: {ms_val}")
+                if ms_val == "danger-full-access" and not allow_danger:
+                    raise ValueError("danger-full-access 尚未解锁，请先在权限中心二次确认解锁 (allow_danger_full_access=True)")
                 b["max_sandbox"] = ms_val
                 if ms_val == "read-only":
                     s["default_task_sandbox"] = "read-only"
+                elif ms_val == "workspace-write":
+                    if s.get("default_task_sandbox") == "danger-full-access":
+                        s["default_task_sandbox"] = "workspace-write"
+                    for mem in (st.get("members") or {}).values():
+                        if mem.get("sandbox") == "danger-full-access":
+                            mem["sandbox"] = "workspace-write"
             if default_task_sandbox is not None:
                 ds_val = str(default_task_sandbox).strip().lower()
                 if ds_val not in _SANDBOX_RANK:
                     raise ValueError(f"非法默认任务权限 default_task_sandbox: {ds_val}")
                 b_max = b.get("max_sandbox", "workspace-write")
-                s["default_task_sandbox"] = _effective_sandbox(b_max, ds_val)
+                s["default_task_sandbox"] = _effective_sandbox(b_max, ds_val, allow_danger=allow_danger)
+            if extra_add_dirs is not None:
+                b["extra_add_dirs"] = _normalize_add_dirs(extra_add_dirs)
             if roundtable_allow_member_writes is not None:
                 s["roundtable_allow_member_writes"] = bool(roundtable_allow_member_writes)
             if max_concurrency is not None:
@@ -781,16 +853,21 @@ class TeamOrchestrator:
         member_id: Optional[str] = None,
         client: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Configure file-edit permission (read-only / workspace-write) for a member or an entire engine (e.g. 'codex')."""
+        """Configure file-edit permission (read-only / workspace-write / danger-full-access if unlocked) for a member or engine."""
         sb_req = str(sandbox or "").strip().lower()
         if sb_req not in _SANDBOX_RANK:
-            raise ValueError(f"非法 sandbox 权限（仅允许 read-only / workspace-write）: {sb_req}")
+            raise ValueError(f"非法 sandbox 权限: {sb_req}")
 
         def _upd(st: Dict[str, Any]) -> Dict[str, Any]:
+            allow_danger = bool(st.get("binding", {}).get("allow_danger_full_access", False))
+            if sb_req == "danger-full-access" and not allow_danger:
+                raise ValueError("danger-full-access 尚未解锁，请先在「沙箱与目录权限中心」二次确认解锁")
             b_max = st.get("binding", {}).get("max_sandbox") or "workspace-write"
-            if sb_req == "workspace-write" and b_max == "read-only":
-                raise ValueError("当前全局文件权限上限已锁定为只读 (max_sandbox=read-only)，请先在设置中解锁全局可写上限")
-            eff_sb = _effective_sandbox(b_max, sb_req)
+            if _SANDBOX_RANK[sb_req] > _SANDBOX_RANK.get(b_max, 1):
+                if b_max == "read-only":
+                    raise ValueError("当前全局文件权限上限已锁定为只读 (max_sandbox=read-only)，请先在设置中解锁全局可写上限")
+                raise ValueError(f"目标权限 {sb_req} 超过当前全局上限 ({b_max})，请先在权限中心调高全局上限")
+            eff_sb = _effective_sandbox(b_max, sb_req, allow_danger=allow_danger)
             updated: List[str] = []
             queued: List[str] = []
             members = st.get("members") or {}
@@ -1976,7 +2053,11 @@ class TeamOrchestrator:
 
             base_name = _strip_model_parens(src.get("name") or source_member_id)
             bk_name = f"{base_name} [替补 · {chosen_disp}]"
-            eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), src.get("sandbox", "read-only"))
+            eff_sb = _effective_sandbox(
+                st["binding"].get("max_sandbox", "workspace-write"),
+                src.get("sandbox", "read-only"),
+                allow_danger=bool(st["binding"].get("allow_danger_full_access", False)),
+            )
             new_mem = {
                 "id": cand_id,
                 "name": bk_name,
@@ -2227,7 +2308,11 @@ class TeamOrchestrator:
             clean_tags = [str(x).strip() for x in (tags if tags is not None else (existing.get("tags") if existing else [])) if str(x).strip()]
             clean_scope = workspace_scope.strip() or "."
             _resolve_workdir(st["binding"]["project_path"], clean_scope)
-            eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), sandbox)
+            eff_sb = _effective_sandbox(
+                st["binding"].get("max_sandbox", "workspace-write"),
+                sandbox,
+                allow_danger=bool(st["binding"].get("allow_danger_full_access", False)),
+            )
             new_mem = {
                 "id": member_id,
                 "name": (name or (existing.get("name") if existing else member_id)).strip(),
@@ -2308,6 +2393,7 @@ class TeamOrchestrator:
         eff_sb = _effective_sandbox(
             snap["binding"].get("max_sandbox", "workspace-write"),
             sandbox if sandbox is not None else m.get("sandbox", "read-only"),
+            allow_danger=bool(snap["binding"].get("allow_danger_full_access", False)),
         )
 
         new_cfg = {
@@ -2465,7 +2551,9 @@ class TeamOrchestrator:
         steps: Optional[List[Dict[str, Any]]] = None,
         project_path: Optional[str] = None,
         workspace_scope: Optional[str] = None,
-        sandbox: str = "read-only",
+        sandbox: Optional[str] = None,
+        add_dirs: Optional[List[str]] = None,
+        seat_sandboxes: Optional[Dict[str, str]] = None,
         max_auto_repairs: Optional[int] = None,
         require_manual_ruling: bool = False,
         reuse_member_session: bool = False,
@@ -2504,8 +2592,26 @@ class TeamOrchestrator:
             proj_abs = st["binding"]["project_path"]
             proj_norm = st["binding"]["normalized_project_path"]
             proj_name = st["binding"].get("project_name") or os.path.basename(proj_abs)
+            allow_danger = bool(st["binding"].get("allow_danger_full_access", False))
             max_sb = st["binding"].get("max_sandbox", "workspace-write")
-            sandbox = _effective_sandbox(max_sb, sandbox)
+            raw_req_sb = (sandbox or "").strip().lower()
+            if not raw_req_sb or raw_req_sb == "default":
+                raw_req_sb = (st.get("settings", {}).get("default_task_sandbox") or "read-only").strip().lower()
+            sandbox = _effective_sandbox(max_sb, raw_req_sb, allow_danger=allow_danger)
+            binding_dirs = [
+                d for d in (st["binding"].get("extra_add_dirs") or [])
+                if isinstance(d, str) and os.path.isdir(d)
+            ]
+            req_dirs = _normalize_add_dirs(add_dirs) if add_dirs is not None else []
+            merged_add_dirs: List[str] = []
+            seen_ad: set = set()
+            for ad in binding_dirs + req_dirs:
+                ad_k = os.path.normcase(ad)
+                if ad_k not in seen_ad:
+                    seen_ad.add(ad_k)
+                    merged_add_dirs.append(ad)
+                if len(merged_add_dirs) >= 8:
+                    break
             default_repairs = st.get("settings", {}).get("default_max_auto_repairs", 2)
             repairs_cap = default_repairs if max_auto_repairs is None else max(0, min(5, int(max_auto_repairs)))
 
@@ -2532,6 +2638,11 @@ class TeamOrchestrator:
                     for ai, am_id in enumerate(perm_ids):
                         letter = chr(ord("A") + (ai % 26))
                         anon_map[am_id] = f"席位 {letter}"
+                clean_seat_sb: Dict[str, str] = {}
+                if isinstance(seat_sandboxes, dict):
+                    for sk, sv in seat_sandboxes.items():
+                        if sk in valid_ids and sv:
+                            clean_seat_sb[sk] = _effective_sandbox(sandbox, str(sv), allow_danger=allow_danger)
                 mode_meta = {
                     "host_member_id": host_id,
                     "participants": valid_ids,
@@ -2539,6 +2650,7 @@ class TeamOrchestrator:
                     "enable_host_opening": bool(enable_host_opening),
                     "anonymous_peer_review": anon_enabled,
                     "anon_map": anon_map,
+                    "seat_sandboxes": clean_seat_sb,
                 }
 
                 roster_desc = "、".join(f"@{mid}({st['members'][mid]['name']})" for mid in valid_ids)
@@ -2631,11 +2743,14 @@ class TeamOrchestrator:
                             if allow_member_writes is not None
                             else bool(st.get("settings", {}).get("roundtable_allow_member_writes", False))
                         )
-                        mem_can_write = (
-                            sandbox == "workspace-write"
-                            and eff_rt_writes
-                            and st.get("members", {}).get(mid, {}).get("sandbox") == "workspace-write"
-                        )
+                        if mid in clean_seat_sb:
+                            step_sb = clean_seat_sb[mid]
+                        elif sandbox != "read-only" and eff_rt_writes:
+                            mem_sb = st.get("members", {}).get(mid, {}).get("sandbox", "read-only")
+                            step_sb = _effective_sandbox(sandbox, mem_sb, allow_danger=allow_danger) if mem_sb != "read-only" else "read-only"
+                        else:
+                            step_sb = "read-only"
+                        mem_can_write = step_sb != "read-only"
                         built_steps.append(
                             self._make_step(
                                 step_index=idx,
@@ -2650,14 +2765,15 @@ class TeamOrchestrator:
                                 read_only=not mem_can_write,
                                 write_scope=[scope_default] if mem_can_write else [],
                                 workspace_scope=scope_default,
-                                sandbox="workspace-write" if mem_can_write else "read-only",
+                                sandbox=step_sb,
                             )
                         )
                     prev_round_indices = cur_round_indices
 
                 # Final Host Synthesis & Execution
                 fin_idx = len(built_steps)
-                ro_final = sandbox == "read-only"
+                final_sb = clean_seat_sb.get(host_id, sandbox) if clean_seat_sb else sandbox
+                ro_final = final_sb == "read-only"
                 built_steps.append(
                     self._make_step(
                         step_index=fin_idx,
@@ -2679,7 +2795,7 @@ class TeamOrchestrator:
                         read_only=ro_final,
                         write_scope=[] if ro_final else [scope_default],
                         workspace_scope=scope_default,
-                        sandbox=sandbox,
+                        sandbox=final_sb,
                     )
                 )
                 initial_status = "queued" if st.get("paused") else "running"
@@ -2707,7 +2823,7 @@ class TeamOrchestrator:
                             f"你是本次任务的主帅总管。请先快速查看当前项目目录概况，再从以下真实团队花名册中按需点选最合适的 1~{chief_cap} 名成员，编排串行/并行协作与审查步骤（无需所有人都上场）：\n"
                             + "\n".join(roster_lines)
                             + f"\n\n【用户任务目标】{goal}\n"
-                            + f"【用户授予的文件权限】sandbox={sandbox}（若为 read-only 则所有步骤 read_only 必须为 true；若为 workspace-write 则实施写文件步骤可设 read_only=false）\n\n"
+                            + f"【用户授予的文件权限】sandbox={sandbox}（若为 read-only 则所有步骤 read_only 必须为 true；若为 workspace-write 或 danger-full-access 则实施写文件步骤可设 read_only=false）\n\n"
                             + "请先用一段话说明你的【点将理由与战术分工】，随后在末尾严格附上如下 JSON 代码块：\n"
                             + "```chief_plan\n"
                             + '{"rationale":"一句话战术总结","steps":[\n'
@@ -2754,7 +2870,12 @@ class TeamOrchestrator:
                         ro_node = True if ntype in ("review", "discussion") else (
                             bool(node["read_only"]) if "read_only" in node else (sandbox == "read-only")
                         )
-                        node_sb = _effective_sandbox(sandbox, node.get("sandbox") or ("read-only" if ro_node else sandbox), read_only=ro_node)
+                        node_sb = _effective_sandbox(
+                            sandbox,
+                            node.get("sandbox") or ("read-only" if ro_node else sandbox),
+                            read_only=ro_node,
+                            allow_danger=allow_danger,
+                        )
                         ro_node = node_sb == "read-only"
                         node_ws = (node.get("workspace_scope") or scope_default).strip() or "."
                         _resolve_workdir(proj_abs, node_ws)
@@ -2808,7 +2929,12 @@ class TeamOrchestrator:
                             f"能力路由拦截：步骤 {idx} 需要 Shell/脚本执行权限 (requires_shell=True)，不能指派给无头 Antigravity 节点 {mid}，请改派 Codex 成员或走 external_import 模式"
                         )
                     ro = bool(raw_s.get("read_only", True))
-                    step_sb = _effective_sandbox(sandbox, raw_s.get("sandbox") or ("read-only" if ro else sandbox), read_only=ro)
+                    step_sb = _effective_sandbox(
+                        sandbox,
+                        raw_s.get("sandbox") or ("read-only" if ro else sandbox),
+                        read_only=ro,
+                        allow_danger=allow_danger,
+                    )
                     ro = step_sb == "read-only"
                     step_ws = (raw_s.get("workspace_scope") or scope_default).strip() or "."
                     _resolve_workdir(proj_abs, step_ws)
@@ -2915,6 +3041,7 @@ class TeamOrchestrator:
                 "execution_mode": mode,
                 "mode_meta": mode_meta,
                 "sandbox": sandbox,
+                "add_dirs": merged_add_dirs,
                 "workspace_scope": scope_default,
                 "worktree_isolation": (
                     bool(enable_worktree_isolation)
@@ -3489,7 +3616,12 @@ class TeamOrchestrator:
             if task["steps"]:
                 raise ValueError("该任务已包含执行步骤")
             proj_abs = task.get("project_path") or st["binding"]["project_path"]
-            task_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), task.get("sandbox", "read-only"))
+            allow_danger = bool(st["binding"].get("allow_danger_full_access", False))
+            task_sb = _effective_sandbox(
+                st["binding"].get("max_sandbox", "workspace-write"),
+                task.get("sandbox", "read-only"),
+                allow_danger=allow_danger,
+            )
             built = []
             for idx, raw_s in enumerate(steps):
                 mid = raw_s["member_id"]
@@ -3499,7 +3631,12 @@ class TeamOrchestrator:
                 if req_shell and st["members"][mid].get("client") == "antigravity":
                     raise ValueError(f"能力路由拦截：步骤 {idx} 需要 Shell 执行权限，不能指派给 Antigravity 节点 {mid}")
                 ro_req = bool(raw_s.get("read_only", True))
-                step_sb = _effective_sandbox(task_sb, raw_s.get("sandbox") or ("read-only" if ro_req else task_sb), read_only=ro_req)
+                step_sb = _effective_sandbox(
+                    task_sb,
+                    raw_s.get("sandbox") or ("read-only" if ro_req else task_sb),
+                    read_only=ro_req,
+                    allow_danger=allow_danger,
+                )
                 ro = step_sb == "read-only"
                 step_ws = (raw_s.get("workspace_scope") or ".").strip() or "."
                 _resolve_workdir(proj_abs, step_ws)
@@ -3595,11 +3732,12 @@ class TeamOrchestrator:
                 sess = base_step.get("worker_session_id")
 
             req_sb = (sandbox or "").strip().lower()
+            allow_danger = bool(st["binding"].get("allow_danger_full_access", False))
             max_sb = st["binding"].get("max_sandbox", "workspace-write")
             if req_sb in _SANDBOX_RANK:
-                eff_sb = _effective_sandbox(max_sb, req_sb)
+                eff_sb = _effective_sandbox(max_sb, req_sb, allow_danger=allow_danger)
             else:
-                eff_sb = _effective_sandbox(max_sb, base_step.get("sandbox", "read-only"))
+                eff_sb = _effective_sandbox(max_sb, base_step.get("sandbox", "read-only"), allow_danger=allow_danger)
             is_ro = eff_sb == "read-only"
             if not is_ro and st["members"][mid].get("client") == "antigravity":
                 # Antigravity headless cannot execute workspace-write scripts -> prefer Codex plotter if explicitly requesting write
@@ -4868,6 +5006,7 @@ class TeamOrchestrator:
         on_event: Any = None,
         on_partial_text: Any = None,
         lightweight_effort: bool = False,
+        add_dirs: Optional[List[str]] = None,
     ) -> CodexExecutionResult:
         client_kind = mem.get("client", "codex")
         model_arg = None if mem["model"] in ("client_default", "client_current_setting") else mem["model"]
@@ -4891,6 +5030,7 @@ class TeamOrchestrator:
                 on_start=on_start,
                 on_event=on_event,
                 on_partial_text=on_partial_text,
+                add_dirs=add_dirs,
             )
         return self.adapter.execute_turn(
             prompt=prompt_text,
@@ -4903,6 +5043,7 @@ class TeamOrchestrator:
             on_start=on_start,
             on_event=on_event,
             on_partial_text=on_partial_text,
+            add_dirs=add_dirs,
         )
 
     def _execute_attempt_worker(self, task_id: str, step_index: int, attempt_id: str) -> None:
@@ -4917,13 +5058,19 @@ class TeamOrchestrator:
             # P0-0 Secondary Guard: validate path confinement, hard sandbox ceiling & shell capability BEFORE spawning CLI!
             try:
                 work_dir = _resolve_workdir(proj_root, rel_scope)
+                allow_danger = bool(snap["binding"].get("allow_danger_full_access", False))
                 max_sb = snap["binding"].get("max_sandbox", "workspace-write")
-                task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"))
+                task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"), allow_danger=allow_danger)
                 sandbox_arg = _effective_sandbox(
                     task_sb,
                     step.get("sandbox") or mem.get("sandbox") or "read-only",
                     read_only=bool(step.get("read_only", True)),
+                    allow_danger=allow_danger,
                 )
+                raw_ad = task.get("add_dirs")
+                if raw_ad is None:
+                    raw_ad = snap["binding"].get("extra_add_dirs") or []
+                eff_add_dirs = [d for d in raw_ad if isinstance(d, str) and os.path.isdir(d)]
                 if step.get("requires_shell") and mem.get("client") == "antigravity":
                     raise ValueError(
                         f"能力路由拦截：步骤 {step_index} 需要 Shell/脚本执行权限 (requires_shell=True)，不能指派给无头 Antigravity 节点 {step['member_id']}"
@@ -4947,7 +5094,7 @@ class TeamOrchestrator:
             wt_info: Optional[Dict[str, Any]] = None
             if (
                 task.get("worktree_isolation")
-                and sandbox_arg == "workspace-write"
+                and sandbox_arg != "read-only"
                 and not step.get("read_only", True)
             ):
                 existing_wt = step.get("worktree_info") if isinstance(step.get("worktree_info"), dict) else None
@@ -5190,7 +5337,7 @@ class TeamOrchestrator:
             step_exec_started_at = time.time()
             is_light = step.get("step_type") in ("opening", "chief_plan")
             res = self._invoke_member_turn(
-                mem, prompt_text, sess_to_use, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
+                mem, prompt_text, sess_to_use, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light, add_dirs=eff_add_dirs
             )
 
             # Reactive Context-Overflow Rollover: monotonic L0 -> L1 -> L2 (hard cap 2 retries) + write-side-effect safety gate!
@@ -5287,7 +5434,7 @@ class TeamOrchestrator:
 
                         self.store.mutate(_log_reactive_ro)
                         res = self._invoke_member_turn(
-                            mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
+                            mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light, add_dirs=eff_add_dirs
                         )
                         still_ovf = bool(getattr(res, "context_overflow", False)) or is_context_overflow_error(
                             res.error, res.stderr_lines, getattr(res, "raw_events", None)
@@ -5343,7 +5490,7 @@ class TeamOrchestrator:
                 turn_plan = snf_plan
                 prompt_text = snf_plan["prompt"]
                 res = self._invoke_member_turn(
-                    mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light
+                    mem, prompt_text, None, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, lightweight_effort=is_light, add_dirs=eff_add_dirs
                 )
 
             # Live Peer @Mention Consultation Loop (up to 3 consultations per step, deduped + reply-capped!)
@@ -5427,7 +5574,7 @@ class TeamOrchestrator:
                 )
                 peer_prompt = "\n\n".join(peer_parts)
                 peer_res = self._invoke_member_turn(
-                    peer_mem, peer_prompt, None, work_dir, "read-only", agy_proj_id, f"{attempt_id}-c{consult_loops}", lightweight_effort=True
+                    peer_mem, peer_prompt, None, work_dir, "read-only", agy_proj_id, f"{attempt_id}-c{consult_loops}", lightweight_effort=True, add_dirs=eff_add_dirs
                 )
                 raw_peer_txt = (peer_res.response_text or "").strip()
                 if peer_res.final_status != "succeeded" or not raw_peer_txt:
@@ -5473,7 +5620,7 @@ class TeamOrchestrator:
                     + "请结合该反馈直接完成你的本步最终交付（不要重复发起相同提问）。"
                 )
                 res = self._invoke_member_turn(
-                    mem, followup_to_caller, res.session_id, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text
+                    mem, followup_to_caller, res.session_id, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, add_dirs=eff_add_dirs
                 )
 
             # P0-2 Lock-Free Sidecar Execution Ledger (keeps team_state.json lean & avoids O(N^2) bloat)
@@ -5495,6 +5642,7 @@ class TeamOrchestrator:
                             "client": mem.get("client"),
                             "model": mem.get("model"),
                             "sandbox": sandbox_arg,
+                            "add_dirs": eff_add_dirs,
                             "final_status": res.final_status,
                             "exit_code": res.exit_code,
                             "edit_after_check": edit_after,
@@ -5824,8 +5972,9 @@ class TeamOrchestrator:
 
         valid_members = [k for k, v in st["members"].items() if v.get("client") in SUPPORTED_CLIENTS]
         codex_members = [k for k in valid_members if st["members"][k].get("client") == "codex"]
+        allow_danger = bool(st["binding"].get("allow_danger_full_access", False))
         max_sb = st["binding"].get("max_sandbox", "workspace-write")
-        task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"))
+        task_sb = _effective_sandbox(max_sb, task.get("sandbox", "read-only"), allow_danger=allow_danger)
         sc = task.get("workspace_scope", ".")
 
         if not raw_steps:
@@ -5867,7 +6016,12 @@ class TeamOrchestrator:
             stype = str(rs.get("step_type") or ("review" if rev_of is not None else "execution"))
             ro = True if (task_sb == "read-only" or rev_of is not None or stype in ("review", "discussion")) else bool(rs.get("read_only", False))
             raw_sb_val = str(rs.get("sandbox") or "").strip().lower()
-            step_sb = _effective_sandbox(task_sb, raw_sb_val if raw_sb_val in _SANDBOX_RANK else ("read-only" if ro else task_sb), read_only=ro)
+            step_sb = _effective_sandbox(
+                task_sb,
+                raw_sb_val if raw_sb_val in _SANDBOX_RANK else ("read-only" if ro else task_sb),
+                read_only=ro,
+                allow_danger=allow_danger,
+            )
             ro = step_sb == "read-only"
 
             task["steps"].append(
@@ -6278,7 +6432,11 @@ class TeamOrchestrator:
                             seq += 1
                         bk_id = cand_id
                         base_name = _strip_model_parens(src_m.get("name") or src_id)
-                        eff_sb = _effective_sandbox(st["binding"].get("max_sandbox", "workspace-write"), src_m.get("sandbox", "read-only"))
+                        eff_sb = _effective_sandbox(
+                            st["binding"].get("max_sandbox", "workspace-write"),
+                            src_m.get("sandbox", "read-only"),
+                            allow_danger=bool(st["binding"].get("allow_danger_full_access", False)),
+                        )
                         bk_mem = {
                             "id": bk_id,
                             "name": f"{base_name} [替补 · {ch_disp}]",

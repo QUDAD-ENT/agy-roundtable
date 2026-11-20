@@ -241,6 +241,7 @@ class AgyAdapter:
         reasoning_effort: Optional[str] = None,
         cwd: Optional[str] = None,
         sandbox: str = "read-only",
+        add_dirs: Optional[List[str]] = None,
         agy_project_id: Optional[str] = None,
         attempt_id: Optional[str] = None,
         idle_timeout_sec: Optional[float] = None,
@@ -250,11 +251,13 @@ class AgyAdapter:
         on_partial_text: Optional[Callable[[str], None]] = None,
     ) -> CodexExecutionResult:
         eff_idle_timeout = resolve_idle_timeout(reasoning_effort, idle_timeout_sec)
+        clean_add_dirs = [os.path.normpath(os.path.abspath(d)) for d in (add_dirs or []) if d and os.path.isdir(str(d).strip())]
         requested_cfg = {
             "client": "antigravity",
             "model": model,
             "reasoning_effort": reasoning_effort,
             "sandbox": sandbox,
+            "add_dirs": clean_add_dirs,
         }
         ok, err_reason, full_slug, accepted_cfg = self.resolve_full_model_slug(model, reasoning_effort)
         if not ok:
@@ -302,7 +305,7 @@ class AgyAdapter:
                 repomap = ""
             static_rule = (
                 "【Antigravity 无头 CLI 规范：你当前拥有的可用只读工具为 read_file 与 search_web"
-                + ("，以及写入工具 write_file / edit_file" if sandbox == "workspace-write" else "")
+                + ("，以及写入工具 write_file / edit_file" if sandbox in ("workspace-write", "danger-full-access") else "")
                 + "。严禁调用 run_command、run_workflow、invoke_subagent、ask_question 或 codex-team MCP 工具！"
                 "文末已为你列出当前项目的结构化代码符号图谱（AST RepoMap）与文件绝对路径索引，请直接将所需文件的绝对路径传给 read_file 读取；"
                 "读取巨型数据表/计数矩阵时优先查看汇总表与脚本，避免对同一大文件连续多次分块翻页；核查后直接输出高密度、结构化正文结论。】"
@@ -319,6 +322,7 @@ class AgyAdapter:
                 full_slug=full_slug,
                 cwd=cwd,
                 sandbox=sandbox,
+                add_dirs=clean_add_dirs,
                 agy_project_id=agy_project_id,
                 force_new_project=False,
                 attempt_id=attempt_id,
@@ -343,6 +347,7 @@ class AgyAdapter:
                     full_slug=full_slug,
                     cwd=cwd,
                     sandbox=sandbox,
+                    add_dirs=clean_add_dirs,
                     agy_project_id=None,
                     force_new_project=True,
                     attempt_id=attempt_id,
@@ -440,19 +445,24 @@ class AgyAdapter:
         more = f"（共 {total_found} 项，已优先置顶图件/Manifest/数据表/脚本并展示前 {max_entries} 项）" if total_found > max_entries else ""
         return f"【当前项目文件绝对路径索引{more}】\n" + "\n".join(items)
 
-    def _build_session_settings_json(self, work_dir: str, sandbox: str) -> str:
+    def _build_session_settings_json(self, work_dir: str, sandbox: str, add_dirs: Optional[List[str]] = None) -> str:
         allow_rules = [
             "read_file(*)",
             "search_web(*)",
             "list_resources(*)",
             "read_resource(*)",
         ]
-        if sandbox == "workspace-write":
-            wd_fwd = work_dir.replace("\\", "/").rstrip("/")
-            wd_win = work_dir.rstrip("\\")
+        if sandbox == "danger-full-access":
             for tool_n in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content"):
-                allow_rules.append(f"{tool_n}({wd_fwd}/*)")
-                allow_rules.append(f"{tool_n}({wd_win}\\*)")
+                allow_rules.append(f"{tool_n}(*)")
+        elif sandbox == "workspace-write":
+            dirs = [work_dir] + [d for d in (add_dirs or []) if d and os.path.isdir(d)]
+            for d_raw in dirs:
+                wd_fwd = d_raw.replace("\\", "/").rstrip("/")
+                wd_win = d_raw.rstrip("\\")
+                for tool_n in ("write_file", "edit_file", "replace_file_content", "multi_replace_file_content"):
+                    allow_rules.append(f"{tool_n}({wd_fwd}/*)")
+                    allow_rules.append(f"{tool_n}({wd_win}\\*)")
         return json.dumps({"permissions": {"allow": allow_rules}}, ensure_ascii=False)
 
     def _run_agy_once(
@@ -462,6 +472,7 @@ class AgyAdapter:
         full_slug: Optional[str],
         cwd: Optional[str],
         sandbox: str,
+        add_dirs: Optional[List[str]],
         agy_project_id: Optional[str],
         force_new_project: bool,
         attempt_id: Optional[str],
@@ -472,8 +483,8 @@ class AgyAdapter:
         on_event: Optional[Callable[[Dict[str, Any]], None]],
         on_partial_text: Optional[Callable[[str], None]],
     ) -> CodexExecutionResult:
-        if sandbox not in ("read-only", "workspace-write"):
-            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write）: {sandbox}")
+        if sandbox not in ("read-only", "workspace-write", "danger-full-access"):
+            raise ValueError(f"非法 sandbox 策略（仅允许 read-only / workspace-write / danger-full-access）: {sandbox}")
         mode = "plan" if sandbox == "read-only" else "accept-edits"
         work_dir = os.path.normpath(os.path.abspath(cwd or os.getcwd()))
         if sandbox == "read-only":
@@ -481,7 +492,12 @@ class AgyAdapter:
                 raise ValueError(f"只读工作目录不存在: {work_dir}")
         else:
             os.makedirs(work_dir, exist_ok=True)
-        settings_json = self._build_session_settings_json(work_dir, sandbox)
+        valid_add_dirs = [
+            os.path.normpath(os.path.abspath(d))
+            for d in (add_dirs or [])
+            if d and os.path.isdir(str(d).strip()) and os.path.normcase(os.path.abspath(d)) != os.path.normcase(work_dir)
+        ]
+        settings_json = self._build_session_settings_json(work_dir, sandbox, add_dirs=valid_add_dirs)
 
         # Stream the prompt over stdin as NDJSON (--input-format stream-json) so Windows never hits
         # CreateProcess's 32KB argv limit ([WinError 206]) on rich multi-round Roundtable transcripts!
@@ -496,9 +512,13 @@ class AgyAdapter:
             mode,
             "--add-dir",
             work_dir,
+        ]
+        for ad in valid_add_dirs:
+            argv.extend(["--add-dir", ad])
+        argv.extend([
             "--settings",
             settings_json,
-        ]
+        ])
         if full_slug:
             argv.extend(["--model", full_slug])
         if session_id:
