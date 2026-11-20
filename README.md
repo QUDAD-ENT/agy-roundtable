@@ -1,202 +1,174 @@
 # 🏛️ AGY Roundtable · 圆桌会议
 
-**Heterogeneous Multi-Agent Roundtable Studio for Google Antigravity CLI & OpenAI Codex CLI**  
-**面向 Google Antigravity CLI 与 OpenAI Codex CLI 的跨厂商多智能体圆桌协作工坊**
+**面向 Google Antigravity CLI 与 OpenAI Codex CLI 的跨厂商异构多智能体圆桌协作工坊**
 
-[![Release: v5.6.0](https://img.shields.io/badge/Release-v5.6.0-indigo.svg)](https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.6.0)
-[![Zero Pip Deps](https://img.shields.io/badge/Core-Pure%20Python%20Stdlib-emerald.svg)](#why-agy-roundtable--核心差异化优势)
-[![Tests: 34/34 Passing](https://img.shields.io/badge/Tests-34%2F34%20Passing-brightgreen.svg)](#quick-start-english)
-[![UI: Bilingual EN / 中文](https://img.shields.io/badge/UI-English%20%7C%20%E4%B8%AD%E6%96%87-blue.svg)](#中文说明)
-[![License: MIT](https://img.shields.io/badge/License-MIT-slate.svg)](LICENSE)
-[![Companion: Agy Console](https://img.shields.io/badge/Companion-dneo9527--ctrl%2Fagy--console-purple.svg)](https://github.com/dneo9527-ctrl/agy-console)
+**简体中文** · **[English Documentation (README_EN.md) →](README_EN.md)**
 
-[Why AGY Roundtable?](#why-agy-roundtable--核心差异化优势) · [What's New in v5.6.0](#whats-new-in-v560--v560-最新亮点) · [English Overview](#english-overview) · [中文说明](#中文说明) · [Quick Start](#quick-start-english)
+[![最新版本: v5.6.0](https://img.shields.io/badge/版本-v5.6.0-indigo.svg)](https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.6.0)
+[![零第三方依赖](https://img.shields.io/badge/核心运行时-Python纯标准库-emerald.svg)](#核心差异化优势)
+[![自动化测试: 34/34 通过](https://img.shields.io/badge/回归测试-34%2F34%20全通过-brightgreen.svg)](#快速启动)
+[![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-slate.svg)](LICENSE)
+[![关联项目: Agy Console](https://img.shields.io/badge/生态关联-dneo9527--ctrl%2Fagy--console-purple.svg)](https://github.com/dneo9527-ctrl/agy-console)
 
-> **Stop letting one model grade its own homework.**  
-> Seat **Gemini 4**, **Claude 5.5**, and **GPT-6.2** at the same Roundtable — with **sealed Blind Round 1**, **anonymous Borda consensus**, **user-controlled 3-tier sandboxes + `--add-dir`**, **KV-cache long-context compression**, **bilingual SQLite FTS5 memory**, **Git Worktree parallel isolation**, and **publication-grade scientific Figure QA** — running 100% locally via your official signed-in CLIs with **zero third-party pip dependencies** and **zero API-key proxying**.
->
-> **不要让同一个模型自己给自己批改作业。**  
-> 让 **Gemini 4**、**Claude 5.5** 与 **GPT-6.2** 同席圆桌——内置**首轮真盲评隔离**、**匿名互评 Borda 共识计票**、**用户自主三档沙箱与跨目录 `--add-dir` 授权**、**三区 KV 缓存长上下文压缩**、**中英双语 SQLite FTS5 跨任务记忆**、**Git Worktree 并行隔离写盘**与**顶刊级科研图双门控质检**；零第三方 pip 依赖、零密钥托管、100% 本地合规调用本机已登录的官方 CLI。
+[核心差异化优势](#核心差异化优势) · [v5.6.0 最新升级](#v560-最新升级) · [核心能力架构](#核心能力架构) · [快速启动](#快速启动) · [项目关联](#项目关联与生态定位) · [目录结构](#目录结构)
+
+> **拒绝让同一个模型“自己写代码、自己审自己”。**  
+> **AGY Roundtable** 让来自不同厂商的顶尖模型（**Gemini 4**、**Claude 5.5**、**GPT-6.2**）围坐同一张圆桌——内置**首轮真盲评隔离**、**匿名互评 Borda 共识计票**、**用户自主三档沙箱与跨盘 `--add-dir` 目录授权**、**三区 KV 缓存长上下文压缩**、**纯标准库中英双语 SQLite FTS5 跨任务记忆**、**Git Worktree 并行写盘隔离**以及**顶刊级科研图双门控质检闭环**。  
+> 核心运行时 **零第三方 pip 依赖**、**零 API Key 中转托管**，100% 本地直连你已安装并登录的官方 `agy` 与 `codex` CLI。
 
 ---
 
-<a id="why-agy-roundtable--核心差异化优势"></a>
-## 🏆 Why AGY Roundtable? | 核心差异化优势
+## 🏆 核心差异化优势
 
-How **AGY Roundtable v5.6.0** compares against single-vendor CLI agent teams and code-heavy multi-agent frameworks:
+与「单一厂商内置 CLI 团队」以及「AutoGen / CrewAI / LangGraph 等代码编排框架」相比，**AGY Roundtable v5.6.0** 的核心优势对照：
 
-| Dimension / 能力维度 | Single-Vendor CLI Teams (单一厂商 CLI) | Generic Frameworks (AutoGen / CrewAI / LangGraph) | **🏛️ AGY Roundtable v5.6.0** |
+| 对比维度 | 单一厂商 CLI 团队 | 传统多智能体代码框架 (AutoGen / CrewAI 等) | **🏛️ AGY Roundtable v5.6.0** |
 | :--- | :--- | :--- | :--- |
-| **Heterogeneous Multi-Model Debate**<br>跨厂商异构模型同席思辨 | Locked to one vendor's model family | Requires manual API keys, billing & custom glue code | **Native Antigravity (`Gemini 4` / `Claude 5.5`) + Codex (`GPT-6.2`)** in one live Roundtable, with real-time `@mention` peer verification |
-| **Anti-Groupthink Governance**<br>反群体迷思与防锚定机制 | Shared prompt thread; early anchoring bias | Free-form chat loops prone to sycophancy | **Sealed Blind Round 1** (in-memory & on-disk isolation) + **Anonymous Seat Masking (`Seat A/B/C`)** + **Deterministic Borda Voting** |
-| **Granular Sandbox & Cross-Drive Control**<br>用户自主三档沙箱与跨目录授权 | Global binary flags; hard to mix per-agent permissions | Usually unsandboxed host execution or heavy Docker | **3-Tier Permission Center**: `read-only` / `workspace-write` + **`--add-dir` (up to 8 cross-drive folders)** / **2-step opt-in `danger-full-access`** (1-click instant relock & clamp) + **Per-Seat Roundtable overrides** |
-| **Long-Context & Memory Engine**<br>长上下文治理与跨任务记忆 | Naive truncation or full history replay | External vector DBs, embeddings & heavy infra | **3-Zone KV-Cache Stable Prefix** + observation masking + immutable snapshots + peak-occupancy auto rollover (`L0→L1→L2`) + **Pure-Stdlib Bilingual SQLite FTS5** & **AST RepoMap** |
-| **Parallel Write Safety**<br>多工位并行改码隔离 | Concurrent edits can collide in one working tree | Rarely integrated with native Git | **Opt-in Native Git Worktree Isolation** per writable step, live unified diff viewer, dirty-repo guard & conflict-safe `--no-ff` merge with auto-rollback |
-| **Scientific Rigor & Figure QA**<br>科研复算与顶刊级出图闭环 | General coding only | Not built-in | **7 Modular OpenScience Playbooks**, pure-stdlib **TIFF/PNG/SVG/PDF/CSV anti-fabrication gate**, automated **VLM Visual Critique & Self-Repair loop**, SHA-256 hash-locked verifiers & Provenance DAG |
-| **Calling Resilience & Zero-Freeze UX**<br>高流畅度、防卡死与自动容错 | Stalls or 429 errors abort the turn | Requires custom retry graphs | **Linear $O(N)$ zero-ReDoS Markdown**, `slim + 304 + gzip` polling (**-96% payload**), `0%` idle CPU/disk writes, dynamic idle watchdog (`240s–600s`) + **2-hop cross-engine quota/stall failover**, **zero Windows CMD / `Rterm` crash popups** |
-| **Setup & Dependencies**<br>安装成本与依赖 | Vendor CLI only | Heavy Python/Node/Docker stack + API keys | **Zero third-party pip packages** (100% Python stdlib + single-file Studio UI), official CLI auth only, **built-in GitHub auto-update notification popup** |
+| **跨厂商异构同席思辨** | 锁定单一厂商同源模型，易产生同质盲区 | 需自行配置多平台 API Key、计费与胶水代码 | **原生打通 Antigravity（Gemini 4 / Claude 5.5）+ Codex（GPT-6.2）** 同席圆桌，支持中途实时 `@队友` 核验 |
+| **反群体迷思与防锚定** | 共享上下文串行跟帖，极易受首位发言锚定 | 自由聊天循环容易相互附和、“和稀泥” | **首轮真盲评物理隔离**（内存与磁盘双密封）+ **匿名席位掩码（席位 A/B/C）** + **Borda 共识计分牌** |
+| **沙箱与跨盘权限自主控制** | 粗粒度全局参数，难以按角色混配读写权限 | 多为无沙箱裸跑或依赖笨重的 Docker 容器 | **三档可视化权限中心**：`只读` / `项目可写` + **`--add-dir` 跨盘目录授权（最多 8 个）** / **二次确认解锁 `完全访问`**（支持一键立即回收降级）+ **圆桌单席独立权限** |
+| **长上下文治理与跨任务记忆** | 超长对话易爆窗口或粗暴截断丢细节 | 依赖外部向量数据库、Embedding 服务与繁琐配置 | **三区 KV 缓存稳定前缀** + 观测块外置折叠 + 不可变轮次状态卡 + 单次峰值水位校准无损换乘（`L0→L1→L2`）+ **纯标准库中英双语 SQLite FTS5 检索**与 **AST 代码结构图谱** |
+| **多工位并行改码安全** | 多人同时写同一工作区易互相覆盖冲突 | 极少原生集成 Git 工作树隔离 | **可选原生 Git Worktree 分支隔离**、实时 Unified Diff 预览、脏工作区守卫与冲突安全 `--no-ff` 自动合并回滚 |
+| **科研复算与顶刊出图质检** | 仅面向常规软件开发 | 无内置科研与图件核验能力 | **7 大模块化 OpenScience 科研协议**、纯标准库 **TIFF/PNG/SVG/PDF/CSV 防造假双门控**、**VLM 自动视觉审图自修闭环**、SHA-256 锁定验收脚本与溯源谱系树 |
+| **高流畅度与调用高可用** | 长文渲染易卡顿，遇限流或卡死直接中断 | 需手工编写复杂重试与降级逻辑 | **线性 $O(N)$ 零 ReDoS Markdown 渲染**、`slim + 304 + gzip` 增量轮询（**-95.9% 流量**）、空闲零写盘、动态超时心跳 + **2 跳跨引擎自动容错接力**、**Windows 零命令行黑框与零 `Rterm` 崩溃弹窗** |
+| **部署成本与更新体验** | 仅限终端命令行交互 | 依赖庞大的 Python/Node 环境栈 | **核心零第三方 pip 依赖**（纯 Python 标准库 + 单文件 Web 工坊）、双击即用、**内置 GitHub 新版本自动弹窗通知** |
 
-### 📊 Verified Engineering Benchmarks | 实测工程指标
+### 📊 实测工程指标
 
-- **HTTP Polling Bandwidth**: `5.22 MB` full state → **`215 KB`** cold slim gzip (`-95.9%`) → **`0 B` / `1.09 ms`** via `HTTP 304 Not Modified` (`since_rev` + `ETag`).
-- **Markdown Renderer Anti-Freeze**: 600-char unclosed-link adversarial input reduced from exponential catastrophic backtracking freeze → **`0.1 ms`** linear $O(N)$ scan + 180-entry LRU cache.
-- **Idle Runtime Footprint**: **`0` disk writes/sec** and **`0%` background CPU delta** when no task is actively running.
-- **Automated Regression Verification**: **`34 / 34`** end-to-end tests passing (`~29s`) covering P0 sandbox trust root, 3-tier opt-in/relock, `--add-dir`, per-seat overrides, SQLite FTS5 bilingual search, Git Worktree merge, VLM Figure QA, quota failover, and Win32 zero-popup/zero-crash-dialog execution.
-
----
-
-<a id="whats-new-in-v560--v560-最新亮点"></a>
-## ✨ What's New in v5.6.0 | v5.6.0 最新亮点
-
-- **🛡️ User-Controlled 3-Tier Sandbox & Directory Permission Center (`v5.6.0`)**:
-  - Live topbar status pill (`🔒 只读` / `✏️ 可写` / `⚠️ 完全访问`) opens the dedicated **Sandbox & Directory Permission Center**.
-  - **Tier 1 (`read-only`)**: Strictly read-only review & verification (with optional global read-only lock).
-  - **Tier 2 (`workspace-write` + `--add-dir`)**: Recommended daily mode for coding, plotting, and R/Python scripts — plus **up to 8 extra cross-drive/external directories** (paste path or native OS Folder Picker) passed directly to Codex (`--add-dir` / `writable_roots`) and Antigravity (`--add-dir`).
-  - **Tier 3 (`danger-full-access`)**: **Fail-closed locked by default** (`allow_danger_full_access=false`); requires explicit 2-step risk confirmation in the UI to unlock, displays a red warning banner whenever selected, and supports **1-click instant relock** (immediately clamping global ceiling, default task mode, and all members back to `workspace-write`).
-- **🪑 Per-Seat Roundtable Permissions & MCP Auto-Sync (`v5.6.0`)**:
-  - In any writable Roundtable, toggle each seated expert individually (`🔒 / ✏️ / ⚠️`) right on the participant chip (e.g., keep peer reviewers `read-only` while granting `workspace-write` to statistical/plotting engineers).
-  - MCP `team_dispatch_task` now defaults `sandbox=None` to automatically follow your configured `default_task_sandbox`, and supports `allow_member_writes`, `add_dirs_json`, and `seat_sandboxes_json`.
-- **🪟 Zero Windows `Rterm.exe` Crash Modals & Zero Black CMD Popups (`v5.5.1` + `v5.5.0`)**:
-  - Process-tree inherited Win32 `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)` eliminates blocking `Rterm.exe / Rscript.exe 0xc0000005` crash modals on Windows; read-only sandbox guardrails steer statistical spot-checks to Python while R executes cleanly in `workspace-write`.
-  - Unified `hidden_subprocess_kwargs()` (`CREATE_NO_WINDOW` + `SW_HIDE`, no `DETACHED_PROCESS`) + `-c notify=[]` eliminates stray CMD console flashes on Windows.
-- **🔔 Automatic Update Popups for Older Versions (`v5.5.0+`)**:
-  - Both older local installations (checking remote GitHub `VERSION.json` / Releases API) and cached browser tabs (detecting `X-Server-Rev` hot upgrades) automatically display a non-intrusive topbar `新版 vX.Y.Z` badge and bilingual changelog modal with 1-click `git pull` copy & GitHub Release link.
+- **轮询带宽压缩**：`5.22 MB` 全量状态 → **`215 KB`** 首次增量压缩包（`-95.9%`）→ 未变化时 **`0 B` / `1.09 ms`**（`HTTP 304 Not Modified`）。
+- **Markdown 防卡死引擎**：针对 600 字符未闭合链接的极端输入，耗时从正则回溯卡死降至 **`0.1 ms`**（线性 $O(N)$ 括号扫描 + 180 条 LRU 缓存）。
+- **空闲资源占用**：无活跃任务时后台调度器 **`0` 次/秒磁盘写入**、**`0%` 额外 CPU 波动**。
+- **自动化回归测试**：内置 **`34 / 34` 项全链路自动化测试**（约 `29s` 跑完），覆盖沙箱信任根、三档解锁与一键回收、`--add-dir` 透传、单席权限、SQLite FTS5 双语检索、Git Worktree 合并、科研图 QA 及额度容错切换。
 
 ---
 
-## 🔗 Ecosystem & Project Association | 项目关联与生态定位
+## ✨ v5.6.0 最新升级
 
-**AGY Roundtable (`agy-roundtable`)** is an independent companion collaboration studio associated with **[dneo9527-ctrl/agy-console](https://github.com/dneo9527-ctrl/agy-console)**:
-
-- **[Agy Console (`dneo9527-ctrl/agy-console`)](https://github.com/dneo9527-ctrl/agy-console)** focuses on persistent per-window CLI binding, task queues, model fallback/quota failover, and cross-platform update packaging.
-- **AGY Roundtable (`agy-roundtable`)** builds the **multi-agent team orchestration & scientific verification layer** on top of official `agy` and `codex` CLIs — seating heterogeneous models at a shared Roundtable with blind peer review, dynamic `@mention` consultations, Chief Dispatch, multi-stage DAGs, Git Worktree isolation, and publication Figure QA.
-
-> Independent community open-source tool. Not an official product of Google, OpenAI, or Anthropic. Executes solely through user-installed and user-authenticated official `agy` and/or `codex` CLIs without reading or transmitting account credentials.  
-> 独立社区开源项目，非厂商官方产品；仅通过本机已安装并登录的官方 `agy` 与 `codex` CLI 合规调用，不读取或提取任何账号密钥。
-
----
-
-<a id="english-overview"></a>
-## 🌍 English Overview
-
-### Core Capabilities
-
-1. **Four Anthropomorphic Execution Topologies**
-   - **🪑 Roundtable Chamber (`roundtable`)**: Seat 2–N heterogeneous specialists + 1 Host. Sealed Blind Round 1 independent proposals → multi-round adversarial cross-critique with `@mention` verification & optional anonymous Borda voting → Host multi-dimensional synthesis.
-   - **🎖️ Chief Dispatch Bridge (`chief_dispatch`)**: Assign 1 Chief Commander to inspect the workspace & roster, dynamically recruit only needed specialists (`1–12`), orchestrate parallel/serial/review nodes, and sign off.
-   - **🧱 Multi-Track Pipeline Studio (`custom_dag`)**: Visually stack up to `10` stages × `10` parallel workstations with independent fail-closed review gates (bounded 2-round auto-repair before human ruling).
-   - **⚡ 1-on-1 Specialist Desk (`single_member`)**: Direct low-latency specialist turn with native session continuation.
-
-2. **Context Compression, Cross-Task Memory & Parallel Isolation**
-   - **🧠 3-Zone KV-Cache Context Engine (`context_engine.py`)**: Stable prefix hashing, externalized observation masking (`BlobStore`), newest-first immutable round snapshots + Pinned Historical Anchor Ledger, dual billing vs peak-context occupancy calibration, and automatic lossless session rollover (`L0 → L1 → L2`).
-   - **🔎 Bilingual SQLite FTS5 Memory & AST RepoMap (`memory_index.py`)**: Zero-dependency English + CJK bi-gram BM25 full-text memory across tasks/snapshots/blobs (strictly disabled during Blind Round 1) + AST Structural RepoMap (Python `ast` + JS/TS/HTML/R + import centrality).
-   - **🌿 Native Git Worktree Parallel Isolation (`worktree_manager.py`)**: Opt-in isolated branch/worktree per writable step, live unified diff inspection, dirty-repo guard, and conflict-safe `--no-ff` merge with automatic rollback.
-
-3. **OpenScience Research & Publication-Grade Figure QA**
-   - **🔬 7 Modular OpenScience Playbooks (`openscience_playbooks.py`)**: Auto-matched or manually toggled protocols covering Statistical Rigor, Experimental Design, Code Hygiene, Publication Figures, Atomic Citations, Autoresearch Loop, and Peer Review.
-   - **🎨 Dual-Gate Publication Figure QA + VLM Critique Loop (`figure_qa.py`)**: Pure-stdlib Python/R backend probe, binary TIFF IFD dual-axis DPI & physical-mm anti-spoofing, PNG/SVG/PDF structural checks, Source-CSV semantic verification (catching group swaps & raw-vs-adjusted P misuse), automated multimodal VLM critique (`PASS | REVISE`) & bounded self-repair (max 2 rounds), plus optional editable `.drawio` export.
-   - **🔒 Lock-Free Hash-Locked Verification & Provenance DAG (`research_verifier.py`, `provenance_store.py`)**: SHA-256 locked acceptance scripts (`shell=False`), `readonly_inputs` tamper guard, content-addressed `source → run → artifact → claim` DAG, and `experiment_run` baseline-vs-delta board.
-
-4. **Studio UX, Resilience & Security**
-   - **🔄 Live Seat Hot-Swap & 2-Hop Quota/Stall Failover**: Swap any seated specialist mid-process or next round, add seats on the fly, auto-bind quota backups, and seamlessly failover across engines on 429 / idle stall / read-only shell blocks.
-   - **🛡️ Hard Security Trust Root**: Loopback-only `127.0.0.1` binding, POST CSRF `Origin`/`Content-Type` validation, `/api/fs/raw_file` root allowlist, path-escape guard, fail-closed review JSON gate, and user-controlled 3-tier sandbox with 2-step opt-in for `danger-full-access`.
-   - **✨ Quiet Reading-First Bilingual UI (`EN / 中文`)**: Dark + Paper Light themes, 15 curated specialist templates, 7 Squad Presets, pure-white Figure Gallery (with color-blindness proofing filters & side-by-side compare), wide CSV/TSV/DOCX/PDF/SVG/TIFF local file previewer, and `Ctrl+K` Command Palette.
-
-<a id="quick-start-english"></a>
-### Quick Start (English)
-
-1. **Prerequisites**:
-   - Python `3.9+` (**zero third-party pip packages required** for the web console & HTTP runtime; `mcp` package optional only if mounting `codex_team_mcp.py`).
-   - At least one official CLI installed & signed in: [Google Antigravity CLI (`agy`)](https://antigravity.google/docs/install?tab=cli) and/or OpenAI Codex CLI (`codex`).
-2. **Launch Web Studio (`http://127.0.0.1:8765/`)**:
-   - **Windows**: Double-click `Start-Roundtable.cmd` (or `打开团队协作面板.cmd`).
-   - **macOS / Linux**: Run `chmod +x Start-Roundtable.sh && ./Start-Roundtable.sh`.
-   - **Direct Python**: `python prototype/serve_sidebar.py`
-3. **Optional MCP Integration (Antigravity / Claude / Codex MCP)**:
-   ```json
-   {
-     "mcpServers": {
-       "codex-team": {
-         "command": "python",
-         "args": ["/absolute/path/to/agy-roundtable/prototype/codex_team_mcp.py"]
-       }
-     }
-   }
-   ```
-4. **Run Automated Regression Suite (`34` tests)**:
-   ```bash
-   python prototype/test_runtime_mechanisms.py
-   ```
+1. **🛡️ 用户自主三档沙箱与目录权限中心**
+   - 顶栏右侧新增实时权限胶囊（`🔒 只读` / `✏️ 可写` / 红色 `⚠️ 完全访问`），一键打开「沙箱与目录权限中心」弹窗：
+     - **🔒 只读模式 (`read-only`)**：仅允许读取核查，严禁修改任何文件（支持一键全局锁死只读上限）。
+     - **✏️ 项目目录可写 (`workspace-write`)**：日常写代码、科研画图与运行 R/Python 脚本推荐模式。
+     - **⚠️ 完全访问 (`danger-full-access`)**：默认安全锁定（`allow_danger_full_access=false`），需在权限中心勾选二次风险确认后解锁；选中时任务栏自动展示醒目红色风险横幅，且随时可点击「立即重新锁定并回收」，瞬间将全局上限、默认权限与所有成员强制回退至 `workspace-write`。
+2. **📁 跨盘 / 外部目录授权 (`--add-dir`)**
+   - 无需放开整机无沙箱权限，即可直接粘贴或调用系统原生选目录弹窗（`/api/fs/pick_dir`）授权最多 **8 个**跨盘数据或代码文件夹（如 `H:\project 1\BioData`），自动透传给 Codex CLI（新会话 `--add-dir` / 续聊 `writable_roots`）与 Antigravity CLI。
+3. **🪑 圆桌单席细粒度权限 + MCP 默认同步**
+   - 在可写或完全访问圆桌中，可直接在每个参会席位胶囊上点选切换 `🔒 / ✏️ / ⚠️`（例如让审稿专家保持严格只读，仅授权统计/绘图专家写文件）。
+   - MCP `team_dispatch_task` 默认自动跟随用户在面板中配置的默认沙箱权限（`default_task_sandbox`），并支持透传 `allow_member_writes`、`add_dirs_json` 与 `seat_sandboxes_json`。
+4. **🪟 根治 Windows 下 `Rterm.exe` 崩溃弹窗与命令行黑框闪烁**
+   - 服务进程树继承 Win32 `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)`，彻底拦截 Windows 下 R 只读受限令牌触发的 `0xc0000005` 阻塞式崩溃弹窗，并在只读沙箱下自动引导使用 Python 复算（确需运行 R 脚本可切至 `workspace-write`）。
+   - 全模块统一 `CREATE_NO_WINDOW + SW_HIDE`（禁用冲突的 `DETACHED_PROCESS`）与 `-c notify=[]`，彻底消除后台命令行黑框闪现。
+5. **🔔 老版本自动检测与更新弹窗通知**
+   - 老版本实例（对比 GitHub `VERSION.json` / Releases API）与未刷新的旧网页标签页（对比 `X-Server-Rev`）均会自动在顶栏点亮 **`新版 vX.Y.Z`** 提示并弹出更新说明窗，支持一键复制 `git pull` 更新命令。
 
 ---
 
-<a id="中文说明"></a>
-## 🇨🇳 中文说明
+## 🧩 核心能力架构
 
-### 核心能力一览
+### 1. 四大拟人化协作阵型
+- **🪑 群聊圆桌议事厅（`roundtable`）**：2~N 位跨引擎专家围坐圆桌——首轮真盲评并行立论 → 多轮共享群聊对抗质询、`@队友` 实时交叉核验与可选匿名 Borda 计票 → 主持人多维仲裁拍板交付。
+- **🎖️ 总管自动点将台（`chief_dispatch`）**：由 1 位主帅先勘察当前工作区结构与花名册，按需抽调 `1–12` 名精兵动态生成并行/串行/审查 DAG 并终审签发，其余成员待命不陪跑。
+- **🧱 多轨搭积木工坊（`custom_dag`）**：可视化自由编排最多 `10` 阶段 × `10` 并行工位，支持插入独立 Fail-Closed 审查门禁（最多 2 轮自动退回返修，超限转交人工裁决）。
+- **⚡ 专家一对一专办（`single_member`）**：直连单名专家极速分析或改码，支持沿用原生 Session ID 多轮追问。
 
-1. **四种拟人化团队编排阵型**
-   - **🪑 群聊圆桌议事厅（`roundtable`）**：2~N 位跨引擎专家同席圆桌——首轮真盲评并行立论（杜绝早期锚定偏倚）→ 多轮共享群聊对抗质询、`@队友` 实时核验与可选匿名 Borda 共识计票 → 主持人多维仲裁定稿。
-   - **🎖️ 总管自动点将台（`chief_dispatch`）**：主帅探查项目与花名册后按需抽调 `1–12` 名精兵动态编排并行/串行/审查节点并终审签发。
-   - **🧱 多轨搭积木工坊（`custom_dag`）**：自由堆叠最多 `10` 阶段 × `10` 并行工位与独立 Fail-Closed 审查关卡（自动退回修复最多 2 轮，超限交人工裁决）。
-   - **⚡ 专家一对一专办（`single_member`）**：直连单名专家高响应分析或改码，支持原生会话续聊。
+### 2. 长上下文压缩、双语 FTS5 记忆与并行隔离
+- **🧠 三区 KV 缓存长上下文引擎（`context_engine.py`）**：稳定系统前缀提升缓存命中率；超长代码块/宽表自动外置落盘为 `BlobStore` 摘要指针；每轮结束自动封存不可变状态卡（优先保留最新轮次并维护历史锚点总账）；区分累计计费 Token 与单次真实上下文峰值，超水位自动无损换乘新会话（`L0 → L1 → L2`）。
+- **🔎 纯标准库中英双语 SQLite FTS5 记忆与 AST 代码图谱（`memory_index.py`）**：内置英文词元 + 中文双字切分（CJK Bi-gram）BM25 全文检索引擎，自动跨任务召回历史结论与指标（盲评第 1 轮严格屏蔽以防锚定）；纯标准库解析 Python `ast` 及 JS/TS/HTML/R 核心符号与引用中心度生成结构图谱。
+- **🌿 原生 Git Worktree 并行写盘隔离（`worktree_manager.py`）**：开启后每个可写工位在独立临时分支与工作树中运行，面板可直接查看文件变更 Diff，支持脏工作区保护与无冲突 `--no-ff` 安全合并。
 
-2. **用户自主三档沙箱权限 + 跨目录授权 (`--add-dir`) + 单席细粒度控制**
-   - **顶栏权限胶囊直达「沙箱与目录权限中心」**：自由在 **🔒 只读 (`read-only`)**、**✏️ 项目目录可写 (`workspace-write`)** 与 **⚠️ 完全访问 (`danger-full-access`)** 间按需配置；高危完全访问默认安全锁定，需二次风险勾选确认方可解锁，并支持一键立即重新锁定回退。
-   - **跨盘 / 外部目录授权 (`--add-dir`)**：无需放开整机权限，即可直接粘贴或通过系统原生选目录弹窗放行最多 8 个外部数据/代码目录，Codex 与 Antigravity CLI 同步生效。
-   - **圆桌单席权限 & MCP 自动同步**：发起圆桌时可给每个参会席位单独点选 `🔒 / ✏️ / ⚠️`（例如审稿官只读、统计/绘图官可写）；MCP `team_dispatch_task` 自动跟随面板默认权限。
+### 3. OpenScience 科研方法论与顶刊科研图质检闭环
+- **🔬 7 大可组合 OpenScience 科研协议（`openscience_playbooks.py`）**：涵盖统计规范与效能、实验设计与防伪重复、科研代码洁净与隐性验收、顶刊绘图与示意图、原子声明与文献溯源、自动科研实验循环、顶刊审稿与论文撰写，支持任务目标自动匹配或手动点选。
+- **🎨 出版级科研图双门控 QA 与 VLM 自动审图闭环（`figure_qa.py`）**：实时探测本机 Python（`matplotlib`/`seaborn`/`scipy`/`statsmodels`）与 R（`ggplot2`/`patchwork`/`ComplexHeatmap`）环境；零第三方依赖解析二进制 TIFF 双轴真实物理 DPI（识破低分辨率伪造 600 DPI）、SVG/PNG/PDF 结构合规性与面板级 Source CSV/TSV 图数一致性（自动拦截组别标签互换及未校正 P 值混用）；支持多模态 VLM 自动视觉审图与最多 2 轮自动返修重绘，并可同步导出可编辑 `.drawio` 矢量流程图。
+- **🔒 无锁哈希机械验收与内容寻址溯源谱系（`research_verifier.py`、`provenance_store.py`）**：在状态锁外安全执行 SHA-256 哈希锁定的验收脚本与只读原始数据防篡改校验，自动记录 `数据源 → 运行 → 产物 → 结论声明` 溯源 DAG 与实验基线对比榜。
 
-3. **长上下文压缩、双语 FTS5 记忆、Git Worktree 隔离与顶刊科研绘图闭环**
-   - **🧠 三区 KV 缓存长上下文引擎 (`context_engine.py`)**：固定前缀缓存命中、观测块自动外置折叠、不可变轮次状态卡（newest-first 保留 + 历史锚点总账）、单次峰值水位校准与超限自动无损换乘 (`L0 → L1 → L2`)。
-   - **🔎 纯标准库中英双语 SQLite FTS5 记忆与 AST 代码图谱 (`memory_index.py`)**：跨任务检索历史状态卡、指标数值与报错结论（盲评第 1 轮严格屏蔽），自动提取 Python/JS/TS/HTML/R 核心符号与依赖图谱。
-   - **🌿 原生 Git Worktree 并行写盘隔离 (`worktree_manager.py`)**：同仓库并行改码自动分枝隔离，支持实时 Diff 审查、脏工作区保护与冲突安全 `--no-ff` 合并。
-   - **🔬 7 大 OpenScience 科研协议 & 顶刊科研图双门控质检 (`openscience_playbooks.py`, `figure_qa.py`)**：内置 Python/R 绘图栈实时探测、纯标准库 TIFF 双轴物理 DPI 防造假校验、SVG/PNG/PDF 与 Source CSV 图数一致性核验、自动 VLM 视觉审图闭环（最多 2 轮自修）、可选可编辑 `.drawio` 导出与内容寻址溯源 DAG。
-   - **⚡ 极速零卡死体验与 Windows 零弹窗运行时**：线性 $O(N)$ 防 ReDoS Markdown 渲染、`slim + 304 + gzip` 增量状态轮询、空闲零磁盘写入、动态努力度感知超时与跨引擎自动容错、Win32 全链路静默子进程与 `SetErrorMode` 根治 Windows 命令行黑框及 `Rterm.exe` 崩溃弹窗，并支持新版本自动检测弹窗提醒。
-
-### 快速启动（中文）
-
-1. **前置条件**：本机已安装 Python `3.9+`（Web 控制台与核心运行时零第三方 pip 依赖），并已安装登录官方 `agy` CLI 或 `codex` CLI。
-2. **一键开启**：
-   - **Windows**：双击 `Start-Roundtable.cmd` 或 `打开团队协作面板.cmd`（后台无弹窗守护启动并打开 `http://127.0.0.1:8765/`）。
-   - **macOS / Linux**：终端执行 `./Start-Roundtable.sh`。
-3. **自由切换项目与权限**：顶栏下拉或系统弹窗切换任意本地课题/仓库；点击顶栏右侧权限胶囊即可按需切换三档沙箱或添加跨盘 `--add-dir` 数据目录。
+### 4. 现场热换人、额度替补与双主题工作台
+- **🔄 现场热换人与 2 跳额度容错接力**：全面适配 `Gemini 4 Neon / Carbon / Hydrogen`、`Claude Opus 5.5 / Sonnet 5.5`、`GPT-6.2-Astra / GPT-6.2-Sol`；运行途中点击席位胶囊即可立即换人接力或下轮换人，支持一键全员绑定同角色跨模型额度替补，遇 429 限流或长时间无响应自动触发最多 2 跳跨引擎级联切换。
+- **🖼️ 纯白底板科研图画廊与本地真实文件预览**：深色 / 纸感浅色双主题一键切换，内置色觉障碍（Protan / Deutan / Tritan / 灰度）投稿预检滤镜、`SVG / PNG / PDF / TIFF` 同源切换、Before/After 并排对比，以及支持 60 列宽表 CSV/TSV、DOCX、PDF、源码行号锚点的浏览器内真实文件预览器。
 
 ---
 
-## 📁 Repository Structure | 目录结构
+## 🚀 快速启动
+
+### 1. 环境准备
+- 本机已安装 **Python `3.9+`**（Web 工作台与核心调度服务**无需安装任何第三方 pip 包**；仅在需要将 `codex_team_mcp.py` 挂载为 IDE MCP 工具时可选安装 `mcp` 包）。
+- 本机已安装并登录至少一个官方 CLI：[Google Antigravity CLI (`agy`)](https://antigravity.google/docs/install?tab=cli) 或 OpenAI Codex CLI (`codex`)。
+
+### 2. 一键启动 Web 协作工坊（`http://127.0.0.1:8765/`）
+- **Windows**：直接双击仓库根目录的 `打开团队协作面板.cmd`（或 `Start-Roundtable.cmd`），后台无弹窗静默拉起服务并自动打开浏览器页面。
+- **macOS / Linux**：
+  ```bash
+  chmod +x Start-Roundtable.sh && ./Start-Roundtable.sh
+  ```
+- **命令行直启**：
+  ```bash
+  python prototype/serve_sidebar.py
+  ```
+
+### 3. 挂载至 IDE 原生 MCP（可选，支持 Antigravity / Claude / Codex MCP）
+```json
+{
+  "mcpServers": {
+    "codex-team": {
+      "command": "python",
+      "args": ["/你的绝对路径/agy-roundtable/prototype/codex_team_mcp.py"]
+    }
+  }
+}
+```
+
+### 4. 运行全量自动化回归测试（共 34 项）
+```bash
+python prototype/test_runtime_mechanisms.py
+```
+
+---
+
+## 🔗 项目关联与生态定位
+
+**AGY Roundtable（圆桌会议）** 是与 **[dneo9527-ctrl/agy-console](https://github.com/dneo9527-ctrl/agy-console)** 关联互补的双端多智能体团队协作工坊：
+
+- **[Agy Console (`dneo9527-ctrl/agy-console`)](https://github.com/dneo9527-ctrl/agy-console)** 聚焦单窗口固定会话绑定、队列任务进度、模型额度候补切换与跨平台安装包分发；
+- **AGY Roundtable（本项目）** 聚焦 **跨厂商多智能体编排、盲评对抗思辨与科研级质量核验**：让多位来自 Antigravity 与 Codex 的异构模型专家同席圆桌、中途互相 `@队友` 核查、主帅动态点将、多轨流水线并行改码并完成机械化验收。
+
+> **合规声明**：本项目为独立社区开源工具，非 Google、OpenAI 或 Anthropic 官方产品。所有模型调用均通过用户本机已安装并自行登录的官方 `agy` 与 `codex` CLI 执行，绝不读取、复制或上传任何账号凭证。
+
+---
+
+## 📁 目录结构
 
 ```text
 agy-roundtable/
 ├── prototype/
-│   ├── serve_sidebar.py          # Loopback HTTP server, slim+304+gzip API, CSRF/root guard & native pickers (rev 21)
-│   ├── sidebar_panel.html        # Single-file Bilingual (EN/ZH) Studio UI, 3-Tier Sandbox Center & Figure Gallery
-│   ├── team_runtime.py           # Orchestrator (Roundtable, Chief, DAG, Per-Seat Sandbox, Hot-Swap, Failover)
-│   ├── team_state_manager.py     # Atomic/debounced state store, 15 specialist templates & orphan-PID recovery
-│   ├── context_engine.py         # 3-Zone KV-stable compiler, BlobStore masking, immutable snapshots & rollover
-│   ├── memory_index.py           # Pure-stdlib bilingual (EN + CJK) SQLite FTS5 memory & AST Structural RepoMap
-│   ├── worktree_manager.py       # Native Git Worktree parallel isolation, diff preview & safe --no-ff merge
-│   ├── figure_qa.py              # Pure-stdlib Python/R runtime probe, TIFF/PNG/SVG/PDF/CSV QA & VLM critique loop
-│   ├── research_verifier.py      # Lock-free SHA-256 hash-locked acceptance verifier & readonly_inputs guard
-│   ├── openscience_playbooks.py  # 7 modular OpenScience core methodology playbooks & auto-matcher
-│   ├── provenance_store.py       # Content-addressed Provenance DAG & Experiment Baseline-vs-Delta ledger
-│   ├── version_checker.py        # GitHub VERSION.json + Releases API update checker for old-version popups
-│   ├── agy_adapter.py            # Official Google Antigravity CLI stream-json adapter (3-tier sandbox + --add-dir)
-│   ├── codex_adapter.py          # Official OpenAI Codex CLI JSONL adapter (3-tier sandbox + --add-dir + Win32 guards)
-│   ├── project_discovery.py      # Cross-platform workspace & native OS folder picker
-│   ├── team_cli.py               # CLI client & hidden zero-popup background daemon launcher
-│   ├── codex_team_mcp.py         # MCP server ('codex-team') with default-sandbox sync & per-seat overrides
-│   └── test_runtime_mechanisms.py# 34 automated security, context, FTS5, worktree, Figure QA & 3-tier sandbox tests
+│   ├── serve_sidebar.py          # 本地回环 HTTP 服务、slim+304+gzip 增量接口、CSRF/路径守卫与系统目录选择 (rev 21)
+│   ├── sidebar_panel.html        # 单文件中英双语协作工坊前端、三档沙箱权限中心与纯白底板科研图画廊
+│   ├── team_runtime.py           # 核心编排调度器（圆桌、点将、流水线、单席沙箱、热换人、2 跳容错切换）
+│   ├── team_state_manager.py     # 原子/防抖状态存储、15 位专家人设模板与孤儿进程安全恢复
+│   ├── context_engine.py         # 三区 KV 缓存编译、BlobStore 观测折叠、不可变状态卡与无损换乘
+│   ├── memory_index.py           # 纯标准库中英双语 SQLite FTS5 全文记忆库与 AST 代码结构图谱
+│   ├── worktree_manager.py       # 原生 Git Worktree 并行写盘隔离、Diff 预览与安全合并回滚
+│   ├── figure_qa.py              # 纯标准库 Python/R 环境探测、TIFF/PNG/SVG/PDF/CSV 质检与 VLM 审图闭环
+│   ├── research_verifier.py      # 无锁 SHA-256 锁定验收脚本执行器与只读原始数据防篡改守卫
+│   ├── openscience_playbooks.py  # 7 大模块化 OpenScience 科研方法论协议与自动匹配器
+│   ├── provenance_store.py       # 内容寻址溯源谱系 DAG 与实验基线 Delta 对比账本
+│   ├── version_checker.py        # GitHub VERSION.json 与 Releases API 版本检测器（驱动老版本更新弹窗）
+│   ├── agy_adapter.py            # 官方 Google Antigravity CLI 流式适配器（支持三档沙箱与 --add-dir）
+│   ├── codex_adapter.py          # 官方 OpenAI Codex CLI 适配器（支持三档沙箱、--add-dir 与 Win32 防弹窗）
+│   ├── project_discovery.py      # 跨平台工作区自动发现与原生文件夹选择器
+│   ├── team_cli.py               # 命令行客户端与后台零弹窗守护启动器
+│   ├── codex_team_mcp.py         # MCP 服务端 ('codex-team')，支持默认沙箱自动同步与单席权限覆盖
+│   └── test_runtime_mechanisms.py# 34 项全链路安全、长上下文、FTS5、Worktree、科研图 QA 与三档沙箱测试
 ├── docs/
-│   └── USER_GUIDE.md             # Detailed Bilingual (EN/ZH) User Guide
-├── VERSION.json                  # Canonical version manifest (v5.6.0 / server_rev 21) for auto-update popups
-├── Start-Roundtable.cmd          # Windows 1-click launcher
-├── Start-Roundtable.sh           # macOS / Linux 1-click launcher
-├── LICENSE                       # MIT License
-└── README.md                     # Bilingual project overview & feature comparison
+│   └── USER_GUIDE.md             # 详细使用说明文档
+├── VERSION.json                  # 版本清单文件（v5.6.0 / server_rev 21，供旧版本在线检测更新）
+├── 打开团队协作面板.cmd          # Windows 中文一键启动脚本
+├── Start-Roundtable.cmd          # Windows 一键启动脚本
+├── Start-Roundtable.sh           # macOS / Linux 一键启动脚本
+├── LICENSE                       # MIT 开源许可证
+├── README.md                     # 中文主页介绍（默认展示）
+└── README_EN.md                  # 独立英文项目介绍 (English Documentation)
 ```
 
-## 🔒 Privacy & Security Notice | 隐私与安全边界
+## 🔒 隐私与安全边界
 
-- Binds strictly to `127.0.0.1` loopback interface for trusted single-user local workstations.
-- Never reads, copies, or transmits CLI authentication tokens (`auth.json` / keychains); all model turns execute solely through the user's official `agy` and `codex` binaries under explicit user-chosen sandbox tiers (`read-only`, `workspace-write` + `--add-dir`, or 2-step opt-in `danger-full-access`).
-- Runtime state (`prototype/team_state.json`) contains local workspace history and is excluded via `.gitignore` — never commit personal task snapshots to public repositories.
+- 服务严格仅绑定本机回环地址 `127.0.0.1`，拒绝非本机 `Host` 及跨站 `Origin` 写请求。
+- 绝不读取、拷贝或外传任何 CLI 登录态文件（如 `auth.json` 或系统密钥链）；所有模型调用均在用户显式选定的沙箱边界（`read-only`、`workspace-write` + `--add-dir` 或二次确认解锁的 `danger-full-access`）内运行。
+- 本地运行状态文件 `prototype/team_state.json` 已加入 `.gitignore`，不会随代码提交泄露个人课题记录。
