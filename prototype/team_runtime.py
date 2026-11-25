@@ -25,6 +25,8 @@ from context_engine import (
     ContextBudgetConfig,
     build_handoff_checkpoint,
     classify_turn_error,
+    clip_preserve_anchors,
+    clip_preserve_ends,
     compile_turn_prompt,
     estimate_tokens,
     extract_deterministic_anchors,
@@ -2697,7 +2699,8 @@ class TeamOrchestrator:
                                 "请结合你的专业职责独立检查当前项目材料，并按以下高质量科研/工程标准作答：\n"
                                 "1. 事实锚定：先读后引，所有项目内文件、代码行号与统计数值均标注 `[文件名](路径)`；\n"
                                 "2. 多路径发散与合理深度外推：若任务涉及方案选择、机理阐释或科研创新，请提出 ≥2 条真正正交的竞争假说/架构路线（含更简洁的竞争性解释），并用 `[实证观察]` / `[统计推断]` / `[机制假说/深度外推 · 证伪条件]` 清晰分层，拒绝回避解读；\n"
-                                "3. 如有必须由本场特定队友核验的关键声明，可在末尾附 `team_consult` 发起结构化核验。\n"
+                                "3. 如有必须由本场特定队友核验的关键声明，可在末尾附 `team_consult` 发起结构化核验；若发起 `team_consult`，协商前仅写 ≤800 字精炼待核验要点，待队友回复后再输出本轮完整意见（严禁协商前后重复写两份万字长文）；\n"
+                                "4. 高信噪比篇幅纪律：本轮为合议讨论轮，建议控制在 2,500–5,500 字以内，结论、核心分歧表与关键数据/路径锚点前置，避免冗余铺陈或大段照抄原始日志（长篇逐节展开留给主持人终稿）。\n"
                                 f"总目标：{goal}"
                             )
                         else:
@@ -2726,7 +2729,8 @@ class TeamOrchestrator:
                                 f"{role_lens}\n"
                                 "【强制沟通纪律】\n"
                                 "1. 严禁盲目附和或复读队友观点；发现数字偏差、未读先猜、过度外推或怯懦回避解读时，必须直接 `@名字`（匿名模式下点名 `席位 X`）纠错并附真实证据锚点；\n"
-                                "2. 给出经过质询压力测试后修正并演化的收敛建议。"
+                                "2. 给出经过质询压力测试后修正并演化的收敛建议；\n"
+                                "3. 高信噪比篇幅纪律：聚焦增量纠偏、BLOCKING 清单、可采纳修正方案与关键证据锚点，建议控制在 2,000–4,500 字以内，不要复述第 1 轮已达成共识的完整原文。"
                             )
                             if anon_enabled:
                                 peer_labels = [anon_map[p] for p in valid_ids if p != mid and p in anon_map]
@@ -4587,6 +4591,37 @@ class TeamOrchestrator:
                         if mid in busy_members:
                             continue
                         sess = step.get("worker_session_id")
+                        # v5.7 P0-2: Auto-inherit same-task prior succeeded session for the same member across Roundtable rounds
+                        # (enables hot KV-cache Delta Frames instead of cold-starting every round & re-reading the entire workspace!)
+                        if (
+                            not sess
+                            and st.get("settings", {}).get("context_session_mode", "bounded_native") == "bounded_native"
+                            and step.get("step_type") in ("discussion", "synthesis", "execution")
+                            and step.get("review_of") is None
+                        ):
+                            cur_sb = step.get("sandbox", mem.get("sandbox", "read-only"))
+                            cur_ws = step.get("workspace_scope", ".")
+                            for prev_s in reversed(steps):
+                                if prev_s.get("step_index", 999999) >= step.get("step_index", 0):
+                                    continue
+                                if prev_s.get("member_id") != mid or prev_s.get("status") != "succeeded":
+                                    continue
+                                psid = prev_s.get("worker_session_id")
+                                if not psid or psid in busy_sessions:
+                                    continue
+                                if prev_s.get("sandbox", "read-only") != cur_sb or prev_s.get("workspace_scope", ".") != cur_ws:
+                                    continue
+                                if prev_s.get("worktree_info"):
+                                    continue
+                                prev_att = (prev_s.get("attempts") or [{}])[-1]
+                                prev_rcfg = prev_att.get("requested_config") or {}
+                                if (
+                                    prev_rcfg.get("client") == mem.get("client")
+                                    and prev_rcfg.get("model") == mem.get("model")
+                                ):
+                                    step["worker_session_id"] = psid
+                                    sess = psid
+                                    break
                         if sess and sess in busy_sessions:
                             continue
                         step_wt_iso = bool(task_wt_iso and not step.get("read_only", True) and step.get("sandbox") == "workspace-write")
@@ -4870,14 +4905,16 @@ class TeamOrchestrator:
                 except Exception:
                     pass
 
-        # Pillar 5: Inject deterministic Borda Count scoreboard into final Host Synthesis when available!
+        borda_block = ""
+        # Pillar 5: Inject deterministic Borda Count scoreboard into Zone C of final Host Synthesis
+        # (MUST stay in Zone C so hot-session Delta Mode on Synthesis ALWAYS delivers newly tallied votes!)
         if stype == "synthesis" and isinstance(task.get("borda_scoreboard"), dict) and (task["borda_scoreboard"].get("ballots_count") or 0) > 0:
             bs = task["borda_scoreboard"]
             b_rows = [
                 f"- {r['name']} ({r.get('anon_label') or r['member_id']}): {r['borda_points']} 分 (首推 {r['first_place_votes']} 票)"
                 for r in (bs.get("rows") or [])
             ]
-            zone_b_static.append(
+            borda_block = (
                 f"【匿名互评 Borda 共识计票结果（已揭晓真实席位 · 共 {bs['ballots_count']} 份有效选票 · 平均置信度 {bs['mean_confidence']}）】\n"
                 + "\n".join(b_rows)
             )
@@ -4897,6 +4934,8 @@ class TeamOrchestrator:
             dep_fallback = "\n".join(dep_blocks)
 
         handoff_parts: List[str] = []
+        if borda_block:
+            handoff_parts.append(borda_block)
         if extra_handoff_md and extra_handoff_md.strip():
             handoff_parts.append(extra_handoff_md.strip())
         if step.get("handoff_context"):
@@ -4986,6 +5025,8 @@ class TeamOrchestrator:
             compression_level=compression_level,
             force_full_prompt=force_full_prompt,
             dep_fallback_block=dep_fallback,
+            step_type=stype,
+            current_member_id=step["member_id"],
         )
 
     def _build_step_prompt(self, st: Dict[str, Any], task: Dict[str, Any], step: Dict[str, Any], work_dir: str) -> str:
@@ -5241,7 +5282,9 @@ class TeamOrchestrator:
                 t = self._find_task(st, task_id)
                 att_ref = next((a for a in t["steps"][step_index]["attempts"] if a["attempt_id"] == attempt_id), t["steps"][step_index]["attempts"][-1])
                 att_ref["prompt_sent"] = (
-                    prompt_text[:4000] + (f"\n…[完整 Prompt ({len(prompt_text)} chars) 见 {prompt_ledger_path}]" if len(prompt_text) > 4000 else "")
+                    prompt_text[:600] + (f"\n…[完整 Prompt ({len(prompt_text)} chars) 见 {prompt_ledger_path}]" if len(prompt_text) > 600 else "")
+                    if prompt_ledger_path
+                    else (prompt_text[:2000] + ("…" if len(prompt_text) > 2000 else ""))
                 )
                 att_ref["prompt_ledger_path"] = prompt_ledger_path
                 att_ref["context_telemetry"] = _make_telemetry(turn_plan, rollover_events, prompt_ledger_path)
@@ -5534,10 +5577,12 @@ class TeamOrchestrator:
                 def _log_ask(st: Dict[str, Any]) -> None:
                     t = self._find_task(st, task_id)
                     if cleaned_before_consult:
-                        self._append_room_chat(
+                        draft_entry = self._append_room_chat(
                             st, t, sender_id=step["member_id"], kind="speech", content=cleaned_before_consult,
                             step_index=step_index, round_label=step.get("round_label") or step["title"]
                         )
+                        if draft_entry:
+                            draft_entry["pre_consult_draft"] = True
                     self._append_room_chat(
                         st, t, sender_id=step["member_id"], kind="mention_ask", content=ask_display,
                         to_member_id=peer_id, step_index=step_index, round_label="@队友结构化协商"
@@ -5604,24 +5649,71 @@ class TeamOrchestrator:
 
                 self.store.mutate(_log_reply)
 
-                # Cap injected peer reply to <= 3,500 chars while preserving anchors & full BlobStore pointer!
+                # v5.7.1: Deliver peer consult replies up to 6,500 chars 100% verbatim; if oversized,
+                # preserve head Verdict + key anchors + tail Corrections/Conclusions instead of head-only slicing!
                 injected_peer = peer_reply
-                if len(injected_peer) > 3500:
+                if len(injected_peer) > 6500:
                     pr_blob = blob_store.put_text(peer_reply, subdir="consults", ext=".md")
                     pr_masked, _ = mask_observation_blocks(peer_reply, blob_store, min_code_lines=16, min_table_lines=14, min_block_chars=700)
-                    injected_peer = pr_masked[:3100] + f"\n…[完整协商回复已落盘：{pr_blob['path']} · 完整群聊见 {room_md_path}]"
+                    if len(pr_masked) > 6500:
+                        injected_peer = clip_preserve_anchors(pr_masked, 6200, raw_text=peer_reply) + f"\n…[完整协商回复已落盘：{pr_blob['path']} · 完整群聊见 {room_md_path}]"
+                    else:
+                        injected_peer = pr_masked + f"\n[完整协商回复已落盘：{pr_blob['path']}]"
 
                 base_re_ctx = ""
                 if not res.session_id:
-                    base_re_ctx = (prompt_text[:12000] + "\n…[上下文已截断，完整 Prompt 见 " + prompt_ledger_path + "]\n\n") if len(prompt_text) > 12000 else f"{prompt_text}\n\n"
+                    base_re_ctx = (
+                        clip_preserve_ends(prompt_text, 18000) + f"\n…[完整 Prompt 见 {prompt_ledger_path}]\n\n"
+                        if len(prompt_text) > 18000
+                        else f"{prompt_text}\n\n"
+                    )
                 followup_to_caller = (
                     base_re_ctx
                     + f"【收到队友 @{peer_mem['name']} 的协商回复】\n{injected_peer}\n\n"
                     + "请结合该反馈直接完成你的本步最终交付（不要重复发起相同提问）。"
                 )
+                prev_usage_norm = normalize_usage(
+                    getattr(res, "usage", None),
+                    prompt_chars=len(prompt_text),
+                    response_chars=len(res.response_text or ""),
+                    model_slug=mem.get("model"),
+                )
+                prev_cmd_logs = list(getattr(res, "command_logs", None) or [])
+                prev_chg_files = list(getattr(res, "changed_files", None) or [])
                 res = self._invoke_member_turn(
                     mem, followup_to_caller, res.session_id, work_dir, sandbox_arg, agy_proj_id, attempt_id, _on_start, _on_event, _on_partial_text, add_dirs=eff_add_dirs
                 )
+                # Merge multi-subturn usage cleanly so post-consult turns never divide cumulative session tokens by tiny calls!
+                next_usage_norm = normalize_usage(
+                    getattr(res, "usage", None),
+                    prompt_chars=len(followup_to_caller),
+                    response_chars=len(res.response_text or ""),
+                    model_slug=mem.get("model"),
+                )
+                merged_calls = int(prev_usage_norm.get("internal_api_calls") or 1) + int(next_usage_norm.get("internal_api_calls") or 1)
+                p_in = int(prev_usage_norm.get("input_tokens") or 0)
+                n_in = int(next_usage_norm.get("input_tokens") or 0)
+                p_cac = int(prev_usage_norm.get("cached_input_tokens") or 0)
+                n_cac = int(next_usage_norm.get("cached_input_tokens") or 0)
+                p_out = int(prev_usage_norm.get("output_tokens") or 0)
+                n_out = int(next_usage_norm.get("output_tokens") or 0)
+                merged_in = (p_in + n_in) if (p_in > 0 and n_in > 0) else max(p_in, n_in)
+                merged_cac = (p_cac + n_cac) if (p_cac > 0 and n_cac > 0) else max(p_cac, n_cac)
+                merged_out = p_out + n_out
+                merged_peak = max(int(prev_usage_norm.get("peak_context_tokens") or 0), int(next_usage_norm.get("peak_context_tokens") or 0))
+                if merged_in > 0 or merged_out > 0:
+                    res.usage = {
+                        **(dict(res.usage or {})),
+                        "input_tokens": merged_in,
+                        "cached_input_tokens": merged_cac if (prev_usage_norm.get("cached_input_tokens") is not None or next_usage_norm.get("cached_input_tokens") is not None) else None,
+                        "output_tokens": merged_out,
+                        "internal_api_calls": merged_calls,
+                        "peak_context_tokens": merged_peak,
+                    }
+                if prev_cmd_logs:
+                    res.command_logs = prev_cmd_logs + list(getattr(res, "command_logs", None) or [])
+                if prev_chg_files:
+                    res.changed_files = prev_chg_files + list(getattr(res, "changed_files", None) or [])
 
             # P0-2 Lock-Free Sidecar Execution Ledger (keeps team_state.json lean & avoids O(N^2) bloat)
             ledger_summary: Optional[Dict[str, Any]] = None
@@ -6090,10 +6182,20 @@ class TeamOrchestrator:
         if is_ctx_overflow:
             res.context_overflow = True
             res.error_kind = "context_length_exceeded"
+        pre_model_slug: Optional[str] = None
+        try:
+            def _peek_model(st: Dict[str, Any]) -> Optional[str]:
+                t0 = self._find_task(st, task_id)
+                mid0 = t0["steps"][step_index]["member_id"]
+                return str((st.get("members", {}).get(mid0) or {}).get("model") or "") or None
+            pre_model_slug = self.store.read(_peek_model)
+        except Exception:
+            pre_model_slug = None
         norm_usage = normalize_usage(
             getattr(res, "usage", None),
             prompt_chars=int((turn_plan or {}).get("prompt_chars") or 0),
             response_chars=len(res.response_text or res.partial_text or ""),
+            model_slug=pre_model_slug,
         )
         usage_src = "cli_reported" if norm_usage.get("has_provider_usage") else "estimated"
         norm_usage["usage_source"] = usage_src
@@ -6192,8 +6294,21 @@ class TeamOrchestrator:
             att["is_fallback_session"] = used_fallback
             att["fallback_of_session_id"] = fallback_of
             att["accepted_config"] = res.accepted_config
-            att["partial_text"] = res.partial_text
-            att["result_text"] = res.response_text
+            # v5.7 P1-5: Avoid duplicating 30KB+ succeeded responses 4x inside team_state.json!
+            # Keep full partial_text only for failed/aborted/needs_verification rescue; clear on succeeded.
+            if res.final_status == "succeeded":
+                att["partial_text"] = ""
+                resp_str = res.response_text or ""
+                att["result_len"] = len(resp_str)
+                att["result_text"] = (
+                    resp_str[:400] + f"\n…[完整内容 ({len(resp_str)} chars) 见 step.latest_result_text / chat_room]"
+                    if len(resp_str) > 1200
+                    else resp_str
+                )
+            else:
+                att["partial_text"] = res.partial_text
+                att["result_text"] = res.response_text
+                att["result_len"] = len(res.response_text or res.partial_text or "")
             att["stderr_excerpt"] = "\n".join(res.stderr_lines[-8:])
             att["status"] = res.final_status
             att["blocking_reason"] = res.blocking_reason or res.error
@@ -6261,6 +6376,7 @@ class TeamOrchestrator:
                         "turns": int(sm.get("turns") or 0) + 1,
                         "last_input_tokens": in_tok,
                         "last_peak_context_tokens": peak_tok,
+                        "max_peak_context_tokens": max(int(sm.get("max_peak_context_tokens") or 0), peak_tok),
                         "last_internal_api_calls": int(norm_usage.get("internal_api_calls") or 1),
                         "last_cached_input_tokens": cached_tok,
                         "last_output_tokens": out_tok,
@@ -6313,9 +6429,29 @@ class TeamOrchestrator:
 
             def _sync_session_cursor() -> None:
                 if res.session_id and isinstance(task.get("session_metrics", {}).get(res.session_id), dict):
+                    sm_ref = task["session_metrics"][res.session_id]
                     last_cid = str((task.get("chat_room") or [{}])[-1].get("id") or tp.get("chat_cursor_id") or "")
                     if last_cid:
-                        task["session_metrics"][res.session_id]["last_synced_msg_id"] = last_cid
+                        sm_ref["last_synced_msg_id"] = last_cid
+                    # v5.7 P0-2: Maintain exact `seen_msg_ids` set (delivered inputs + messages authored in this step)
+                    # so parallel Blind Round 1 completion order NEVER causes a resumed R2 session to skip peers!
+                    seen_list = list(sm_ref.get("seen_msg_ids") or [])
+                    seen_set = set(seen_list)
+                    for dcid in list(tp.get("delivered_msg_ids") or []):
+                        if dcid and dcid not in seen_set:
+                            seen_set.add(dcid)
+                            seen_list.append(dcid)
+                    for cm_x in task.get("chat_room") or []:
+                        cid_x = str(cm_x.get("id") or "")
+                        if not cid_x or cid_x in seen_set:
+                            continue
+                        if cm_x.get("kind") == "user_goal" or (
+                            cm_x.get("step_index") == step_index
+                            and (cm_x.get("sender_id") == step["member_id"] or cm_x.get("to_member_id") == step["member_id"])
+                        ):
+                            seen_set.add(cid_x)
+                            seen_list.append(cid_x)
+                    sm_ref["seen_msg_ids"] = seen_list[-120:]
 
             mem["status"] = "idle"
             mem["live_activity"] = ""
@@ -6947,6 +7083,14 @@ class TeamOrchestrator:
                     }
                 else:
                     chat_kind = "deliverable" if stype_done in ("synthesis", "execution") else "speech"
+                # v5.7 P0-3: Mark any pre-consult draft from this exact step as superseded so R2/Synthesis never ingest duplicate 40K drafts!
+                for prev_cm in task.get("chat_room") or []:
+                    if (
+                        prev_cm.get("step_index") == step_index
+                        and prev_cm.get("sender_id") == step["member_id"]
+                        and prev_cm.get("pre_consult_draft")
+                    ):
+                        prev_cm["superseded_by_step_final"] = True
                 self._append_room_chat(
                     st, task, sender_id=step["member_id"], kind=chat_kind,
                     content=res.response_text, step_index=step_index, round_label=step.get("round_label") or step["title"]

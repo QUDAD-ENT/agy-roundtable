@@ -691,6 +691,8 @@ class TeamStateManager:
                         for mem in (loaded.get("members") or {}).values():
                             if enrich_member_metadata(mem):
                                 enriched = True
+                        if self._dedup_historical_state(loaded):
+                            enriched = True
                         if enriched:
                             self._write_atomic(loaded)
                         return loaded
@@ -709,6 +711,50 @@ class TeamStateManager:
         fresh = self._default_state()
         self._write_atomic(fresh)
         return fresh
+
+    def _dedup_historical_state(self, st: Dict[str, Any]) -> bool:
+        """v5.7 P1-5: Losslessly strip 3x–4x duplicate attempt/prompt copies from completed tasks in team_state.json.
+        100% of original speeches remain verbatim in chat_room/summary and full prompts remain in prompt_ledger_path.
+        """
+        changed = False
+        tasks = st.get("tasks") or []
+        if not tasks:
+            return False
+        active_id = st.get("active_task_id")
+        recent_ids = {t.get("id") for t in sorted(tasks, key=lambda x: x.get("updated_at") or 0, reverse=True)[:3]}
+        if active_id:
+            recent_ids.add(active_id)
+        for t in tasks:
+            if t.get("status") not in ("succeeded", "aborted", "failed"):
+                continue
+            is_recent = t.get("id") in recent_ids
+            chat_by_step: Dict[Any, List[str]] = {}
+            if not is_recent:
+                for cm in t.get("chat_room") or []:
+                    chat_by_step.setdefault(cm.get("step_index"), []).append(str(cm.get("content") or ""))
+            for s in t.get("steps") or []:
+                ltxt = str(s.get("latest_result_text") or "")
+                for att in s.get("attempts") or []:
+                    if att.get("status") == "succeeded":
+                        if att.get("partial_text"):
+                            att["partial_text"] = ""
+                            changed = True
+                        rtxt = str(att.get("result_text") or "")
+                        if len(rtxt) > 1200 and (ltxt or not is_recent):
+                            att["result_len"] = max(int(att.get("result_len") or 0), len(rtxt))
+                            att["result_text"] = rtxt[:400] + f"\n…[完整内容 ({att['result_len']} chars) 见 step.latest_result_text / chat_room]"
+                            changed = True
+                    plp = att.get("prompt_ledger_path") or (att.get("context_telemetry") or {}).get("prompt_ledger_path")
+                    psent = str(att.get("prompt_sent") or "")
+                    if plp and len(psent) > 750:
+                        att["prompt_sent"] = psent[:600] + f"\n…[完整 Prompt 见 {plp}]"
+                        changed = True
+                if (not is_recent) and len(ltxt) > 1200:
+                    step_chats = chat_by_step.get(s.get("step_index")) or []
+                    if any(ltxt[:200] in cc for cc in step_chats):
+                        s["latest_result_text"] = ltxt[:400] + f"\n…[历史归档步骤，完整正文 ({len(ltxt)} chars) 保留在 chat_room]"
+                        changed = True
+        return changed
 
     def _write_atomic(self, data: Dict[str, Any]) -> None:
         os.makedirs(os.path.dirname(self.state_file), exist_ok=True)

@@ -46,6 +46,96 @@ def suppress_windows_crash_dialogs() -> int:
 suppress_windows_crash_dialogs()
 
 
+_CODEX_TOOL_ITEM_TYPES = frozenset(
+    {
+        "command_execution",
+        "file_change",
+        "mcp_tool_call",
+        "web_search",
+        "function_call",
+        "custom_tool_call",
+        "local_shell_call",
+    }
+)
+
+
+def _is_codex_tool_item(item_type: Optional[str]) -> bool:
+    if not item_type or item_type in ("reasoning", "agent_message", "user_message"):
+        return False
+    return item_type in _CODEX_TOOL_ITEM_TYPES or item_type.endswith("_call") or item_type.endswith("_execution")
+
+
+def count_codex_logical_api_calls(
+    events: List[Dict[str, Any]],
+    recv_timestamps: Optional[List[float]] = None,
+    *,
+    wave_merge_sec: float = 0.30,
+) -> Tuple[int, int]:
+    """Count logical LLM API roundtrips from a Codex JSONL event stream via in-flight `0 -> 1` tool burst tracking.
+
+    Codex CLI often omits `reasoning` items between consecutive command batches; tracking concurrent in-flight
+    tool IDs counts 15 sequential waves of 4 parallel commands as EXACTLY 15 batches (16 API calls) instead of
+    collapsing them into 2~3 batches and falsely triggering peak-context clamping / proactive session rollover.
+    """
+    tool_batches = 0
+    tool_items_total = 0
+    in_flight_ids: set = set()
+    in_flight_anon = 0
+    seen_completed_ids: set = set()
+    unmatched_no_ts = 0
+    last_batch_end_ts: Optional[float] = None
+    last_unmatched_ts: Optional[float] = None
+    has_ts = isinstance(recv_timestamps, list) and len(recv_timestamps) == len(events)
+
+    for idx, e in enumerate(events):
+        et = e.get("type")
+        item_obj = e.get("item") if isinstance(e.get("item"), dict) else None
+        it = str(item_obj.get("type") or "") if item_obj else ""
+        iid = str(item_obj.get("id") or "") if item_obj else ""
+        ts = recv_timestamps[idx] if has_ts else None
+
+        if et == "item.started" and _is_codex_tool_item(it):
+            if not in_flight_ids and in_flight_anon == 0:
+                if ts is None or last_batch_end_ts is None or (ts - last_batch_end_ts) >= wave_merge_sec:
+                    tool_batches += 1
+            if iid:
+                in_flight_ids.add(iid)
+            else:
+                in_flight_anon += 1
+        elif et == "item.completed" and _is_codex_tool_item(it):
+            if iid and iid in seen_completed_ids:
+                continue
+            if iid:
+                seen_completed_ids.add(iid)
+            tool_items_total += 1
+            if iid and iid in in_flight_ids:
+                in_flight_ids.discard(iid)
+                if not in_flight_ids and in_flight_anon == 0:
+                    last_batch_end_ts = ts
+            elif in_flight_anon > 0:
+                in_flight_anon -= 1
+                if not in_flight_ids and in_flight_anon == 0:
+                    last_batch_end_ts = ts
+            elif not in_flight_ids:
+                # CLI emitted item.completed without a matching prior item.started
+                if ts is not None:
+                    if last_unmatched_ts is None or (ts - last_unmatched_ts) >= wave_merge_sec:
+                        tool_batches += 1
+                    last_unmatched_ts = ts
+                else:
+                    unmatched_no_ts += 1
+        elif et == "turn.started" or (et in ("item.started", "item.completed") and it in ("reasoning", "agent_message")):
+            in_flight_ids.clear()
+            in_flight_anon = 0
+            last_batch_end_ts = None
+            last_unmatched_ts = None
+
+    if unmatched_no_ts > 0:
+        tool_batches += max(1, (unmatched_no_ts + 1) // 2)
+
+    return max(1, 1 + tool_batches), tool_items_total
+
+
 def hidden_subprocess_kwargs(new_process_group: bool = False) -> Dict[str, Any]:
     """Win32 zero-popup subprocess flags: CREATE_NO_WINDOW (NEVER mixed with DETACHED_PROCESS!)
     + STARTF_USESHOWWINDOW / SW_HIDE so neither direct children nor grandchildren flash console windows."""
@@ -716,6 +806,7 @@ class CodexAdapter:
         response_text = ""
         partial_chunks: List[str] = []
         events: List[Dict[str, Any]] = []
+        event_recv_ts: List[float] = []
         command_logs: List[Dict[str, Any]] = []
         changed_files: List[Dict[str, Any]] = []
         last_ok_cmd_seq = -1
@@ -736,6 +827,7 @@ class CodexAdapter:
                 except Exception:
                     continue
                 events.append(ev)
+                event_recv_ts.append(time.monotonic())
                 ev_type = ev.get("type", "unknown")
 
                 if ev_type == "thread.started":
@@ -830,12 +922,10 @@ class CodexAdapter:
                 elif ev_type == "turn.completed":
                     turn_completed = True
                     usage_info = dict(ev.get("usage") or {})
-                    tool_calls_done = sum(
-                        1 for e in events
-                        if e.get("type") == "item.completed"
-                        and (e.get("item") or {}).get("type") in ("command_execution", "file_change", "mcp_tool_call", "web_search")
-                    )
-                    usage_info["internal_api_calls"] = max(1, 1 + tool_calls_done)
+                    # v5.7.1: Exact in-flight `0 -> 1` tool burst batch counter (immune to missing `reasoning` events!)
+                    api_calls, tool_items_total = count_codex_logical_api_calls(events, event_recv_ts)
+                    usage_info["internal_api_calls"] = api_calls
+                    usage_info["tool_items_completed"] = tool_items_total
                     if on_event:
                         on_event(
                             {

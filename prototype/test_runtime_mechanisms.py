@@ -3862,6 +3862,584 @@ class TestTeamRuntimeMechanisms(unittest.TestCase):
         finally:
             orch.stop_scheduler()
 
+    def test_35_v57_ultracontext_cross_round_delta_fair_budget_consult_dedup_and_state_slim(self) -> None:
+        """Verify v5.7.0 6-pillar ultra-long context optimizations:
+        P0-1 adaptive budget + fair water-fill (zero dropped speakers),
+        P0-2 cross-round Roundtable hot session Delta reuse with parallel-safe seen_msg_ids,
+        P0-3 superseded @team_consult pre-consult draft folding,
+        P1-4 accurate peak clamping + nested cached_tokens + max_peak tracking,
+        P1-5 lossless team_state.json deduplication,
+        P2-6 discussion round high-signal output discipline.
+        """
+        import context_engine as ce
+
+        # 1. P0-1: Adaptive Synthesis Budget (Gemini 4 1M -> 96k) + Fair Per-Speaker Water-Fill (zero dropped speakers!)
+        bs = ce.BlobStore("TASK-V57-FAIR")
+        four_heavy_msgs = [
+            {
+                "id": f"CHAT-SPK-{i}",
+                "sender_id": f"expert_{i}",
+                "sender_name": f"Expert {i}",
+                "kind": "speech",
+                "round_label": "第 2 轮 · 对抗互评",
+                "content": f"SPEAKER_{i}_HEAD_ANCHOR BLOCKING: BLK-{i} p_adj=0.00{i+1}\n" + (f"详细论证段落{i}。" * 1800) + f"\nSPEAKER_{i}_TAIL_CONCLUSION",
+            }
+            for i in range(4)
+        ]
+        # Under automatic mode on 1M Gemini 4 synthesis -> budget scales to 96,000!
+        plan_auto = ce.compile_turn_prompt(
+            zone_a_blocks=["Zone A"],
+            zone_b_static_blocks=[],
+            sealed_snapshots=[],
+            visible_msgs=four_heavy_msgs,
+            is_blind_r1=False,
+            current_stage_index=3,
+            step_prompt_block="终稿汇总",
+            handoff_block="",
+            protocol_blocks=[],
+            room_md_path="room.md",
+            blob_store=bs,
+            session_id=None,
+            session_metric=None,
+            model_slug="gemini-4-neon",
+            cfg=ce.ContextBudgetConfig(),
+            step_type="synthesis",
+        )
+        self.assertEqual(plan_auto["budget_chars"], 96_000)
+        self.assertEqual(plan_auto["omitted_refs"], [])
+        for i in range(4):
+            self.assertIn(f"SPEAKER_{i}_HEAD_ANCHOR", plan_auto["prompt"])
+            self.assertIn(f"BLK-{i}", plan_auto["prompt"])
+
+        # Even under tight explicit 22,000 char budget, ALL 4 speakers survive via fair water-fill (ZERO dropped!)
+        plan_tight = ce.compile_turn_prompt(
+            zone_a_blocks=["Zone A"],
+            zone_b_static_blocks=[],
+            sealed_snapshots=[],
+            visible_msgs=four_heavy_msgs,
+            is_blind_r1=False,
+            current_stage_index=3,
+            step_prompt_block="终稿汇总",
+            handoff_block="",
+            protocol_blocks=[],
+            room_md_path="room.md",
+            blob_store=bs,
+            session_id=None,
+            session_metric=None,
+            model_slug="gpt-6.2-sol",
+            cfg=ce.ContextBudgetConfig(max_prompt_chars=22_000, explicit_budget=True),
+            step_type="synthesis",
+        )
+        self.assertEqual(plan_tight["omitted_refs"], [], f"Fair water-fill MUST NOT drop any of the 4 active speakers: {plan_tight['omitted_refs']}")
+        for i in range(4):
+            self.assertIn(f"SPEAKER_{i}_HEAD_ANCHOR", plan_tight["prompt"])
+            self.assertIn(f"BLK-{i}", plan_tight["prompt"])
+
+        # 2. P1-4: Nested cached_tokens extraction & impossible single-call peak clamping
+        u_nested = ce.normalize_usage(
+            {"input_tokens": 5_000_000, "output_tokens": 20_000, "prompt_tokens_details": {"cached_tokens": 4_500_000}},
+            internal_api_calls=2,
+            model_slug="gpt-6.2-sol",
+        )
+        self.assertEqual(u_nested["cached_input_tokens"], 4_500_000)
+        self.assertAlmostEqual(u_nested["cache_hit_ratio"], 0.9, places=2)
+        self.assertTrue(u_nested["peak_clamped"])
+        self.assertLessEqual(u_nested["peak_context_tokens"], 272_000)
+
+        # 3. P0-2 + P0-3 + P1-5 + P2-6 End-to-End 2-Round Roundtable with parallel Blind R1 + @team_consult!
+        proj_dir = os.path.join(self.tmp_dir, f"v57_rt_{time.time_ns()}")
+        os.makedirs(proj_dir, exist_ok=True)
+        captured_turns: List[Dict[str, Any]] = []
+        consult_done = {"fired": False}
+
+        def v57_runner(prompt, session_id, **kwargs):
+            # Distinguish peer consult call vs main discussion/synthesis steps
+            if "【团队实时协助请求】" in prompt:
+                return CodexExecutionResult(
+                    session_id=session_id or "peer-consult-s",
+                    response_text="**判定 (Verdict)**：`CONFIRMED`\n**核查证据**：PEER_CONSULT_EVIDENCE_OK p_adj=0.004",
+                    partial_text="",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 12000, "cached_input_tokens": 6000, "output_tokens": 300, "internal_api_calls": 2},
+                )
+            captured_turns.append({"prompt": prompt, "session_id": session_id, "client": kwargs["requested_config"].get("client")})
+            is_r1_codex = ("(ID: codex_author)" in prompt and "第 1 轮独立盲评阶段" in prompt and not session_id)
+            if is_r1_codex and not consult_done["fired"]:
+                consult_done["fired"] = True
+                # Sleep briefly so agy_gemini finishes R1 FIRST while codex_author is still in Blind R1!
+                time.sleep(0.25)
+                pre_draft = "PRE_CONSULT_OBSOLETE_DRAFT_XYZ " + ("冗长协商前草稿内容。" * 250)
+                return CodexExecutionResult(
+                    session_id="sess-codex-r1",
+                    response_text=pre_draft + '\n```team_consult\n{"to":"agy_gemini","question":"请核验数值"}\n```',
+                    partial_text="partial_stream_should_be_cleared",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 42000, "cached_input_tokens": 30000, "output_tokens": 1500, "internal_api_calls": 5},
+                )
+            if session_id == "sess-codex-r1" and "【收到队友" in prompt:
+                return CodexExecutionResult(
+                    session_id="sess-codex-r1",
+                    response_text="CODEX_R1_FINAL_POST_CONSULT_OK " + ("精炼协商后定稿结论。" * 180),
+                    partial_text="partial_stream_should_be_cleared_2",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 48000, "cached_input_tokens": 40000, "output_tokens": 900, "internal_api_calls": 2},
+                )
+            if "(ID: agy_gemini)" in prompt and "第 1 轮独立盲评阶段" in prompt and not session_id:
+                return CodexExecutionResult(
+                    session_id="sess-agy-r1",
+                    response_text="AGY_R1_UNIQUE_SPEECH_ABC BLOCKING: BLK-AGY1",
+                    partial_text="agy_partial_should_be_cleared",
+                    exit_code=0,
+                    turn_completed=True,
+                    requested_config=kwargs["requested_config"],
+                    accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 35000, "output_tokens": 1200, "internal_api_calls": 4},
+                )
+            return CodexExecutionResult(
+                session_id=session_id or f"sess-other-{len(captured_turns)}",
+                response_text=f"TURN_OK_{len(captured_turns)} " + ("完整结论。" * 80),
+                partial_text="partial_to_clear",
+                exit_code=0,
+                turn_completed=True,
+                requested_config=kwargs["requested_config"],
+                accepted_config=kwargs["accepted_config"],
+                usage={"input_tokens": 22000, "cached_input_tokens": 18000, "output_tokens": 800, "internal_api_calls": 2},
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=v57_runner),
+            agy_adapter=AgyAdapter(runner_override=v57_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            orch.switch_project(proj_dir)
+            orch.update_binding(max_concurrency=4)
+            t = orch.create_task(
+                title="v5.7 跨轮Delta与协商折叠全链路验证",
+                goal="验证跨轮热会话复用、并行盲评seen_msg_ids与协商初稿折叠",
+                execution_mode="roundtable",
+                participants=["codex_author", "agy_gemini"],
+                host_member_id="agy_gemini",
+                discussion_rounds=2,
+                enable_host_opening=False,
+                sandbox="read-only",
+            )
+            # P2-6: R1 & R2 prompts include concise output discipline
+            self.assertIn("高信噪比篇幅纪律", t["steps"][0]["prompt"])
+            self.assertIn("高信噪比篇幅纪律", t["steps"][2]["prompt"])
+
+            dl = time.time() + 18.0
+            cur = t
+            while time.time() < dl:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] == "succeeded":
+                    break
+                time.sleep(0.08)
+            self.assertEqual(cur["status"], "succeeded")
+
+            # P0-2: Cross-round hot session reuse happened! (codex_author R2 reused sess-codex-r1, agy_gemini R2 & Synthesis reused sess-agy-r1!)
+            self.assertGreaterEqual(int((cur.get("context_stats") or {}).get("delta_turns") or 0), 2)
+            r2_codex_step = cur["steps"][2]
+            self.assertEqual(r2_codex_step["worker_session_id"], "sess-codex-r1")
+            self.assertTrue(r2_codex_step["attempts"][-1]["context_telemetry"]["is_delta"])
+            self.assertGreater(int(cur["session_metrics"]["sess-codex-r1"]["max_peak_context_tokens"]), 0)
+
+            # Verify codex_author's R2 Delta prompt received agy_gemini's R1 speech EVEN THOUGH agy finished BEFORE codex in Blind R1!
+            # And did NOT re-ingest codex's own R1 final speech or superseded pre-consult draft!
+            r2_codex_turns = [c for c in captured_turns if c["session_id"] == "sess-codex-r1" and "同会话增量帧 Delta Frame" in c["prompt"]]
+            self.assertEqual(len(r2_codex_turns), 1)
+            r2_codex_prompt = r2_codex_turns[0]["prompt"]
+            self.assertIn("AGY_R1_UNIQUE_SPEECH_ABC", r2_codex_prompt, "Parallel-safe seen_msg_ids MUST deliver peer R1 speech!")
+            self.assertNotIn("CODEX_R1_FINAL_POST_CONSULT_OK", r2_codex_prompt, "Delta Frame MUST skip member's own R1 speech!")
+            self.assertNotIn("PRE_CONSULT_OBSOLETE_DRAFT_XYZ", r2_codex_prompt, "Superseded pre-consult draft MUST NOT leak into R2!")
+
+            # P0-3: Verify agy_gemini's R2 Delta prompt received CODEX_R1_FINAL_POST_CONSULT_OK and folded PRE_CONSULT_OBSOLETE_DRAFT_XYZ!
+            r2_agy_turns = [c for c in captured_turns if c["session_id"] == "sess-agy-r1" and "同会话增量帧 Delta Frame" in c["prompt"]]
+            self.assertGreaterEqual(len(r2_agy_turns), 1)
+            self.assertIn("CODEX_R1_FINAL_POST_CONSULT_OK", r2_agy_turns[0]["prompt"])
+            self.assertNotIn("PRE_CONSULT_OBSOLETE_DRAFT_XYZ", r2_agy_turns[0]["prompt"])
+            superseded_chats = [cm for cm in cur["chat_room"] if cm.get("superseded_by_step_final")]
+            self.assertEqual(len(superseded_chats), 1)
+
+            # P1-5: Succeeded attempts cleared partial_text and deduplicated oversized result_text!
+            att0 = cur["steps"][0]["attempts"][-1]
+            self.assertEqual(att0["partial_text"], "")
+            self.assertIn("见 step.latest_result_text / chat_room", att0["result_text"])
+            self.assertIn("CODEX_R1_FINAL_POST_CONSULT_OK", cur["steps"][0]["latest_result_text"])
+        finally:
+            orch.stop_scheduler()
+
+    def test_36_v571_zero_clip_verbatim_delivery_and_codex_burst_batch_counter(self) -> None:
+        """Verify v5.7.1 uninterrupted inter-agent communication & telemetry fixes:
+        1. Bug A: Codex in-flight `0 -> 1` tool burst counter counts 15 waves x 4 parallel commands WITHOUT
+           reasoning items as EXACTLY 16 logical API calls -> NO false 90% clamp, NO false proactive rollover!
+        2. Bug B: Zero-clip 100% verbatim delivery when total messages <= budget (eliminates `-72` off-by-66 bug).
+        3. Large 20K peer critique + folded pre-consult drafts + @mention_reply inside 72K GPT-6.2 discussion budget:
+           folded drafts NEVER demote real peers; all 4 peers + 20K critique delivered 100% verbatim!
+        4. Enhanced `@team_consult`: 5.8K peer reply delivered 100% verbatim; 8.2K peer reply preserves head Verdict,
+           BLOCKING anchors AND tail Correction/Alternative (no blind head-only slicing!).
+        5. Full-squad 4-member (3 Codex + 1 AGY) 2-round Roundtable with 2.1M cumulative R1 tool tokens stays
+           100% in hot Delta Mode (`rollover_count == 0`, `delta_turns >= 4`).
+        """
+        import codex_adapter as ca
+        import context_engine as ce
+
+        # --- 1. Bug A: Codex burst batch counter (15 waves x 4 parallel commands, ZERO reasoning events!) ---
+        events: List[Dict[str, Any]] = [{"type": "turn.started"}]
+        timestamps: List[float] = [0.0]
+        t_cur = 1.0
+        for wave in range(15):
+            # 4 parallel commands started within 30ms
+            for k in range(4):
+                events.append({"type": "item.started", "item": {"id": f"cmd_{wave}_{k}", "type": "command_execution"}})
+                timestamps.append(t_cur + k * 0.01)
+            # 4 parallel commands complete ~0.7s later
+            t_cur += 0.70
+            for k in range(4):
+                events.append({"type": "item.completed", "item": {"id": f"cmd_{wave}_{k}", "type": "command_execution"}})
+                timestamps.append(t_cur + k * 0.02)
+            # 5s LLM thinking gap (NO reasoning event emitted!)
+            t_cur += 5.0
+        events.append({"type": "item.completed", "item": {"id": "msg_final", "type": "agent_message", "text": "done"}})
+        timestamps.append(t_cur + 1.0)
+
+        calls_ts, items_ts = ca.count_codex_logical_api_calls(events, timestamps)
+        self.assertEqual(calls_ts, 16, f"15 parallel waves + final turn MUST equal 16 API calls, got {calls_ts}")
+        self.assertEqual(items_ts, 60)
+
+        calls_no_ts, items_no_ts = ca.count_codex_logical_api_calls(events, None)
+        self.assertEqual(calls_no_ts, 16)
+        self.assertEqual(items_no_ts, 60)
+
+        # Intra-wave fast consecutive completion (< 0.30s) merges into 1 batch instead of double-counting
+        fast_wave_events = [
+            {"type": "item.started", "item": {"id": "f1", "type": "command_execution"}},
+            {"type": "item.completed", "item": {"id": "f1", "type": "command_execution"}},
+            {"type": "item.started", "item": {"id": "f2", "type": "command_execution"}},
+            {"type": "item.completed", "item": {"id": "f2", "type": "command_execution"}},
+        ]
+        fast_calls, fast_items = ca.count_codex_logical_api_calls(fast_wave_events, [1.0, 1.02, 1.05, 1.08])
+        self.assertEqual(fast_calls, 2, "Sub-300ms consecutive tool emissions belong to 1 API wave (2 calls total)")
+        self.assertEqual(fast_items, 2)
+
+        # Calibrated peak occupancy on 2.1M billing input / 16 calls -> ~151K (< 72% of 272K = 195.8K) -> NO rollover!
+        u_cal = ce.normalize_usage(
+            {"input_tokens": 2_100_000, "cached_input_tokens": 1_900_000, "output_tokens": 4_200, "internal_api_calls": calls_ts},
+            model_slug="gpt-6.2-sol",
+        )
+        self.assertFalse(u_cal["peak_clamped"], f"16-call 2.1M turn must NOT falsely clamp: {u_cal}")
+        self.assertLess(u_cal["peak_context_tokens"], 165_000)
+        need_ro, ro_reason = ce.should_proactive_rollover(
+            {"turns": 1, "last_peak_context_tokens": u_cal["peak_context_tokens"], "estimated_cumulative_tokens": u_cal["peak_context_tokens"] + 4_200},
+            "gpt-6.2-sol",
+            est_next_tokens=14_000,
+            cfg=ce.ContextBudgetConfig(),
+        )
+        self.assertFalse(need_ro, f"Healthy 16-call Codex R1 session MUST NOT falsely rollover: {ro_reason}")
+
+        # --- 2. Bug B: Exact reproduction of TASK-9c15cd35 step#8 (4 peers = 35.4K inside 96K synthesis budget) -> ZERO clips! ---
+        bs = ce.BlobStore("TASK-V571-ZEROCLIP")
+        exact_sizes = [11670, 7265, 7324, 9192]
+        r2_msgs = []
+        for idx, sz in enumerate(exact_sizes):
+            head = f"PEER_{idx}_START_SENTENCE "
+            mid = f"MID_PROOF_{idx}_UNIQUE_CONTENT "
+            tail = f" PEER_{idx}_END_SENTENCE"
+            pad_len = max(0, sz - len(head) - len(mid) - len(tail))
+            half = pad_len // 2
+            body = head + ("论" * half) + mid + ("证" * (pad_len - half)) + tail
+            r2_msgs.append({
+                "id": f"CHAT-R2-{idx}",
+                "sender_id": f"peer_{idx}",
+                "sender_name": f"Peer {idx}",
+                "kind": "speech",
+                "round_label": "第 2 轮 · 对抗互评",
+                "content": body,
+            })
+        plan_syn = ce.compile_turn_prompt(
+            zone_a_blocks=["Zone A " + ("规" * 1200)],
+            zone_b_static_blocks=["【用户原始目标】\n" + ("目" * 4457)],
+            sealed_snapshots=[{"stage_index": 0, "rendered_md": "【Stage 1 卡】\n" + ("卡" * 5077), "event_ids": ["OLD-1"]}],
+            visible_msgs=r2_msgs,
+            is_blind_r1=False,
+            current_stage_index=2,
+            step_prompt_block="请做终稿汇总",
+            handoff_block="",
+            protocol_blocks=[],
+            room_md_path="room.md",
+            blob_store=bs,
+            session_id=None,
+            session_metric=None,
+            model_slug="gemini-4-neon",
+            cfg=ce.ContextBudgetConfig(),
+            step_type="synthesis",
+        )
+        self.assertEqual(plan_syn["omitted_refs"], [])
+        self.assertNotIn("按公平配额压缩", plan_syn["prompt"], "Bug B regression: messages fitting within 96K MUST NEVER be clipped!")
+        self.assertNotIn("完整原文指针", plan_syn["prompt"], "Bug B regression: 0 BlobStore clipping pointers when budget has 40K spare!")
+        for idx, m in enumerate(r2_msgs):
+            self.assertIn(m["content"], plan_syn["prompt"], f"Peer {idx} speech MUST appear 100.0% verbatim!")
+
+        # --- 3. 20K peer speech + 3 folded pre-consult drafts + @mention Q&A inside 72K GPT-6.2 discussion budget -> ZERO clips! ---
+        huge_20k = "HUGE_20K_HEAD " + ("深" * 9950) + " HUGE_20K_EXACT_MID_CLAUSE " + ("度" * 9950) + " HUGE_20K_TAIL"
+        mixed_msgs = [
+            {"id": "M-P0", "sender_id": "p0", "sender_name": "P0", "kind": "speech", "round_label": "第 1 轮", "content": huge_20k},
+            {"id": "M-D1", "sender_id": "p1", "sender_name": "P1", "kind": "speech", "round_label": "第 1 轮", "content": "OLD_DRAFT_1 " * 200, "superseded_by_step_final": True},
+            {"id": "M-A1", "sender_id": "p1", "sender_name": "P1", "kind": "mention_ask", "round_label": "@协商", "content": "请问核验 A1"},
+            {"id": "M-R1", "sender_id": "p2", "sender_name": "P2", "kind": "mention_reply", "round_label": "@答复", "content": "CONFIRMED_REPLY_R1 " + ("证" * 2400)},
+            {"id": "M-P1", "sender_id": "p1", "sender_name": "P1", "kind": "speech", "round_label": "第 1 轮", "content": "P1_FINAL_OK " + ("评" * 8000)},
+            {"id": "M-D2", "sender_id": "p2", "sender_name": "P2", "kind": "speech", "round_label": "第 1 轮", "content": "OLD_DRAFT_2 " * 200, "superseded_by_step_final": True},
+            {"id": "M-D3", "sender_id": "p3", "sender_name": "P3", "kind": "speech", "round_label": "第 1 轮", "content": "OLD_DRAFT_3 " * 200, "superseded_by_step_final": True},
+            {"id": "M-P2", "sender_id": "p2", "sender_name": "P2", "kind": "speech", "round_label": "第 1 轮", "content": "P2_FINAL_OK " + ("审" * 8000)},
+            {"id": "M-P3", "sender_id": "p3", "sender_name": "P3", "kind": "speech", "round_label": "第 1 轮", "content": "P3_FINAL_OK " + ("核" * 8000)},
+        ]
+        plan_gpt = ce.compile_turn_prompt(
+            zone_a_blocks=["Zone A"],
+            zone_b_static_blocks=["Goal"],
+            sealed_snapshots=[],
+            visible_msgs=mixed_msgs,
+            is_blind_r1=False,
+            current_stage_index=1,
+            step_prompt_block="第 2 轮讨论",
+            handoff_block="",
+            protocol_blocks=[],
+            room_md_path="room.md",
+            blob_store=bs,
+            session_id=None,
+            session_metric=None,
+            model_slug="gpt-6.2-sol",
+            cfg=ce.ContextBudgetConfig(),
+            step_type="discussion",
+        )
+        self.assertEqual(plan_gpt["budget_chars"], 72_000)
+        self.assertNotIn("按公平配额压缩", plan_gpt["prompt"])
+        self.assertIn(huge_20k, plan_gpt["prompt"], "20K peer speech inside 72K budget MUST NOT be clipped at 14K!")
+        self.assertIn("CONFIRMED_REPLY_R1", plan_gpt["prompt"])
+        self.assertNotIn("OLD_DRAFT_1", plan_gpt["prompt"])
+
+        # --- 4 & 5. End-to-End: 5.8K verbatim consult + 8.2K tail-preserving consult + 4/4 hot R2 Delta reuse ---
+        proj_dir = os.path.join(self.tmp_dir, f"v571_e2e_{time.time_ns()}")
+        os.makedirs(proj_dir, exist_ok=True)
+        consult_prompts_seen: List[str] = []
+        consult_call_idx = {"n": 0}
+
+        def v571_runner(prompt, session_id, **kwargs):
+            if "【团队实时协助请求】" in prompt:
+                if "核验5800字" in prompt:
+                    # 5,800-char thorough peer reply -> MUST arrive 100% verbatim!
+                    body_5800 = "**判定 (Verdict)**：`CONFIRMED` VERDICT_HEAD_5800\n" + ("详" * 5680) + "\nCORRECTION_TAIL_5800_INTACT"
+                    return CodexExecutionResult(
+                        session_id="peer-c1", response_text=body_5800, partial_text="", exit_code=0, turn_completed=True,
+                        requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                        usage={"input_tokens": 15000, "output_tokens": 1800, "internal_api_calls": 2},
+                    )
+                # 8,200-char oversized peer reply -> MUST preserve head Verdict, BLOCKING anchor AND tail Correction!
+                body_8200 = (
+                    "**判定 (Verdict)**：`PARTIAL` VERDICT_HEAD_8200\n"
+                    + ("证" * 3500)
+                    + "\nBLOCKING: BLK-CONSULT-8200_MUST_SURVIVE\n"
+                    + ("据" * 4450)
+                    + "\n**最小修正**：TAIL_ALTERNATIVE_8200_PRESERVED"
+                )
+                return CodexExecutionResult(
+                    session_id="peer-c2", response_text=body_8200, partial_text="", exit_code=0, turn_completed=True,
+                    requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 18000, "output_tokens": 2400, "internal_api_calls": 2},
+                )
+
+            if "【收到队友" in prompt:
+                consult_prompts_seen.append(prompt)
+                return CodexExecutionResult(
+                    session_id=session_id or "s-post-consult",
+                    response_text=f"POST_CONSULT_DONE_{len(consult_prompts_seen)}",
+                    partial_text="", exit_code=0, turn_completed=True,
+                    requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 90_000, "cached_input_tokens": 75_000, "output_tokens": 1_200, "internal_api_calls": 2},
+                )
+
+            # First consult trigger from codex_author in R1 (5.8K verbatim test)
+            if "(ID: codex_author)" in prompt and "第 1 轮独立盲评阶段" in prompt and not session_id:
+                return CodexExecutionResult(
+                    session_id="sess-author-r1",
+                    response_text='简短核验。\n```team_consult\n{"to":"agy_gemini","question":"核验5800字"}\n```',
+                    partial_text="", exit_code=0, turn_completed=True,
+                    requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 2_000_000, "cached_input_tokens": 1_800_000, "output_tokens": 3_000, "internal_api_calls": 16},
+                )
+            # Second consult trigger from codex_reviewer in R1 (8.2K tail-preserving test)
+            if "(ID: codex_reviewer)" in prompt and "第 1 轮独立盲评阶段" in prompt and not session_id:
+                return CodexExecutionResult(
+                    session_id="sess-reviewer-r1",
+                    response_text='简短核验2。\n```team_consult\n{"to":"agy_gemini","question":"核验8200字"}\n```',
+                    partial_text="", exit_code=0, turn_completed=True,
+                    requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                    usage={"input_tokens": 2_050_000, "cached_input_tokens": 1_850_000, "output_tokens": 3_100, "internal_api_calls": 16},
+                )
+            # All other R1/R2/Synthesis turns simulate realistic client telemetry:
+            # Codex: 16-call 2.0M cumulative tool loop; Antigravity: 10-call 320K tool loop
+            sid = session_id or f"sess-r1-{len(consult_prompts_seen)}-{time.time_ns()}"
+            is_agy = kwargs["requested_config"].get("client") == "antigravity"
+            turn_usage = (
+                {"input_tokens": 320_000, "cached_input_tokens": 240_000, "output_tokens": 2_500, "internal_api_calls": 10}
+                if is_agy
+                else {"input_tokens": 2_000_000, "cached_input_tokens": 1_820_000, "output_tokens": 2_500, "internal_api_calls": 16}
+            )
+            return CodexExecutionResult(
+                session_id=sid,
+                response_text=f"CLEAN_SPEECH_OK_{sid[-6:]}",
+                partial_text="", exit_code=0, turn_completed=True,
+                requested_config=kwargs["requested_config"], accepted_config=kwargs["accepted_config"],
+                usage=turn_usage,
+            )
+
+        orch = TeamOrchestrator(
+            state_file=self.state_path,
+            adapter=CodexAdapter(runner_override=v571_runner),
+            agy_adapter=AgyAdapter(runner_override=v571_runner),
+            auto_start_scheduler=True,
+        )
+        try:
+            orch.switch_project(proj_dir)
+            orch.update_binding(max_concurrency=4)
+            t = orch.create_task(
+                title="v5.7.1 全员热会话与协商保真验证",
+                goal="验证4席圆桌全员R2零换乘热会话复用与协商6.5K保真",
+                execution_mode="roundtable",
+                participants=["codex_author", "codex_reviewer", "agy_claude_reviewer", "agy_gemini"],
+                host_member_id="agy_gemini",
+                discussion_rounds=2,
+                enable_host_opening=False,
+                sandbox="read-only",
+            )
+            dl = time.time() + 25.0
+            cur = t
+            while time.time() < dl:
+                cur = next(x for x in orch.store.snapshot()["tasks"] if x["id"] == t["id"])
+                if cur["status"] in ("succeeded", "failed"):
+                    break
+                time.sleep(0.08)
+            self.assertEqual(cur["status"], "succeeded")
+
+            # Check 4: Both consult followups preserved critical content cleanly!
+            self.assertEqual(len(consult_prompts_seen), 2)
+            p_5800 = next(p for p in consult_prompts_seen if "VERDICT_HEAD_5800" in p)
+            self.assertIn("CORRECTION_TAIL_5800_INTACT", p_5800, "5.8K peer consult reply MUST be delivered 100% verbatim!")
+            self.assertNotIn("完整协商回复已落盘", p_5800)
+
+            p_8200 = next(p for p in consult_prompts_seen if "VERDICT_HEAD_8200" in p)
+            self.assertIn("BLK-CONSULT-8200_MUST_SURVIVE", p_8200, "8.2K peer consult reply MUST preserve BLOCKING anchors!")
+            self.assertIn("TAIL_ALTERNATIVE_8200_PRESERVED", p_8200, "8.2K peer consult reply MUST preserve tail corrections!")
+
+            # Check 5: ZERO false rollovers across all 4 members (3 Codex + 1 AGY) & >= 4 hot Delta turns (4 R2 + 1 Synthesis = 5)!
+            cs = cur.get("context_stats") or {}
+            self.assertEqual(int(cs.get("rollover_count") or 0), 0, f"ALL 4/4 members MUST stay in hot sessions with 0 false rollovers: {cs}")
+            self.assertGreaterEqual(int(cs.get("delta_turns") or 0), 4, f"Expected >= 4 hot R2/Synthesis Delta turns, got {cs}")
+        finally:
+            orch.stop_scheduler()
+
+    def test_37_v572_agy_never_passes_new_project_and_retries_cleanly(self) -> None:
+        """Verify v5.7.2 fix preventing ghost empty projects in Antigravity 2.0 sidebar:
+        1. `AgyAdapter._run_agy_once` NEVER emits `--new-project`.
+        2. When `agy.exe` transiently fails with `empty conversation id`, `execute_turn()` retries cleanly
+           via backoff WITHOUT `--new-project`, passes `--add-dir <work_dir>`, and succeeds cleanly.
+        """
+        import inspect
+        import io
+        from unittest import mock
+        import agy_adapter as aa
+
+        # 1. Source contract guard: `--new-project` must never be emitted by _run_agy_once
+        src_run_once = inspect.getsource(aa.AgyAdapter._run_agy_once)
+        self.assertNotIn("--new-project", src_run_once, "AgyAdapter._run_agy_once MUST NOT pass --new-project!")
+
+        proj_dir = os.path.join(self.tmp_dir, f"v572_no_ghost_proj_{time.time_ns()}")
+        os.makedirs(proj_dir, exist_ok=True)
+        adapter = aa.AgyAdapter()
+        captured_argvs: List[List[str]] = []
+
+        class _FakeProc:
+            def __init__(self, pid: int, stdout_lines: List[str], stderr_lines: List[str], rc: int):
+                self.pid = pid
+                self.stdin = io.StringIO()
+                self.stdout = io.StringIO("\n".join(stdout_lines) + ("\n" if stdout_lines else ""))
+                self.stderr = io.StringIO("\n".join(stderr_lines) + ("\n" if stderr_lines else ""))
+                self._rc = rc
+                self._done = False
+
+            def poll(self):
+                return self._rc if self._done else None
+
+            def wait(self):
+                self._done = True
+                return self._rc
+
+        def _fake_popen(argv, **kwargs):
+            captured_argvs.append(list(argv))
+            if len(captured_argvs) == 1:
+                # Attempt 1: simulate transient backend error "empty conversation id"
+                return _FakeProc(
+                    pid=90001,
+                    stdout_lines=[],
+                    stderr_lines=["Error: failed to start conversation: empty conversation id"],
+                    rc=1,
+                )
+            # Attempt 2: clean stream-json success without --new-project!
+            ev_init = json.dumps({"event": "init", "conversation_id": "conv-v572-clean", "init": {"model": "gemini-4-neon-high"}})
+            ev_res = json.dumps({
+                "event": "result",
+                "result": {
+                    "conversation_id": "conv-v572-clean",
+                    "status": "SUCCESS",
+                    "response": "CLEAN_NO_GHOST_PROJECT",
+                    "duration_seconds": 1.2,
+                    "usage": {"input_tokens": 12000, "output_tokens": 350},
+                },
+            })
+            return _FakeProc(pid=90002, stdout_lines=[ev_init, ev_res], stderr_lines=[], rc=0)
+
+        fake_caps = {
+            "cli": {"installed": True, "binary": "agy.exe", "cli_version": "agy 1.5.10", "logged_in": True},
+            "models": [{
+                "slug": "gemini-4-neon",
+                "display_name": "Gemini 4 Neon",
+                "supported_reasoning_efforts": ["medium", "high"],
+                "default_reasoning_effort": "high",
+                "variants": {"medium": "gemini-4-neon-medium", "high": "gemini-4-neon-high"},
+            }],
+        }
+        with mock.patch.object(adapter, "discover_capabilities", return_value=fake_caps), \
+             mock.patch.object(aa.subprocess, "Popen", side_effect=_fake_popen), \
+             mock.patch.object(aa.time, "sleep", return_value=None):
+            res = adapter.execute_turn(
+                prompt="请只读核查当前课题目录",
+                session_id=None,
+                model="gemini-4-neon",
+                reasoning_effort="high",
+                cwd=proj_dir,
+                sandbox="read-only",
+                agy_project_id="",
+                attempt_id="att-v572-test",
+            )
+
+        self.assertEqual(res.final_status, "succeeded")
+        self.assertEqual(res.session_id, "conv-v572-clean")
+        self.assertEqual(res.response_text, "CLEAN_NO_GHOST_PROJECT")
+        self.assertEqual(len(captured_argvs), 2, f"Expected 1 initial + 1 clean backoff retry, got {len(captured_argvs)}")
+        for idx_a, av in enumerate(captured_argvs):
+            self.assertNotIn("--new-project", av, f"Attempt {idx_a + 1} MUST NOT pass --new-project: {av}")
+            self.assertIn("--add-dir", av, f"Attempt {idx_a + 1} MUST pass --add-dir for workspace access: {av}")
+            self.assertIn(os.path.normpath(os.path.abspath(proj_dir)), av)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

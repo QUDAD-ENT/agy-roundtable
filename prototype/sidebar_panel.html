@@ -1870,7 +1870,7 @@
       <div class="brand">
         <span class="brand-mark" id="brand-icon"></span>
         <span>AGY Roundtable</span>
-        <button type="button" id="btn-ver-pill" class="tag tabular" style="height:20px; min-height:20px; padding:0 6px; font-size:10.5px; cursor:pointer; border:1px solid var(--border); background:var(--surface-subtle); color:var(--text-2); margin-left:2px; flex-shrink:0;" onclick="onVersionPillClick()" title="版本与更新检查">v5.6.0</button>
+        <button type="button" id="btn-ver-pill" class="tag tabular" style="height:20px; min-height:20px; padding:0 6px; font-size:10.5px; cursor:pointer; border:1px solid var(--border); background:var(--surface-subtle); color:var(--text-2); margin-left:2px; flex-shrink:0;" onclick="onVersionPillClick()" title="版本与更新检查">v5.7.2</button>
       </div>
       <div class="v-sep"></div>
       <div class="proj-picker">
@@ -3070,8 +3070,8 @@
       }
     };
 
-    const CLIENT_APP_VERSION = '5.6.0';
-    const CLIENT_SERVER_REV = 21;
+    const CLIENT_APP_VERSION = '5.7.2';
+    const CLIENT_SERVER_REV = 24;
     let UPDATE_INFO = null;
     let LOCAL_UPGRADE_NOTIFIED_REV = 0;
 
@@ -6175,14 +6175,19 @@
       const ctxSt = focused.context_stats || {};
       const ctxSnapsCnt = (focused.round_snapshots || []).length;
       const ctxRoCnt = Number(ctxSt.rollover_count || 0);
+      const ctxDeltaCnt = Number(ctxSt.delta_turns || 0);
       const ctxInTok = Number(ctxSt.total_input_tokens || 0);
+      const ctxPeakTok = Number(ctxSt.max_peak_context_tokens || 0);
       const ctxCachePct = Math.round(Number(ctxSt.cache_hit_ratio || 0) * 100);
+      const fmtShortTok = (n) => n >= 1000000 ? `${(n / 1000000).toFixed(2)}M` : (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
       const ctxBriefParts = [];
-      if (ctxInTok > 0) ctxBriefParts.push(`${ctxInTok >= 1000 ? (ctxInTok / 1000).toFixed(1) + 'k' : ctxInTok} tok`);
+      if (ctxPeakTok > 0) ctxBriefParts.push(`${LANG === 'en' ? 'Peak' : '峰值'} ${fmtShortTok(ctxPeakTok)}`);
+      if (ctxInTok > 0) ctxBriefParts.push(`${LANG === 'en' ? 'Bill' : '累计'} ${fmtShortTok(ctxInTok)}`);
       if (ctxCachePct > 0) ctxBriefParts.push(`KV ${ctxCachePct}%`);
+      if (ctxDeltaCnt > 0) ctxBriefParts.push(`Δ${ctxDeltaCnt}`);
       if (ctxSnapsCnt > 0) ctxBriefParts.push(`${ctxSnapsCnt} snap`);
       if (ctxRoCnt > 0) ctxBriefParts.push(`${ctxRoCnt} ro`);
-      const ctxPillLabel = ctxBriefParts.length ? `${t('ctxPillLbl')} · ${ctxBriefParts.join(' · ')}` : `${t('ctxPillLbl')} · v5.4`;
+      const ctxPillLabel = ctxBriefParts.length ? `${t('ctxPillLbl')} · ${ctxBriefParts.join(' · ')}` : `${t('ctxPillLbl')} · v5.7`;
 
       // Granular in-place live patching: while streaming events/partial text arrive, NEVER destroy completed chat/doc DOM!
       const stageStructSig = [

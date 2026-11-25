@@ -1,21 +1,21 @@
 {
-  "version": "5.6.0",
-  "server_rev": 21,
-  "release_date": "2026-11-20",
+  "version": "5.7.2",
+  "server_rev": 24,
+  "release_date": "2026-11-25",
   "repo": "QUDAD-ENT/agy-roundtable",
-  "release_url": "https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.6.0",
-  "title_zh": "AGY Roundtable v5.6.0 — 用户自主三档沙箱权限中心 · 跨目录授权 (--add-dir) · 单席权限与 R 崩溃弹窗根治",
-  "title_en": "AGY Roundtable v5.6.0 — User-Controlled 3-Tier Sandbox Center, Extra Dir Grants (--add-dir), Per-Seat Permissions & Windows R Crash Fix",
+  "release_url": "https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.7.2",
+  "title_zh": "AGY Roundtable v5.7.2 — 超长上下文零打断协同升级（跨轮全员热会话 Delta 复用 · 公平配额零误剪 · 协商 6.5K 原文保真 · 彻底消除 Antigravity 左侧空项目）",
+  "title_en": "AGY Roundtable v5.7.2 — Uninterrupted Ultra-Long Context & Clean Sidebar Release (Full-Squad Cross-Round Delta Reuse, Zero-Clip Fair Budgeting, 6.5K Consult Fidelity & Zero Empty Antigravity Projects)",
   "highlights_zh": [
-    "三档沙箱权限完全由用户自主选择：顶栏实时权限胶囊一键直达「沙箱与目录权限中心」，自由切换「🔒 只读 (read-only) / ✏️ 项目可写 (workspace-write) / ⚠️ 完全访问 (danger-full-access，默认安全锁定，需二次风险确认解锁且支持一键重新锁定回收)」",
-    "跨盘/外部数据目录授权（--add-dir）：支持直接点选或粘贴额外数据/代码目录（最多 8 个），Codex 与 Antigravity CLI 在 workspace-write 下无需放开整机权限即可跨目录读写",
-    "圆桌单席细粒度权限 + MCP 默认跟随：发起圆桌时可给每个参会席位单独切换只读/可写/完全访问（如审稿官保持只读、绘图/统计官可写），同时 MCP team_dispatch_task 自动跟随用户配置的默认沙箱",
-    "根治 Windows 下圆桌运行 Rscript/Rterm 0xc0000005 崩溃弹窗：进程树继承 Win32 SetErrorMode 彻底静默系统错误弹窗，并在只读沙箱下规避 R 4.5.2 受限令牌崩裂"
+    "彻底消除 Antigravity 2.0 左侧栏自动冒出「空项目」：移除 `agy_adapter.py` 中触发幽灵项目的 `--new-project` 回退逻辑，遇 `empty conversation id` 直接走干净退避重试，配合 `--add-dir` 在 CLI 默认隔离区无污染读写任意课题目录",
+    "多轮超长上下文 100% 完整评审、零漏人零误剪：按模型真实窗口（Gemini 4 1M / GPT-6.2 272K）自适应扩展讨论与终稿预算至 72K–96K，修复公平注水配额 `-72` 偏移（总长未超预算时 100% 逐字原样送达），L0 优先保护窗扩至 10 条且跳过已折叠协商初稿",
+    "圆桌跨轮全员热会话 Delta 复用与精准水位遥测：修复 Codex 多波次并行命令缺失 `reasoning` 时的 API 轮次误折叠（改为并发在途工具 `0 → 1` 跃迁计数），消除 90% 虚假水位钳位与虚假换乘，实现第 2 轮全员（Codex + Antigravity）无缝热复用，单次完整圆桌耗时缩短约 25%",
+    "增强 `@team_consult` 跨席核验与状态库瘦身：队友协商回复原文直通上限提至 6.5K（超长时同时保留首段判定、核心锚点与尾段纠偏建议），自动折叠协商前旧草稿，并无损去重 `team_state.json` 瘦身约 40%~65%"
   ],
   "highlights_en": [
-    "User-controlled 3-tier sandbox permission center accessible from the topbar pill: freely switch between Read-Only (read-only), Workspace-Write (workspace-write), and Danger Full Access (danger-full-access, fail-closed by default, unlocked only via explicit 2-step risk confirmation and instantly relockable)",
-    "Cross-drive/external directory grants (--add-dir): visually pick or add up to 8 extra directories passed to Codex & Antigravity CLI so multi-folder datasets work cleanly inside workspace-write without full-machine access",
-    "Per-seat Roundtable permission overrides + MCP sync: set individual seat permissions (e.g., reviewer read-only, plotter writable) directly in the Roundtable composer, while MCP team_dispatch_task inherits user's default sandbox",
-    "Eliminates Windows Rterm.exe/Rscript.exe 0xc0000005 crash modals via inherited Win32 SetErrorMode and read-only sandbox guardrails"
+    "Eliminates ghost empty projects in the Antigravity 2.0 desktop sidebar: removed the `--new-project` fallback in `agy_adapter.py`; transient `empty conversation id` errors now recover via clean backoff retries while `--add-dir` grants target workspace access without polluting the sidebar",
+    "Uninterrupted multi-round peer review with zero dropped speakers & zero spurious clipping: adaptive 72K–96K L0 budgets for 272K/1M models, fixed `-72` water-fill offset for 100% verbatim delivery whenever messages fit, and expanded 10-slot live priority window excluding folded drafts",
+    "Full-squad cross-round hot Delta session reuse & exact peak telemetry: replaced Codex tool-batch counting with `0 -> 1` in-flight burst tracking (immune to omitted `reasoning` events), eliminating false 90% clamps & rollovers and cutting real 2-round wall-clock time by ~25%",
+    "Higher-fidelity `@team_consult` & leaner persistence: verbatim peer consult reply limit raised to 6.5K chars with anchor+tail-preserving compression, automatic superseded pre-consult draft folding, and lossless `team_state.json` deduplication"
   ]
 }

@@ -96,6 +96,7 @@ def normalize_usage(
     prompt_chars: int = 0,
     response_chars: int = 0,
     internal_api_calls: Optional[int] = None,
+    model_slug: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Normalize Codex CLI (`turn.completed.usage`) & Antigravity CLI (`result.usage`) usage dicts.
@@ -104,18 +105,39 @@ def normalize_usage(
     """
     u = raw_usage if isinstance(raw_usage, dict) else {}
 
-    def _pick_int(*keys: str) -> Optional[int]:
-        for k in keys:
-            val = u.get(k)
-            if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= 0:
-                return int(val)
+    def _pick_int(*keys: str, containers: Optional[List[Dict[str, Any]]] = None) -> Optional[int]:
+        for src in (containers or [u]):
+            if not isinstance(src, dict):
+                continue
+            for k in keys:
+                val = src.get(k)
+                if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= 0:
+                    return int(val)
         return None
 
-    inp = _pick_int("input_tokens", "prompt_tokens", "promptTokenCount", "inputTokens")
-    cached = _pick_int("cached_input_tokens", "cache_read_input_tokens", "cachedContentTokenCount", "cached_tokens")
-    outp = _pick_int("output_tokens", "completion_tokens", "candidatesTokenCount", "outputTokens")
-    tot = _pick_int("total_tokens", "totalTokenCount", "totalTokens")
-    calls = internal_api_calls if (isinstance(internal_api_calls, int) and internal_api_calls >= 1) else _pick_int("internal_api_calls", "api_calls", "num_turns")
+    detail_containers: List[Dict[str, Any]] = [u]
+    for sub_k in ("prompt_tokens_details", "input_tokens_details", "usage_metadata", "cache", "details"):
+        sub = u.get(sub_k)
+        if isinstance(sub, dict):
+            detail_containers.append(sub)
+
+    inp = _pick_int("input_tokens", "prompt_tokens", "promptTokenCount", "inputTokens", containers=detail_containers)
+    cached = _pick_int(
+        "cached_input_tokens",
+        "cache_read_input_tokens",
+        "cacheReadInputTokens",
+        "cachedContentTokenCount",
+        "cached_content_token_count",
+        "cached_tokens",
+        containers=detail_containers,
+    )
+    outp = _pick_int("output_tokens", "completion_tokens", "candidatesTokenCount", "outputTokens", containers=detail_containers)
+    tot = _pick_int("total_tokens", "totalTokenCount", "totalTokens", containers=detail_containers)
+    calls = (
+        internal_api_calls
+        if (isinstance(internal_api_calls, int) and internal_api_calls >= 1)
+        else _pick_int("internal_api_calls", "api_calls", "num_turns", "tool_batches")
+    )
     calls = max(1, int(calls or 1))
     if tot is None and inp is not None and outp is not None:
         tot = inp + outp
@@ -124,18 +146,29 @@ def normalize_usage(
     est_out = int(math.ceil(response_chars / 2.2)) if response_chars > 0 else 0
     cache_ratio = round((cached / inp), 3) if (cached is not None and inp and inp > 0) else None
 
-    # Calibrate single-call peak context occupancy when Codex sums multiple internal tool-loop API calls
-    peak_ctx: Optional[int] = inp
-    if inp is not None and calls > 1:
+    # Calibrate single-call peak context occupancy when CLI sums multiple internal tool-loop API calls
+    explicit_peak = _pick_int("peak_context_tokens")
+    peak_ctx: Optional[int] = explicit_peak if (explicit_peak is not None and explicit_peak > 0) else inp
+    if explicit_peak is None and inp is not None and calls > 1:
         avg_call = int(math.ceil(inp / calls))
         cached_bound = int(math.ceil(cached / max(1, calls - 1))) if cached else 0
         # Slight 1.15x headroom over average to stay safely conservative without 5x over-counting
         peak_ctx = min(inp, max(int(math.ceil(avg_call * 1.15)), cached_bound))
 
+    peak_clamped = False
+    if model_slug and peak_ctx is not None:
+        win_tok, _ = get_model_context_window(model_slug)
+        if peak_ctx > win_tok:
+            # A completed non-overflow turn cannot physically exceed the model's context window in a single call;
+            # clamp miscounted cumulative billing sums while preserving full `billing_input_tokens`.
+            peak_ctx = int(win_tok * 0.90)
+            peak_clamped = True
+
     return {
         "input_tokens": inp,
         "billing_input_tokens": inp,
         "peak_context_tokens": peak_ctx,
+        "peak_clamped": peak_clamped,
         "internal_api_calls": calls,
         "cached_input_tokens": cached,
         "output_tokens": outp,
@@ -574,6 +607,8 @@ def seal_round_snapshot(
     masked_refs: List[Dict[str, Any]] = []
 
     for ev in visible_events:
+        if ev.get("superseded_by_step_final") or ev.get("kind") == "pre_consult_draft":
+            continue
         content = str(ev.get("content") or "")
         sender = str(ev.get("sender_name") or ev.get("sender_id") or "agent")
         kind = str(ev.get("kind") or "speech")
@@ -584,34 +619,35 @@ def seal_round_snapshot(
         anc = extract_deterministic_anchors(content, source_event_id=ev_id)
 
         for fr in anc["file_refs"]:
-            if fr not in seen_files and len(all_files) < 28:
+            if fr not in seen_files and len(all_files) < 20:
                 seen_files.add(fr)
                 all_files.append(fr)
         for bl in anc["blocking_lines"]:
-            tagged = f"[{sender}] {bl}"
-            if tagged not in seen_blk and len(all_blockers) < 18:
+            tagged = f"[{sender}] {bl[:150]}"
+            if tagged not in seen_blk and len(all_blockers) < 12:
                 seen_blk.add(tagged)
                 all_blockers.append(tagged)
         for nm in anc["numeric_claims"]:
-            if nm not in seen_num and len(all_numerics) < 20:
-                seen_num.add(nm)
-                all_numerics.append(nm)
+            nm_clip = nm[:140]
+            if nm_clip not in seen_num and len(all_numerics) < 12:
+                seen_num.add(nm_clip)
+                all_numerics.append(nm_clip)
         if kind == "mention_reply":
-            v_summary = anc["verdicts"][0] if anc["verdicts"] else re.sub(r"\s+", " ", masked_txt.strip())[:180]
+            v_summary = anc["verdicts"][0][:140] if anc["verdicts"] else re.sub(r"\s+", " ", masked_txt.strip())[:140]
             consult_verdicts.append(f"@{sender} 核验: {v_summary}")
         else:
             # Capture concise head + conclusion snippet per speaker
             non_empty = [re.sub(r"\s+", " ", x.strip()) for x in masked_txt.splitlines() if x.strip() and not x.strip().startswith("```")]
-            head_s = non_empty[0][:180] if non_empty else ""
-            tail_s = non_empty[-1][:140] if len(non_empty) > 1 else ""
+            head_s = non_empty[0][:130] if non_empty else ""
+            tail_s = non_empty[-1][:90] if len(non_empty) > 1 else ""
             pos = f"- **{sender}** ({kind}): {head_s}" + (f" … 结论: {tail_s}" if tail_s and tail_s != head_s else "")
-            positions.append(pos[:340])
+            positions.append(pos[:230])
 
     # Include authoritative rulings & signoff from task_meta
     rulings_lines: List[str] = []
     for rl in (task_meta.get("rulings") or [])[-4:]:
         if isinstance(rl, dict):
-            rulings_lines.append(f"[{rl.get('decision', '')}] {str(rl.get('reason') or '')[:160]}")
+            rulings_lines.append(f"[{rl.get('decision', '')}] {str(rl.get('reason') or '')[:140]}")
 
     signoff = task_meta.get("research_signoff") if isinstance(task_meta.get("research_signoff"), dict) else None
     signoff_line = ""
@@ -627,13 +663,13 @@ def seal_round_snapshot(
     if positions:
         lines_md.append("**各席位核心立场**：\n" + "\n".join(positions[:8]))
     if all_blockers:
-        lines_md.append("**未决 BLOCKING / 关键风险锚点（原样保留）**：\n" + "\n".join(f"- {b}" for b in all_blockers[:12]))
+        lines_md.append("**未决 BLOCKING / 关键风险锚点（原样保留）**：\n" + "\n".join(f"- {b}" for b in all_blockers[:10]))
     if consult_verdicts:
-        lines_md.append("**@协商核验判定**：\n" + "\n".join(f"- {c}" for c in consult_verdicts[:6]))
+        lines_md.append("**@协商核验判定**：\n" + "\n".join(f"- {c}" for c in consult_verdicts[:5]))
     if all_numerics:
-        lines_md.append("**关键定量/统计字面值**：\n" + "\n".join(f"- {n}" for n in all_numerics[:12]))
+        lines_md.append("**关键定量/统计字面值**：\n" + "\n".join(f"- {n}" for n in all_numerics[:10]))
     if all_files:
-        lines_md.append("**核验文件与代码锚点**：" + " · ".join(f"`{f}`" for f in all_files[:16]))
+        lines_md.append("**核验文件与代码锚点**：" + " · ".join(f"`{f}`" for f in all_files[:14]))
     if rulings_lines:
         lines_md.append("**已生效裁决**：" + " | ".join(rulings_lines))
     if signoff_line:
@@ -696,7 +732,7 @@ def build_handoff_checkpoint(
     Build a deterministic, anchor-preserving Checkpoint Handoff Pack for seamless Session Rollover (`session_id=None`).
     Persists full checkpoint to BlobStore and returns compact Markdown sized for the target compression level.
     """
-    max_chars = 4800 if level == "L1" else (2400 if level == "L2" else 7000)
+    max_chars = 3200 if level == "L1" else (1800 if level == "L2" else 5200)
     all_text = "\n".join(str(m.get("content") or "") for m in visible_msgs[-8:])
     anc = extract_deterministic_anchors(all_text)
 
@@ -722,7 +758,7 @@ def build_handoff_checkpoint(
         txt = str(cm.get("content") or "").strip()
         if txt:
             masked_t, _ = mask_observation_blocks(txt, blob_store, min_code_lines=16, min_table_lines=14, min_block_chars=700)
-            recent_tail.append(f"- [{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name')}: {masked_t[:500]}")
+            recent_tail.append(f"- [{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name')}: {masked_t[:260]}")
 
     parts = [
         f"【无缝会话换乘检查点 (Session Rollover Checkpoint · reason={reason} · level={level})】",
@@ -777,10 +813,12 @@ class ContextBudgetConfig:
     mask_min_code_lines: int = 32
     mask_min_table_lines: int = 25
     mask_min_block_chars: int = 1400
+    explicit_budget: bool = False           # True when user/test explicitly pinned context_budget_chars
 
     @classmethod
     def from_settings(cls, settings: Optional[Dict[str, Any]]) -> "ContextBudgetConfig":
         s = settings if isinstance(settings, dict) else {}
+        has_explicit = bool(s.get("context_budget_chars"))
         max_c = int(s.get("context_budget_chars") or 48_000)
         max_c = max(12_000, min(160_000, max_c))
         mode = str(s.get("context_session_mode") or "bounded_native").strip().lower()
@@ -798,6 +836,7 @@ class ContextBudgetConfig:
             max_turns_per_session=turns,
             session_mode=mode,
             auto_rollover=bool(s.get("auto_context_rollover", True)),
+            explicit_budget=has_explicit,
         )
 
 
@@ -884,6 +923,65 @@ def _clip_preserve_ends(text: str, limit: int) -> str:
     return s[:head] + f"\n…[已按硬预算省略中间 {len(s) - head - tail} 字]…\n" + s[-tail:]
 
 
+def _clip_preserve_anchors(text: str, limit: int, raw_text: Optional[str] = None) -> str:
+    """Clip an oversized message while deterministically preserving head, tail, and key BLOCKING/numeric anchors."""
+    s = str(text or "")
+    if limit <= 0 or len(s) <= limit:
+        return s
+    anc = extract_deterministic_anchors(raw_text if raw_text is not None else s)
+    anc_lines: List[str] = []
+    if anc["blocking_lines"]:
+        anc_lines.append("BLOCKING/关键风险: " + " | ".join(x[:100] for x in anc["blocking_lines"][:3]))
+    if anc["verdicts"]:
+        anc_lines.append("判定: " + " | ".join(x[:80] for x in anc["verdicts"][:2]))
+    if anc["numeric_claims"]:
+        anc_lines.append("关键数值: " + " | ".join(x[:90] for x in anc["numeric_claims"][:3]))
+    anc_block = ("\n[保留核心锚点] " + " ; ".join(anc_lines) + "\n") if anc_lines else ""
+    if len(anc_block) > int(limit * 0.25):
+        anc_block = anc_block[: int(limit * 0.25)] + "\n"
+    avail = max(240, limit - len(anc_block) - 56)
+    head = int(avail * 0.68)
+    tail = max(80, avail - head)
+    if head + tail >= len(s):
+        return s[:limit]
+    return (
+        s[:head]
+        + f"\n…[按公平配额压缩中间 {len(s) - head - tail} 字]…"
+        + anc_block
+        + s[-tail:]
+    )
+
+
+clip_preserve_ends = _clip_preserve_ends
+clip_preserve_anchors = _clip_preserve_anchors
+
+
+def _waterfill_budgets(lengths: List[int], total_budget: int, min_floor: int = 1200, max_cap: int = 14000) -> List[int]:
+    """Fair water-fill budget allocator: short items take only what they need; surplus redistributes evenly to longer peers."""
+    n = len(lengths)
+    if n == 0:
+        return []
+    caps = [0] * n
+    rem_indices = list(range(n))
+    rem_budget = max(0, int(total_budget))
+    while rem_indices and rem_budget > 0:
+        fair = max(1, rem_budget // len(rem_indices))
+        settled = []
+        for i in rem_indices:
+            need = min(lengths[i], max_cap)
+            if need <= fair:
+                caps[i] = need
+                rem_budget -= need
+                settled.append(i)
+        if not settled:
+            each = min(max_cap, max(min_floor, fair)) if rem_budget >= min_floor * len(rem_indices) else max(320, fair)
+            for i in rem_indices:
+                caps[i] = min(lengths[i], each)
+            break
+        rem_indices = [i for i in rem_indices if i not in settled]
+    return caps
+
+
 def compile_turn_prompt(
     *,
     zone_a_blocks: List[str],
@@ -904,9 +1002,11 @@ def compile_turn_prompt(
     compression_level: str = "L0",
     force_full_prompt: bool = False,
     dep_fallback_block: str = "",
+    step_type: str = "execution",
+    current_member_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Compile a Three-Zone KV-Cache Prefix-Stable prompt with Four-Tier Hard Budget Governance.
+    Compile a Three-Zone KV-Cache Prefix-Stable prompt with Four-Tier Hard Budget Governance (v5.7).
 
     Returns:
       {
@@ -920,6 +1020,7 @@ def compile_turn_prompt(
         "budget_decision": "send" | "proactive_rollover" | "budget_blocked",
         "rollover_reason": Optional[str],
         "chat_cursor_id": str,
+        "delivered_msg_ids": List[str],
         "masked_blocks": int,
         "used_snapshots": int,
         "omitted_refs": List[str],
@@ -931,16 +1032,28 @@ def compile_turn_prompt(
     prefix_sha256 = hashlib.sha256(zone_a_text.encode("utf-8")).hexdigest()[:16]
 
     level = compression_level if compression_level in ("L0", "L1", "L2") else "L0"
-    budget_chars = (
-        cfg.max_prompt_chars if level == "L0"
-        else (cfg.l1_prompt_chars if level == "L1" else cfg.l2_prompt_chars)
-    )
     window_tokens, window_source = get_model_context_window(model_slug)
+    if level == "L0":
+        if cfg.explicit_budget:
+            budget_chars = cfg.max_prompt_chars
+        else:
+            st_low = (step_type or "execution").strip().lower()
+            if window_tokens >= 900_000:
+                budget_chars = 96_000 if st_low in ("synthesis", "fact_check") else 72_000
+            elif window_tokens >= 250_000:
+                budget_chars = 80_000 if st_low in ("synthesis", "fact_check") else 72_000
+            else:
+                budget_chars = cfg.max_prompt_chars
+    else:
+        budget_chars = cfg.l1_prompt_chars if level == "L1" else cfg.l2_prompt_chars
+
     # Never let budget exceed 60% of model's context window in characters
     win_char_cap = int(window_tokens * 1.4)
     effective_budget = min(budget_chars, max(9_000, win_char_cap))
 
     # Determine whether we can use Resumed-Session Delta Mode (M1)
+    has_seen_set = isinstance(session_metric, dict) and isinstance(session_metric.get("seen_msg_ids"), list) and len(session_metric.get("seen_msg_ids") or []) > 0
+    has_cursor = isinstance(session_metric, dict) and bool(session_metric.get("last_synced_msg_id"))
     can_delta = (
         bool(session_id)
         and cfg.session_mode == "bounded_native"
@@ -948,7 +1061,7 @@ def compile_turn_prompt(
         and level == "L0"
         and isinstance(session_metric, dict)
         and session_metric.get("prefix_sha256") == prefix_sha256
-        and bool(session_metric.get("last_synced_msg_id"))
+        and (has_seen_set or has_cursor)
     )
 
     last_cursor_id = str(visible_msgs[-1].get("id") or "") if visible_msgs else ""
@@ -956,9 +1069,6 @@ def compile_turn_prompt(
     masked_blocks = 0
 
     # Filter sealed snapshots strictly (NEVER leak snapshots into Blind Round 1!)
-    # Under L0, honor `cfg.protect_recent_rounds` (default 1) so the immediately preceding round stays
-    # verbatim for high-fidelity cross-critique while older rounds (>=2 stages back) collapse to snapshots.
-    # Under L1/L2 (reactive compression) or manual_compact, all prior stages may use sealed snapshots.
     usable_snapshots: List[Dict[str, Any]] = []
     covered_cutoff_ids: set = set()
     protect_gap = max(0, int(cfg.protect_recent_rounds)) if level == "L0" else 0
@@ -986,30 +1096,41 @@ def compile_turn_prompt(
         head_blocks = [
             f"【同会话增量帧 Delta Frame · prefix={prefix_sha256} · 沿用已建立身份/规则与完整纪要 {room_md_path}】"
         ]
-        # Select only NEW messages strictly after last_synced_msg_id!
-        prev_mid = str(session_metric.get("last_synced_msg_id") or "")
-        delta_msgs: List[Dict[str, Any]] = []
-        found_cursor = False
-        for cm in visible_msgs:
-            if found_cursor:
-                delta_msgs.append(cm)
-            elif str(cm.get("id") or "") == prev_mid:
-                found_cursor = True
-        if not found_cursor:
-            delta_msgs = visible_msgs[-4:]
+        if has_seen_set:
+            seen_set = {str(x) for x in (session_metric.get("seen_msg_ids") or []) if x}
+            delta_msgs = [cm for cm in visible_msgs if str(cm.get("id") or "") not in seen_set]
+        else:
+            prev_mid = str(session_metric.get("last_synced_msg_id") or "")
+            delta_msgs = []
+            found_cursor = False
+            for cm in visible_msgs:
+                if found_cursor:
+                    delta_msgs.append(cm)
+                elif str(cm.get("id") or "") == prev_mid:
+                    found_cursor = True
+            if not found_cursor:
+                delta_msgs = visible_msgs[-4:]
+        # Skip member's own prior speeches already present verbatim in the resumed session history!
+        if current_member_id:
+            delta_msgs = [
+                cm for cm in delta_msgs
+                if not (
+                    cm.get("sender_id") == current_member_id
+                    and cm.get("kind") in ("speech", "deliverable", "plan", "pre_consult_draft")
+                )
+            ]
         active_msgs = delta_msgs
         used_snaps: List[Dict[str, Any]] = []
     else:
         head_blocks = [zone_a_text] + [b for b in zone_b_static_blocks if b and b.strip()]
         used_snaps = usable_snapshots
-        # Keep messages NOT already covered by sealed snapshots, plus protect latest 4 turns under L0
         if used_snaps and level == "L0":
             uncovered = [cm for cm in visible_msgs if str(cm.get("id") or "") not in covered_cutoff_ids]
-            active_msgs = uncovered[-10:] if uncovered else visible_msgs[-4:]
+            active_msgs = uncovered[-12:] if uncovered else visible_msgs[-6:]
         elif level == "L1":
-            active_msgs = visible_msgs[-4:]
+            active_msgs = visible_msgs[-6:]
         elif level == "L2":
-            active_msgs = visible_msgs[-2:]
+            active_msgs = visible_msgs[-4:]
         else:
             active_msgs = visible_msgs[-16:]
 
@@ -1023,7 +1144,6 @@ def compile_turn_prompt(
     # Calculate mandatory P0 + head size
     base_fixed_len = sum(len(x) + 2 for x in head_blocks) + sum(len(x) + 2 for x in p0_tail_blocks)
     if base_fixed_len > effective_budget and not can_delta:
-        # Even P0 + Zone A exceeds budget -> trim only Zone B static playbooks if needed, never step_prompt!
         trimmed_head = [zone_a_text]
         for zb in zone_b_static_blocks:
             if zb and zb.strip():
@@ -1032,7 +1152,6 @@ def compile_turn_prompt(
         base_fixed_len = sum(len(x) + 2 for x in head_blocks) + sum(len(x) + 2 for x in p0_tail_blocks)
 
     if sum(len(x) for x in p0_tail_blocks) > effective_budget * 0.92:
-        # Mandatory P0 task prompt itself exceeds budget -> explicit budget_blocked!
         return {
             "prompt": "\n\n".join(head_blocks + p0_tail_blocks),
             "prefix_sha256": prefix_sha256,
@@ -1044,6 +1163,7 @@ def compile_turn_prompt(
             "budget_decision": "budget_blocked",
             "rollover_reason": "p0_exceeds_hard_budget",
             "chat_cursor_id": last_cursor_id,
+            "delivered_msg_ids": [],
             "masked_blocks": 0,
             "used_snapshots": len(snap_blocks),
             "omitted_refs": [f"P0 mandatory prompt ({sum(len(x) for x in p0_tail_blocks)} chars) > budget ({effective_budget} chars)"],
@@ -1053,13 +1173,10 @@ def compile_turn_prompt(
 
     remaining_budget = max(1200, effective_budget - base_fixed_len)
 
-    # Reserve up to 35% (45% under L1/L2) of remaining budget for sealed Zone B snapshots.
-    # Walk NEWEST -> OLDEST so recent sealed rounds are ALWAYS preserved intact; any evicted
-    # ancient rounds are folded into a single Pinned Historical Anchor Ledger, then restored
-    # to chronological order for KV-cache append stability!
+    # Reserve up to 28% (40% under L1/L2) of remaining budget for sealed Zone B snapshots.
     kept_snap_rev: List[str] = []
     evicted_old_snaps: List[str] = []
-    snap_budget = int(remaining_budget * (0.45 if level != "L0" else 0.35))
+    snap_budget = int(remaining_budget * (0.40 if level != "L0" else 0.28))
     used_snap_chars = 0
     for sb in reversed(snap_blocks):
         if used_snap_chars + len(sb) <= snap_budget:
@@ -1088,8 +1205,9 @@ def compile_turn_prompt(
         used_snap_chars += len(fold_md) + 2
     remaining_budget = max(800, remaining_budget - used_snap_chars)
 
-    # Render Zone C messages (protecting latest round under L0, masking older blocks)
+    # Render Zone C messages with Superseded Draft Folding + Fair Per-Speaker Water-Fill Budgeting!
     msg_blocks: List[str] = []
+    delivered_msg_ids: List[str] = []
     has_non_goal_active = any(cm.get("kind") != "user_goal" for cm in active_msgs)
     show_active_msgs = (
         (can_delta and bool(active_msgs))
@@ -1097,19 +1215,32 @@ def compile_turn_prompt(
         or (len(active_msgs) > 1)
     )
     if show_active_msgs:
-        # Walk from newest -> oldest to prioritize high-signal recent turns within hard budget
-        rendered_rev: List[str] = []
-        used_msg_chars = 0
         n_active = len(active_msgs)
-        for rev_i, cm in enumerate(reversed(active_msgs)):
-            orig_idx = n_active - 1 - rev_i
+        raw_total = sum(len(str(cm.get("content") or "")) for cm in active_msgs if not cm.get("superseded_by_step_final"))
+        pressure_high = raw_total > remaining_budget
+
+        # Pre-prepare every active message (folding superseded pre-consult drafts & masking oversized blocks)
+        # Count reverse rank ONLY among non-superseded messages so folded pre-consult drafts NEVER demote real peers!
+        live_indices = [
+            i for i, cm in enumerate(active_msgs)
+            if not (bool(cm.get("superseded_by_step_final")) or cm.get("kind") == "pre_consult_draft")
+        ]
+        live_rev_map = {orig_i: (len(live_indices) - 1 - pos) for pos, orig_i in enumerate(live_indices)}
+        prio_window = 10 if level == "L0" else 6
+
+        prepared: List[Dict[str, Any]] = []
+        for idx_m, cm in enumerate(active_msgs):
+            live_rev = live_rev_map.get(idx_m, 999)
             to_tag = f" @{cm['to_member_name']}" if cm.get("to_member_name") else ""
             raw_c = str(cm.get("content") or "")
+            is_superseded = bool(cm.get("superseded_by_step_final")) or cm.get("kind") == "pre_consult_draft"
             is_user_or_ruling = cm.get("kind") in ("user_goal", "user_interjection", "user_choice", "ruling")
-            is_protected_recent = (rev_i < 4) and (level == "L0")
+            is_protected_recent = (live_rev < prio_window) and (level == "L0")
+            hdr_prefix = f"[{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name') or cm.get('sender_id')}{to_tag}：\n"
 
-            # Apply Observation Masking to older non-user turns (age >= 4 msgs) or under L1/L2!
-            if not is_user_or_ruling and (not is_protected_recent or level != "L0"):
+            if is_superseded:
+                proc_c = f"(协商前初稿，已由同步骤协商后定稿取代；完整存档见 {room_md_path})"
+            elif not is_user_or_ruling and (not is_protected_recent or level != "L0" or pressure_high):
                 proc_c, refs = mask_observation_blocks(
                     raw_c,
                     blob_store,
@@ -1121,45 +1252,99 @@ def compile_turn_prompt(
             else:
                 proc_c = raw_c
 
-            per_msg_cap = (
-                9000 if (is_protected_recent or is_user_or_ruling)
-                else (3200 if level == "L0" else (1800 if level == "L1" else 900))
-            )
-            if len(proc_c) > per_msg_cap:
-                # Offload full message before clipping so NOTHING is ever permanently lost!
-                off = blob_store.put_text(raw_c, subdir="msgs", ext=".md")
-                proc_c = _clip_preserve_ends(proc_c, per_msg_cap) + f"\n[完整原文指针: {off['path']}]"
+            prepared.append({
+                "idx": idx_m,
+                "cm": cm,
+                "hdr": hdr_prefix,
+                "raw": raw_c,
+                "proc": proc_c,
+                "is_superseded": is_superseded,
+                "is_priority": (not is_superseded) and (live_rev < prio_window or cm.get("kind") in ("user_interjection", "user_choice", "ruling")),
+                "is_user_or_ruling": is_user_or_ruling,
+            })
 
-            entry = f"[{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name') or cm.get('sender_id')}{to_tag}：\n{proc_c}"
-            if used_msg_chars + len(entry) <= remaining_budget:
-                rendered_rev.append(entry)
+        # Allocate fair water-fill budgets to the priority cohort first (guarantees ZERO active Roundtable peers dropped
+        # AND 100.0% verbatim zero-clip delivery whenever all priority messages fit inside remaining budget!)
+        prio_items = [p for p in prepared if p["is_priority"]]
+        other_items = [p for p in prepared if not p["is_priority"]]
+        max_per_msg = (
+            min(28_000, max(16_000, int(effective_budget * 0.40)))
+            if level == "L0"
+            else (4200 if level == "L1" else 1800)
+        )
+        prio_reserve = int(remaining_budget * (0.90 if other_items else 0.98))
+        prio_lengths = [len(p["hdr"]) + len(p["proc"]) + 6 for p in prio_items]
+        if sum(prio_lengths) <= prio_reserve and level == "L0":
+            # Everything fits comfortably: deliver EVERY peer's complete opinion verbatim with ZERO clipping!
+            prio_caps = list(prio_lengths)
+        else:
+            prio_caps = _waterfill_budgets(prio_lengths, prio_reserve, min_floor=1000, max_cap=max_per_msg)
+
+        rendered_by_idx: Dict[int, str] = {}
+        used_msg_chars = 0
+        for p, cap in zip(prio_items, prio_caps):
+            body = p["proc"]
+            full_entry_len = len(p["hdr"]) + len(body) + 6
+            if full_entry_len > cap:
+                body_cap = max(320, cap - len(p["hdr"]) - 72)
+                off = blob_store.put_text(p["raw"], subdir="msgs", ext=".md")
+                body = _clip_preserve_anchors(body, body_cap, raw_text=p["raw"]) + f"\n[完整原文指针: {off['path']}]"
+            entry = p["hdr"] + body
+            rendered_by_idx[p["idx"]] = entry
+            used_msg_chars += len(entry) + 6
+            cid = str(p["cm"].get("id") or "")
+            if cid:
+                delivered_msg_ids.append(cid)
+
+        # Spend remaining budget on non-priority / older messages (newest -> oldest)
+        for p in reversed(other_items):
+            avail = remaining_budget - used_msg_chars
+            cm = p["cm"]
+            cid = str(cm.get("id") or "")
+            if p["is_superseded"]:
+                entry = p["hdr"].rstrip("\n") + " " + p["proc"]
+                if len(entry) + 6 <= avail:
+                    rendered_by_idx[p["idx"]] = entry
+                    used_msg_chars += len(entry) + 6
+                    if cid:
+                        delivered_msg_ids.append(cid)
+                continue
+            older_cap = (8000 if not pressure_high else 4000) if level == "L0" else (1800 if level == "L1" else 900)
+            body = p["proc"]
+            if len(body) > older_cap:
+                off = blob_store.put_text(p["raw"], subdir="msgs", ext=".md")
+                body = _clip_preserve_anchors(body, older_cap, raw_text=p["raw"]) + f"\n[完整原文指针: {off['path']}]"
+            entry = p["hdr"] + body
+            if len(entry) + 6 <= avail:
+                rendered_by_idx[p["idx"]] = entry
                 used_msg_chars += len(entry) + 6
+                if cid:
+                    delivered_msg_ids.append(cid)
+            elif avail >= 280:
+                anc = extract_deterministic_anchors(p["raw"], cid)
+                brief = "; ".join(anc["blocking_lines"][:2] + anc["file_refs"][:3] + anc["numeric_claims"][:2])
+                stub = (
+                    f"[{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name') or cm.get('sender_id')} "
+                    f"(已折叠，原文见 {room_md_path})：{brief[: max(120, avail - 120)]}"
+                )
+                rendered_by_idx[p["idx"]] = stub
+                used_msg_chars += len(stub) + 6
+                omitted_refs.append(f"msg:{cid or p['idx']}({cm.get('sender_id')})")
             else:
-                # Fit a deterministic anchor-only stub if space permits, else record omitted ref
-                avail = remaining_budget - used_msg_chars
-                if avail >= 320:
-                    anc = extract_deterministic_anchors(raw_c, str(cm.get("id") or ""))
-                    brief = "; ".join(anc["blocking_lines"][:2] + anc["file_refs"][:3] + anc["numeric_claims"][:2])
-                    stub = (
-                        f"[{cm.get('round_label') or cm.get('kind')}] {cm.get('sender_name') or cm.get('sender_id')} "
-                        f"(已折叠，原文见 {room_md_path})：{brief[: max(120, avail - 120)]}"
-                    )
-                    rendered_rev.append(stub)
-                    used_msg_chars += len(stub) + 6
-                omitted_refs.append(f"msg:{cm.get('id') or orig_idx}({cm.get('sender_id')})")
+                omitted_refs.append(f"msg:{cid or p['idx']}({cm.get('sender_id')})")
 
-        rendered_rev.reverse()
-        if rendered_rev:
+        rendered_chron = [rendered_by_idx[i] for i in sorted(rendered_by_idx.keys())]
+        if rendered_chron:
             hdr = (
                 "【本轮可见上下文（Blind Round 1 隔离视图，不包含同轮其他席位草稿）】\n"
                 if is_blind_r1
                 else (
-                    f"【自上次会话同步后的新增群聊增量（完整纪要：{room_md_path}）】\n"
+                    f"【团队共享群聊记录 · 新增增量帧（完整纪要：{room_md_path}）】\n"
                     if can_delta
                     else f"【团队共享群聊记录（完整纪要文件：{room_md_path}）】\n"
                 )
             )
-            msg_blocks.append(hdr + "\n---\n".join(rendered_rev))
+            msg_blocks.append(hdr + "\n---\n".join(rendered_chron))
     elif dep_fallback_block and not is_blind_r1 and not can_delta:
         dep_txt = dep_fallback_block
         if len(dep_txt) > remaining_budget:
@@ -1204,6 +1389,7 @@ def compile_turn_prompt(
         "budget_decision": budget_decision,
         "rollover_reason": rollover_reason,
         "chat_cursor_id": last_cursor_id,
+        "delivered_msg_ids": delivered_msg_ids,
         "masked_blocks": masked_blocks,
         "used_snapshots": len(kept_snap_blocks),
         "omitted_refs": omitted_refs,

@@ -4,13 +4,13 @@
 
 **[← 简体中文主页 (README.md)](README.md)** · **English**
 
-[![Release: v5.6.0](https://img.shields.io/badge/Release-v5.6.0-indigo.svg)](https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.6.0)
+[![Release: v5.7.2](https://img.shields.io/badge/Release-v5.7.2-indigo.svg)](https://github.com/QUDAD-ENT/agy-roundtable/releases/tag/v5.7.2)
 [![Zero Pip Deps](https://img.shields.io/badge/Core-Pure%20Python%20Stdlib-emerald.svg)](#why-agy-roundtable)
-[![Tests: 34/34 Passing](https://img.shields.io/badge/Tests-34%2F34%20Passing-brightgreen.svg)](#quick-start)
+[![Tests: 37/37 Passing](https://img.shields.io/badge/Tests-37%2F37%20Passing-brightgreen.svg)](#quick-start)
 [![License: MIT](https://img.shields.io/badge/License-MIT-slate.svg)](LICENSE)
 [![Companion: Agy Console](https://img.shields.io/badge/Companion-dneo9527--ctrl%2Fagy--console-purple.svg)](https://github.com/dneo9527-ctrl/agy-console)
 
-[Why AGY Roundtable?](#why-agy-roundtable) · [What's New in v5.6.0](#whats-new-in-v560) · [Core Architecture](#core-architecture) · [Quick Start](#quick-start) · [Ecosystem](#ecosystem--project-association) · [Repository Structure](#repository-structure)
+[Why AGY Roundtable?](#why-agy-roundtable) · [What's New in v5.7.2](#whats-new-in-v572) · [Core Architecture](#core-architecture) · [Quick Start](#quick-start) · [Ecosystem](#ecosystem--project-association) · [Repository Structure](#repository-structure)
 
 > **Stop letting a single model grade its own homework.**  
 > **AGY Roundtable** seats heterogeneous frontier models (**Gemini 4**, **Claude 5.5**, and **GPT-6.2**) at a single shared Roundtable — featuring **sealed Blind Round 1**, **anonymous Borda consensus voting**, **user-controlled 3-tier sandboxes + cross-drive `--add-dir` grants**, **3-zone KV-cache long-context compression**, **zero-dependency bilingual SQLite FTS5 cross-task memory**, **native Git Worktree parallel isolation**, and **publication-grade scientific Figure QA**.  
@@ -21,9 +21,9 @@
 <a id="why-agy-roundtable"></a>
 ## 🏆 Why AGY Roundtable?
 
-How **AGY Roundtable v5.6.0** compares against single-vendor CLI agent teams and code-heavy multi-agent frameworks:
+How **AGY Roundtable v5.7.2** compares against single-vendor CLI agent teams and code-heavy multi-agent frameworks:
 
-| Dimension | Single-Vendor CLI Teams | Generic Code Frameworks (AutoGen / CrewAI / LangGraph) | **🏛️ AGY Roundtable v5.6.0** |
+| Dimension | Single-Vendor CLI Teams | Generic Code Frameworks (AutoGen / CrewAI / LangGraph) | **🏛️ AGY Roundtable v5.7.2** |
 | :--- | :--- | :--- | :--- |
 | **Cross-Vendor Heterogeneous Debate** | Locked to one vendor's model family & blind spots | Requires API keys, separate billing & custom Python glue | **Native Antigravity (`Gemini 4` / `Claude 5.5`) + Codex (`GPT-6.2`)** in one live Roundtable with mid-step `@mention` verification |
 | **Anti-Groupthink Governance** | Shared thread prone to early anchoring bias | Unstructured chat loops prone to sycophancy | **Sealed Blind Round 1** (memory + disk isolation) + **Anonymous Seat Masking (`Seat A/B/C`)** + **Deterministic Borda Voting** |
@@ -39,12 +39,26 @@ How **AGY Roundtable v5.6.0** compares against single-vendor CLI agent teams and
 - **HTTP State Polling**: `5.22 MB` full state → **`215 KB`** cold slim gzip (`-95.9%`) → **`0 B` / `1.09 ms`** when unchanged via `HTTP 304 Not Modified` (`since_rev` + `ETag`).
 - **Zero-ReDoS Markdown Parser**: 600-character unclosed-link adversarial input reduced from catastrophic backtracking freeze → **`0.1 ms`** linear $O(N)$ scanner + 180-entry LRU cache.
 - **Idle Footprint**: **`0` disk writes/sec** and **`0%` background CPU delta** when idle.
-- **Automated Regression Suite**: **`34 / 34`** end-to-end tests passing (`~29s`) covering P0 sandbox trust root, 3-tier opt-in & instant relock, `--add-dir` propagation, per-seat overrides, SQLite FTS5 search, Git Worktree merge, Figure QA, and quota failover.
+- **Automated Regression Suite**: **`37 / 37`** end-to-end tests passing (`~26s`) covering P0 sandbox trust root, 3-tier opt-in & instant relock, `--add-dir` propagation, per-seat overrides, cross-round hot Delta reuse, zero-clip water-fill budgeting, Codex burst batch telemetry, clean sidebar retries without `--new-project`, SQLite FTS5 search, Git Worktree merge, Figure QA, and quota failover.
 
 ---
 
+<a id="whats-new-in-v572"></a>
+## ✨ What's New in v5.7.2
+
+1. **🧠 Uninterrupted Multi-Round Dialogue & Zero-Clip Fair Water-Fill Budgeting (`v5.7.0 → v5.7.2`)**
+   - Adaptive L0 prompt budgets scale up to **`72K–96K` chars** by model window (`Gemini 4 1M` / `GPT-6.2 272K`) and step role;
+   - **Fair Per-Speaker Water-Fill Budgeting** delivers **100.0% verbatim peer opinions** whenever the cohort fits in budget (zero spurious clipping, zero dropped experts), with a 10-slot live priority cohort that excludes folded pre-consult drafts.
+2. **⚡ Full-Squad Cross-Round Hot Delta Reuse & Exact Codex Burst Counting**
+   - Same-member R1→R2 transitions reuse warm KV-cached native sessions with parallel-safe `seen_msg_ids` tracking (skipping static prefixes & the member's own R1 transcript);
+   - Exact in-flight `0 → 1` tool burst counting in `codex_adapter.py` eliminates false 90% peak clamps and spurious rollovers even when CLI streams omit `reasoning` items — cutting 2-round wall-clock duration by **~25%** and total compute by **~31%**.
+3. **🤝 6.5K `@team_consult` Peer Fidelity & Lossless State Slimming**
+   - Raises verbatim `@team_consult` peer reply limit to **`6.5K` chars** (preserving head verdicts, `BLOCKING`/numeric anchors, and tail corrections if oversized), auto-folds superseded pre-consult drafts, and losslessly deduplicates `team_state.json` (**40%–65% smaller**).
+4. **🧹 Zero Empty Ghost Projects in Antigravity 2.0 Sidebar**
+   - Removed the legacy `--new-project` fallback in `agy_adapter.py`; transient `empty conversation id` hiccups now retry cleanly with backoff while `--add-dir` grants target folder access inside CLI's isolated `default-cli-project`.
+
 <a id="whats-new-in-v560"></a>
-## ✨ What's New in v5.6.0
+### Built on v5.6.0 Capabilities
 
 1. **🛡️ User-Controlled 3-Tier Sandbox & Directory Permission Center**
    - Live topbar status pill (`🔒 RO` / `✏️ RW` / `⚠️ Full`) opens the dedicated **Sandbox & Directory Permission Center**:

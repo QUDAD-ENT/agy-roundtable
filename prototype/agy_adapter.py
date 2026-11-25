@@ -5,7 +5,7 @@ Supports user-initiated execution on the local collaboration panel using officia
 - Executes non-interactive turns via 'agy -p --output-format stream-json'
 - Streams 'init', 'step_update' (live text_delta), and 'result' events
 - Resumes conversations via '--conversation <id>'
-- Auto-initializes project association via '--new-project' when running in an unbound folder
+- Keeps Antigravity 2.0 desktop sidebar clean (NEVER passes '--new-project'; runs headless turns cleanly inside CLI's default-cli-project + '--add-dir')
 - Supports confirmed Windows process-tree cancellation (abort)
 """
 
@@ -315,8 +315,12 @@ class AgyAdapter:
 
         agy_safe_prompt = _build_agy_prompt(prompt, session_id)
 
-        def _invoke_with_project_init(p_txt: str, sess: Optional[str]) -> CodexExecutionResult:
-            r = self._run_agy_once(
+        def _invoke_agy(p_txt: str, sess: Optional[str]) -> CodexExecutionResult:
+            # v5.7.2: NEVER auto-retry with `--new-project`! Headless agy CLI runs natively inside
+            # `default-cli-project` with `--add-dir <work_dir>`, whereas `--new-project` registers empty
+            # ghost projects in Antigravity 2.0's desktop sidebar (CLI trajectories are hidden in desktop UI).
+            # Transient "empty conversation id" hiccups are handled cleanly by the backoff retry loop below.
+            return self._run_agy_once(
                 prompt=p_txt,
                 session_id=sess,
                 full_slug=full_slug,
@@ -324,7 +328,6 @@ class AgyAdapter:
                 sandbox=sandbox,
                 add_dirs=clean_add_dirs,
                 agy_project_id=agy_project_id,
-                force_new_project=False,
                 attempt_id=attempt_id,
                 idle_timeout_sec=eff_idle_timeout,
                 requested_cfg=requested_cfg,
@@ -333,38 +336,12 @@ class AgyAdapter:
                 on_event=on_event,
                 on_partial_text=on_partial_text,
             )
-            if (
-                not sess
-                and not r.aborted
-                and r.exit_code != 0
-                and "empty conversation id" in (r.error or "").lower()
-            ):
-                if on_event:
-                    on_event({"type": "agy.init_project", "summary": "首次在该项目目录启动 Antigravity CLI，正在自动关联新工作区项目", "ts": time.time()})
-                r = self._run_agy_once(
-                    prompt=p_txt,
-                    session_id=None,
-                    full_slug=full_slug,
-                    cwd=cwd,
-                    sandbox=sandbox,
-                    add_dirs=clean_add_dirs,
-                    agy_project_id=None,
-                    force_new_project=True,
-                    attempt_id=attempt_id,
-                    idle_timeout_sec=eff_idle_timeout,
-                    requested_cfg=requested_cfg,
-                    accepted_cfg=accepted_cfg,
-                    on_start=on_start,
-                    on_event=on_event,
-                    on_partial_text=on_partial_text,
-                )
-            return r
 
         cur_sess = session_id
         res: Optional[CodexExecutionResult] = None
         for retry_idx in range(max_transient_retries + 1):
             cur_prompt = _build_agy_prompt(prompt, cur_sess) if retry_idx > 0 else agy_safe_prompt
-            res = _invoke_with_project_init(cur_prompt, cur_sess)
+            res = _invoke_agy(cur_prompt, cur_sess)
 
             # If headless mode denied a tool and produced empty output, retry once instructing allowed built-in file tools
             joined_err = f"{res.error or ''}\n" + "\n".join(res.stderr_lines).lower()
@@ -382,7 +359,7 @@ class AgyAdapter:
                     + prompt,
                     None,
                 )
-                res = _invoke_with_project_init(retry_prompt, None)
+                res = _invoke_agy(retry_prompt, None)
 
             if res.aborted or res.final_status == "succeeded" or res.session_not_found or res.context_overflow:
                 return res
@@ -474,7 +451,6 @@ class AgyAdapter:
         sandbox: str,
         add_dirs: Optional[List[str]],
         agy_project_id: Optional[str],
-        force_new_project: bool,
         attempt_id: Optional[str],
         idle_timeout_sec: float,
         requested_cfg: Dict[str, Any],
@@ -523,8 +499,6 @@ class AgyAdapter:
             argv.extend(["--model", full_slug])
         if session_id:
             argv.extend(["--conversation", session_id])
-        elif force_new_project:
-            argv.append("--new-project")
         elif agy_project_id:
             argv.extend(["--project", agy_project_id])
 
@@ -627,6 +601,11 @@ class AgyAdapter:
         usage_info: Dict[str, Any] = {}
         stream_error: Optional[str] = None
         accepted_final = dict(accepted_cfg)
+        agy_tool_events = 0
+        agy_tool_batches = 0
+        agy_in_tool_batch = False
+        agy_active_tool_keys: set = set()
+        agy_seen_active_keys: set = set()
 
         if proc.stdout:
             for raw_line in proc.stdout:
@@ -660,43 +639,73 @@ class AgyAdapter:
                     stype = su.get("step_type", "step")
                     delta = su.get("text_delta") or ""
                     if stype == "agent_response" and delta:
+                        agy_in_tool_batch = False
+                        agy_active_tool_keys.clear()
                         streamed_text += delta
                         if on_partial_text:
                             try:
                                 on_partial_text(streamed_text)
                             except Exception:
                                 pass
-                    elif stype not in ("user_input", "agent_response") and su.get("state") == "ACTIVE":
-                        tname = su.get("tool_name") or stype
-                        tparams = (su.get("tool_info") or {}).get("parameters") or {}
-                        target_hint = ""
-                        for pk in ("Path", "SearchPath", "SearchDirectory", "query", "Pattern", "Query"):
-                            if tparams.get(pk):
-                                raw_v = str(tparams[pk])
-                                target_hint = os.path.basename(raw_v.rstrip("/\\")) or raw_v[:32]
-                                break
-                        tool_cn = {
-                            "read_file": "📖 读取文件",
-                            "list_dir": "📂 浏览目录",
-                            "find_by_name": "🔎 查找文件",
-                            "grep_search": "🔎 检索内容",
-                            "search_web": "🌐 联网检索",
-                            "write_file": "✏️ 写入文件",
-                            "edit_file": "✏️ 编辑文件",
-                        }.get(tname, f"⚙️ 调用 {tname}")
-                        act_lbl = f"{tool_cn}: {target_hint}" if target_hint else tool_cn
-                        if on_event:
-                            on_event({
-                                "type": f"agy.{tname}",
-                                "session_id": res_session_id,
-                                "activity_label": act_lbl,
-                                "summary": act_lbl,
-                                "ts": time.time(),
-                            })
+                    elif stype in ("thinking", "planner_thought", "reasoning"):
+                        agy_in_tool_batch = False
+                        agy_active_tool_keys.clear()
+                    elif stype not in ("user_input", "agent_response"):
+                        state_up = str(su.get("state") or "").upper()
+                        tkey = str(su.get("step_index") if su.get("step_index") is not None else (su.get("id") or su.get("tool_call_id") or ""))
+                        if state_up == "ACTIVE":
+                            if not agy_in_tool_batch and not agy_active_tool_keys:
+                                agy_tool_batches += 1
+                                agy_in_tool_batch = True
+                            if tkey:
+                                if tkey not in agy_seen_active_keys:
+                                    agy_seen_active_keys.add(tkey)
+                                    agy_tool_events += 1
+                                agy_active_tool_keys.add(tkey)
+                            else:
+                                agy_tool_events += 1
+                            tname = su.get("tool_name") or stype
+                            tparams = (su.get("tool_info") or {}).get("parameters") or {}
+                            target_hint = ""
+                            for pk in ("Path", "SearchPath", "SearchDirectory", "query", "Pattern", "Query"):
+                                if tparams.get(pk):
+                                    raw_v = str(tparams[pk])
+                                    target_hint = os.path.basename(raw_v.rstrip("/\\")) or raw_v[:32]
+                                    break
+                            tool_cn = {
+                                "read_file": "📖 读取文件",
+                                "list_dir": "📂 浏览目录",
+                                "find_by_name": "🔎 查找文件",
+                                "grep_search": "🔎 检索内容",
+                                "search_web": "🌐 联网检索",
+                                "write_file": "✏️ 写入文件",
+                                "edit_file": "✏️ 编辑文件",
+                            }.get(tname, f"⚙️ 调用 {tname}")
+                            act_lbl = f"{tool_cn}: {target_hint}" if target_hint else tool_cn
+                            if on_event:
+                                on_event({
+                                    "type": f"agy.{tname}",
+                                    "session_id": res_session_id,
+                                    "activity_label": act_lbl,
+                                    "summary": act_lbl,
+                                    "ts": time.time(),
+                                })
+                        elif state_up in ("COMPLETED", "DONE", "SUCCEEDED", "FAILED", "CANCELLED", "ERROR"):
+                            if tkey:
+                                agy_active_tool_keys.discard(tkey)
+                                if not agy_active_tool_keys:
+                                    agy_in_tool_batch = False
+                            else:
+                                agy_in_tool_batch = False
                 elif etype == "result":
                     r_obj = ev.get("result") or {}
                     res_session_id = r_obj.get("conversation_id") or res_session_id
-                    usage_info = r_obj.get("usage") or {}
+                    usage_info = dict(r_obj.get("usage") or {})
+                    # Estimate logical LLM API turns from tool batches (AGY executes ~2-4 parallel tool calls per turn)
+                    eff_agy_batches = agy_tool_batches if agy_tool_batches >= 2 else (max(agy_tool_batches, (agy_tool_events + 2) // 3) if agy_tool_events > 0 else 0)
+                    if not usage_info.get("internal_api_calls"):
+                        usage_info["internal_api_calls"] = max(1, 1 + eff_agy_batches)
+                    usage_info["tool_items_completed"] = agy_tool_events
                     status_str = str(r_obj.get("status", "")).upper()
                     if status_str == "SUCCESS":
                         turn_completed = True
